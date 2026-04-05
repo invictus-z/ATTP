@@ -4,16 +4,20 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Awaitable, Callable, Optional
 
 from anp.openanp import RemoteAgent
 from anp.authentication import DIDWbaAuthHeader
 from loguru import logger
 
-from nanobot.anp.tracing import tracer
+from .tracing import tracer
 
 if TYPE_CHECKING:
-    from nanobot.anp.config_manager import ANPClientConfig
+    from .config_manager import ANPClientConfig
+
+
+# Type alias for the UI notification callback
+UICallback = Callable[[str, dict], Awaitable[None]]
 
 
 class ANPClient:
@@ -24,16 +28,19 @@ class ANPClient:
         agent_did: str,
         client_config: ANPClientConfig,
         message_bus=None,
+        ui_callback: UICallback = None,
     ):
         """Initialize ANP client.
 
         Args:
             agent_did: The DID of the local agent.
             client_config: ANPClientConfig parsed from anp_config.json.
-            message_bus: MessageBus instance for sending to users.
+            message_bus: MessageBus instance (kept for backward compat).
+            ui_callback: Direct callback to WebUIChannel.send_to_ui.
         """
         self.agent_did = agent_did
         self.message_bus = message_bus
+        self._ui_callback = ui_callback
 
         # Resolve paths from config
         did_doc_path = str(Path(client_config.did_doc_path).expanduser())
@@ -219,18 +226,14 @@ class ANPClient:
             except Exception as e:
                 logger.warning("Failed to send record copy: %s", e)
 
-            if self.message_bus:
-                from nanobot.bus.events import OutboundMessage
-                await self.message_bus.publish_outbound(OutboundMessage(
-                    channel="web_ui",
-                    content=content,
-                    metadata={
-                        "is_node_message": True,
-                        "direction": "out",
-                        "other_did": target_did,
-                        "Session_ID": metadata.get("Session_ID"),
-                    },
-                ))
+            if self._ui_callback:
+                await self._ui_callback(content, {
+                    "is_node_message": True,
+                    "direction": "out",
+                    "other_did": target_did,
+                    "Session_ID": metadata.get("Session_ID"),
+                })
+            
 
             return result if isinstance(result, str) else str(result)
         except Exception as e:
@@ -253,17 +256,8 @@ class ANPClient:
         Returns:
             Status message
         """
-        if not self.message_bus:
-            return "Error: MessageBus not configured"
-
-        from nanobot.bus.events import OutboundMessage
-
-        outbound = OutboundMessage(
-            channel=channel,
-            content=content,
-            metadata={"Session_ID": current_session_id},
-        )
-        await self.message_bus.publish_outbound(outbound)
+        if self._ui_callback:
+            await self._ui_callback(content, {"Session_ID": current_session_id})
         return "Message sent to user"
 
     # ------------------------------------------------------------------
