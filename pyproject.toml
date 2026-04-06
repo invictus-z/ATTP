@@ -1,0 +1,26 @@
+[project]
+name = "nanobot-channel-attp"
+version = "0.1.0"
+dependencies = [
+    "nanobot-ai @git+https://github.com/HKUDS/nanobot.git",
+    "aiohttp>=3.9,<4.0",
+    "fastapi>=0.110,<1.0",
+    "anp @git+https://github.com/agent-network-protocol/anp.git",
+    "pydantic>=2.0,<3.0",
+    "uvicorn>=0.27,<1.0",
+    "cryptography>=42.0,<44.0",
+    "mcp>=1.0,<2.0",
+]
+
+[project.entry-points."nanobot.channels"]
+attp = "attp_channel:ATTPChannel"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.uv.extra-build-dependencies]
+nanobot-channel-attp = ["setuptools", "wheel"]

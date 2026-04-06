@@ -123,7 +123,6 @@ class MessageTracer:
         new_path = list(path)
         new_path.append({"Log": log_entry})
         metadata["Path"] = new_path
-        print(f"DEBUG: append_hop called with metadata={metadata}")
         return metadata
 
     def validate_chain(self, metadata: dict) -> bool:

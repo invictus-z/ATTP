@@ -1,1 +1,8 @@
-ui/node_modules
+ui/node_modules/
+.vscode/
+.venv/
+src/nanobot_channel_attp.egg-info/
+__pycache__/
+
+API.md
+CHANNEL_PLUGIN_GUIDE.md

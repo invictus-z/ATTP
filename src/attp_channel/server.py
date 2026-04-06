@@ -1,7 +1,8 @@
-"""ANP server for receiving messages from other agents, using OpenANP SDK."""
+""" ATTP 服务端 """
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 import uvicorn
@@ -11,44 +12,40 @@ from anp.authentication import DidWbaVerifier, DidWbaVerifierConfig
 from loguru import logger
 from typing import TYPE_CHECKING
 
-from nanobot.anp.tracing import tracer
-
+from .tracing import tracer
+from attp_channel.sessions import SessionManager
 if TYPE_CHECKING:
-    from nanobot.anp.config_manager import ANPServerConfig
-
-# MessageBus reference, set at startup
-_message_bus = None
+    from attp_channel.config.config import ATTPServerConfig
 
 
-def set_message_bus(bus):
-    """Set the global message bus reference."""
-    global _message_bus
-    _message_bus = bus
-
-
-class ANPServer:
-    """ANP server wrapping the OpenANP agent."""
+class ATTPServer:
+    """ ATTP 服务端实现 """
 
     def __init__(
         self,
         agent_did: str,
-        server_config: ANPServerConfig,
-        message_bus=None,
+        server_config: ATTPServerConfig,
+        session_manager: SessionManager,
+        web_callback=None,
+        attp_channel_callback = None
     ):
         self.agent_did = agent_did
         self.server_port = server_config.server_port
+        self.session_manager = session_manager
         self.name = server_config.name
         self.prefix = server_config.prefix
         self.description = server_config.description
         self.private_key_path = Path(server_config.private_key_path).expanduser()
         self.public_key_path = Path(server_config.public_key_path).expanduser()
-
-        self.message_bus = message_bus
-        set_message_bus(message_bus)
+        self._web_callback = web_callback
+        self._attp_channel_callback = attp_channel_callback
+        self._running = False
+        self._uvicorn_server = None
+        self._serve_task = None
 
         self.verifier = self._create_did_wba_verifier()
 
-        # Create ANP agent and FastAPI app
+        # Create ATTP agent and FastAPI app
         self.agent_cls = self._create_agent()
         self.app = FastAPI()
         self.app.include_router(self.agent_cls.router())
@@ -75,7 +72,10 @@ class ANPServer:
     def _create_agent(self):
         """Create the ANP agent class dynamically."""
 
-        server_did = self.agent_did  # capture for closure
+        # 通过闭包捕获实例属性，供 Agent 内部方法使用
+        session_manager = self.session_manager
+        web_callback = self._web_callback
+        attp_channel_callback = self._attp_channel_callback
 
         @anp_agent(AgentConfig(
             name=self.name,
@@ -84,7 +84,6 @@ class ANPServer:
             description=self.description,
         ))
         class Agent:
-            did = server_did
 
             @interface
             async def health(self) -> str:
@@ -97,9 +96,9 @@ class ANPServer:
                 sender_did: str,
                 content: str,
                 message_type: str = "agent_request",
-                metadata: dict = None,
+                metadata: dict | None = None,
             ) -> str:
-                """接收来自其他 Agent 的 ANP 消息。
+                """接收来自其他 Agent 的 ATTP 消息。
 
                 Args:
                     sender_did: 发送者 DID
@@ -123,8 +122,6 @@ class ANPServer:
                             return "Error: Failed to save record"
                     return "Error: No log in record metadata"
 
-                if _message_bus is None:
-                    return "Error: MessageBus not initialized"
 
                 metadata = metadata or {}
                 if not tracer.validate_chain(metadata):
@@ -135,31 +132,36 @@ class ANPServer:
                     return "REJECTED: Trace validation failed."
 
                 try:
-                    from nanobot.bus.events import InboundMessage, OutboundMessage
+                    session_id = metadata.get("Session_ID")
 
-                    inbound = InboundMessage(
-                        channel="anp",
-                        sender_id=sender_did,
-                        chat_id=server_did,
-                        content=content,
-                        metadata=metadata,
-                    )
-                    await _message_bus.publish_inbound(inbound)
-
+                    # Store/update Session_Id via SessionManager
+                    if session_id and session_manager:
+                        session = session_manager.get_or_create(session_id)
+                        session.set_metadata("Session_ID", session_id)
+                        session.set_metadata("sender_did", sender_did)
+                        session_manager.save(session)
+                        logger.debug(
+                            "Session stored/updated: id={}, sender={}",
+                            session_id, sender_did,
+                        )
+                    if attp_channel_callback:
+                        await attp_channel_callback(
+                            sender_id=sender_did,
+                            chat_id=session_id,
+                            content=content
+                        )
+                    
                     # Notify UI of incoming node message
-                    await _message_bus.publish_outbound(OutboundMessage(
-                        channel="web_ui",
-                        content=content,
-                        metadata={
+                    if web_callback:
+                        await web_callback(content, {
                             "is_node_message": True,
                             "direction": "in",
                             "other_did": sender_did,
                             "Session_ID": metadata.get("Session_ID"),
-                        },
-                    ))
+                        })
                     return "Message received"
                 except Exception as e:
-                    logger.error("Error processing ANP message: %s", e)
+                    logger.error("Error processing ATTP message: %s", e)
                     return f"Error: {str(e)}"
 
         return Agent
@@ -169,12 +171,25 @@ class ANPServer:
     # ------------------------------------------------------------------
 
     async def start(self):
-        """Start the ANP server."""
+        """Start the ATTP server (non-blocking)."""
         cfg = uvicorn.Config(
             self.app,
             host="0.0.0.0",
             port=self.server_port,
             log_level="info",
         )
-        server = uvicorn.Server(cfg)
-        await server.serve()
+        self._uvicorn_server = uvicorn.Server(cfg)
+        self._serve_task = asyncio.create_task(self._uvicorn_server.serve())
+        self._running = True
+
+    async def stop(self):
+        """Stop the ATTP server gracefully."""
+        self._running = False
+        if self._uvicorn_server:
+            self._uvicorn_server.should_exit = True
+        if self._serve_task:
+            self._serve_task.cancel()
+            try:
+                await self._serve_task
+            except asyncio.CancelledError:
+                pass
