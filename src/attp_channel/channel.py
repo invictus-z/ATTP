@@ -36,7 +36,7 @@ class ATTPChannel(BaseChannel):
 
     @classmethod
     def default_config(cls) -> dict[str, Any]:
-        return {"enabled": False, "config_path": "~/.nanobot/attp_config.json", "allowFrom": ["*"]}
+        return {"enabled": False, "config_path": "~/.nanobot/attp_config.json", "allowFrom": []}
 
     async def start(self) -> None:
         """
@@ -97,7 +97,7 @@ class ATTPChannel(BaseChannel):
         while self._running:
             await asyncio.sleep(1)
 
-        self._heartbeat_manager.stop()
+        await self._heartbeat_manager.stop()
         await self._send_message_tool.stop()
         await self._attp_client.stop()
         await self._attp_server.stop()
@@ -111,6 +111,7 @@ class ATTPChannel(BaseChannel):
         await self._web_app.record_message(msg.content, msg.metadata)
 
     async def _receive(self, sender: str, chat_id: str, content: str, media: list[str]) -> str:
+        print(sender, chat_id, content, media)
         await self._handle_message(
             sender_id=sender,
             chat_id=chat_id,

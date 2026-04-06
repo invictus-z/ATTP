@@ -84,7 +84,7 @@ class WebApp():
     async def start(self, attp_client, attp_config_manager) -> None:
         """Start the FastAPI server (non-blocking)."""
 
-        self.mount_api(attp_client, attp_config_manager)
+        await self.mount_api(attp_client, attp_config_manager)
         config = uvicorn.Config(
             self._app,
             host=self.host,

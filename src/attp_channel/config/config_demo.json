@@ -1,7 +1,7 @@
 {
     "did": "did:wba:home.local:your-agent-name",
     "attpClient": {
-        "didDocPath": "~/.nanobot/did/document.json",
+        "didDocPath": "~/.nanobot/did/did.json",
         "didKeyPath": "~/.nanobot/did/private_key.pem",
         "nodeAds": [
             "http://other-agent:8000/agent/ad.json"
