@@ -2,9 +2,12 @@ import asyncio
 from typing import Any
 
 from loguru import logger
+from pydantic import Field
 
 from nanobot.channels.base import BaseChannel
 from nanobot.bus.events import OutboundMessage
+from nanobot.bus.queue import MessageBus
+from nanobot.config.schema import Base
 
 from attp_channel.client import ATTPClient
 from attp_channel.server import ATTPServer
@@ -15,9 +18,21 @@ from attp_channel.sessions import SessionManager
 from attp_channel.tools import SendMessageTool
 
 
+class ATTPConfig(Base):
+    """ATTP channel configuration."""
+    enabled: bool = False
+    config_path: str = "~/.nanobot/attp_config.json"
+    allow_from: list[str] = Field(default_factory=lambda: ["*"])
+
+
 class ATTPChannel(BaseChannel):
     name = "attp"
     display_name = "ATTP"
+
+    def __init__(self, config: Any, bus: MessageBus):
+        if isinstance(config, dict):
+            config = ATTPConfig(**config)
+        super().__init__(config, bus)
 
     @classmethod
     def default_config(cls) -> dict[str, Any]:
@@ -28,7 +43,7 @@ class ATTPChannel(BaseChannel):
         启动 ATTP channel
         """
         self._running = True
-        config_path = self.config.get("config_path", "~/.nanobot/attp_config.json")
+        config_path = self.config.config_path
 
         # 启动ANPConfigManager
         self._config_manager = ConfigManager(config_path)
@@ -74,7 +89,7 @@ class ATTPChannel(BaseChannel):
             tool_config=self._anp_cfg.tool,
             callback = self._attp_client.send_message
         )
-        self._send_message_tool.start()
+        await self._send_message_tool.start()
 
         await self._web_app.start(self._attp_client, self._config_manager)
 
