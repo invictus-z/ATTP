@@ -38,7 +38,7 @@ class HeartbeatManager:
     # Lifecycle
     # ------------------------------------------------------------------
 
-    def start(self):
+    async def start(self):
         """启动后台心跳检测任务。"""
         if self._task is not None and not self._task.done():
             logger.warning("[Heartbeat] already running")
@@ -46,10 +46,14 @@ class HeartbeatManager:
         self._task = asyncio.create_task(self._loop())
         logger.info(f"[Heartbeat] started (every {self._interval}s)")
 
-    def stop(self):
+    async def stop(self):
         """停止心跳检测任务。"""
         if self._task:
             self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
             self._task = None
             logger.info("[Heartbeat] stopped")
 
