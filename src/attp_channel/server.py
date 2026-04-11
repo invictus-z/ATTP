@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import socket
 from pathlib import Path
 
 import uvicorn
@@ -29,19 +30,14 @@ class ATTPServer:
         web_callback=None,
         attp_channel_callback = None
     ):
-        self.agent_did = agent_did
-        self.server_port = server_config.server_port
         self.session_manager = session_manager
-        self.name = server_config.name
-        self.prefix = server_config.prefix
-        self.description = server_config.description
-        self.private_key_path = Path(server_config.private_key_path).expanduser()
-        self.public_key_path = Path(server_config.public_key_path).expanduser()
         self._web_callback = web_callback
         self._attp_channel_callback = attp_channel_callback
         self._running = False
         self._uvicorn_server = None
         self._serve_task = None
+
+        self._apply_config(agent_did, server_config)
 
         self.verifier = self._create_did_wba_verifier()
 
@@ -53,6 +49,17 @@ class ATTPServer:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _apply_config(self, agent_did: str, server_config: ATTPServerConfig) -> None:
+        """Update instance attributes from config (shared by __init__ and reload)."""
+        self.agent_did = agent_did
+        self.server_host = server_config.server_host
+        self.server_port = server_config.server_port
+        self.name = server_config.name
+        self.prefix = server_config.prefix
+        self.description = server_config.description
+        self.private_key_path = Path(server_config.private_key_path).expanduser()
+        self.public_key_path = Path(server_config.public_key_path).expanduser()
 
     def _create_did_wba_verifier(self) -> DidWbaVerifier:
         """Initialize the DID WBA verifier with the configured keys."""
@@ -177,7 +184,7 @@ class ATTPServer:
         """Start the ATTP server (non-blocking)."""
         cfg = uvicorn.Config(
             self.app,
-            host="0.0.0.0",
+            host=self.server_host,
             port=self.server_port,
             log_level="info",
         )
@@ -191,8 +198,45 @@ class ATTPServer:
         if self._uvicorn_server:
             self._uvicorn_server.should_exit = True
         if self._serve_task:
-            self._serve_task.cancel()
+            # Wait for graceful shutdown first (lets uvicorn close sockets properly)
             try:
-                await self._serve_task
+                await asyncio.wait_for(self._serve_task, timeout=5.0)
+            except asyncio.TimeoutError:
+                self._serve_task.cancel()
+                try:
+                    await self._serve_task
+                except asyncio.CancelledError:
+                    pass
             except asyncio.CancelledError:
                 pass
+
+    async def reload(self, server_config: ATTPServerConfig, agent_did: str) -> None:
+        """Stop → update config → rebuild verifier/agent/app → start."""
+        await self.stop()
+        self._apply_config(agent_did, server_config)
+
+        self.verifier = self._create_did_wba_verifier()
+        self.agent_cls = self._create_agent()
+        self.app = FastAPI()
+        self.app.include_router(self.agent_cls.router())
+
+        # Wait until the port is actually available before starting
+        # Check 0.0.0.0 (superset) since uvicorn may bind to it regardless of config
+        await self._wait_for_port("0.0.0.0", self.server_port, timeout=10.0)
+        await self.start()
+        logger.info(f"[ATTP Server] reloaded on {self.server_host}:{self.server_port}")
+
+    @staticmethod
+    async def _wait_for_port(host: str, port: int, timeout: float = 10.0) -> None:
+        """Poll until the port is available for binding."""
+        deadline = asyncio.get_event_loop().time() + timeout
+        while True:
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                    s.bind((host, port))
+                return
+            except OSError:
+                if asyncio.get_event_loop().time() >= deadline:
+                    raise
+                await asyncio.sleep(0.3)

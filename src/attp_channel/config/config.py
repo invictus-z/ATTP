@@ -21,6 +21,12 @@ class ATTPBase(BaseModel):
 
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
+    def changed_fields(self, other: ATTPBase) -> set[str]:
+        """Return the set of field names whose values differ from *other*."""
+        self_dict = self.model_dump()
+        other_dict = other.model_dump()
+        return {key for key in self_dict if self_dict[key] != other_dict[key]}
+
 
 class ATTPClientConfig(ATTPBase):
     """ATTP client configuration (attp_config.json → attp_client)."""

@@ -60,6 +60,30 @@ class ATTPClient:
     async def stop(self):
         self._running = False
 
+    async def reload(self, client_config: ATTPClientConfig, agent_did: str) -> None:
+        """Reload client with new config: stop → update auth/registry → reinitialize."""
+        self._running = False
+        self.agent_did = agent_did
+
+        # Resolve new paths
+        did_doc_path = str(Path(client_config.did_doc_path).expanduser())
+        did_key_path = str(Path(client_config.did_key_path).expanduser())
+        self.auth = DIDWbaAuthHeader(
+            did_document_path=did_doc_path,
+            private_key_path=did_key_path,
+        )
+        self.registry = client_config.node_ads or []
+
+        # Clear existing connections
+        self.remote_agents.clear()
+        self.registered_agents.clear()
+        self.failed_urls.clear()
+
+        # Reinitialize
+        await self.initialize()
+        self._running = True
+        logger.info(f"[ATTP Client] reloaded with {len(self.remote_agents)} agents, {len(self.failed_urls)} failed")
+
     # ------------------------------------------------------------------
     # Agent discovery & caching
     # ------------------------------------------------------------------

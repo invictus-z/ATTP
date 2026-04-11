@@ -57,6 +57,16 @@ class HeartbeatManager:
             self._task = None
             logger.info("[Heartbeat] stopped")
 
+    async def reload(self, heartbeat_config: HeartbeatConfig) -> None:
+        """Stop → update parameters → restart."""
+        await self.stop()
+        self._interval = heartbeat_config.interval
+        self._timeout = heartbeat_config.timeout
+        self._max_fail = heartbeat_config.max_fail
+        self._fail_counts.clear()
+        await self.start()
+        logger.info(f"[Heartbeat] reloaded (interval={self._interval}s, timeout={self._timeout}s, max_fail={self._max_fail})")
+
     # ------------------------------------------------------------------
     # Public helpers
     # ------------------------------------------------------------------
