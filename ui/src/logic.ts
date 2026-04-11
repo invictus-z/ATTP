@@ -165,7 +165,7 @@ window.toggleNodes = function () {
 
   const container = document.getElementById('trace-timeline-container');
   if (container) {
-      container.innerHTML = '<div class="text-center text-sm py-4 text-gray-400">Loading trace via ANP...</div>';
+      container.innerHTML = '<div class="text-center text-sm py-4 text-gray-400">Loading trace via ATTP...</div>';
   }
   
   // Show modal with animation
@@ -689,7 +689,7 @@ function _collectNodeAds(): string[] {
     const loading = document.getElementById('settings-loading');
     const disabled = document.getElementById('settings-disabled');
     const formContainer = document.getElementById('settings-form-container');
-    const badge = document.getElementById('settings-anp-badge');
+    const badge = document.getElementById('settings-attp-badge');
     if (!loading || !disabled || !formContainer || !badge) return;
 
     loading.classList.remove('hidden');

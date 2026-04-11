@@ -13,7 +13,7 @@ from cryptography.hazmat.primitives import serialization
 logger = get_logger("Tracing")
 
 class MessageTracer:
-    def __init__(self, db_path: str = "anp_traces.db"):
+    def __init__(self, db_path: str = "attp_traces.db"):
         self.db_path = Path.home() / ".nanobot" / db_path
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()

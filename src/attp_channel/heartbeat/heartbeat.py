@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
 
 class HeartbeatManager:
-    """Manages heartbeat checks for all remote agents of an ANPClient.
+    """Manages heartbeat checks for all remote agents of an ATTPClient.
 
     Responsibilities:
     - Periodically retry failed URLs to reconnect dropped agents.

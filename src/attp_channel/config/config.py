@@ -16,7 +16,7 @@ logger = get_logger("Config")
 
 
 # ---------------------------------------------------------------------------
-# ANP config Pydantic models
+# ATTP config Pydantic models
 # ---------------------------------------------------------------------------
 
 class ATTPBase(BaseModel):

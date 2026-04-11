@@ -56,11 +56,11 @@ class ATTPChannel(BaseChannel):
         # 构建ConfigManager
         self._config_manager = ConfigManager(config_path)
         self._config_manager.load()
-        self._anp_cfg = self._config_manager.attp_config
+        self._attp_cfg = self._config_manager.attp_config
 
         # 构建后端服务器 web_app/
         self._web_app = WebApp(
-            web_config=self._anp_cfg.web_app,
+            web_config=self._attp_cfg.web_app,
             channel_callback=self._receive
         )
 
@@ -69,24 +69,24 @@ class ATTPChannel(BaseChannel):
 
         # 构建所有组件
         self._attp_client = ATTPClient(
-            agent_did=self._anp_cfg.did,
-            client_config=self._anp_cfg.attp_client,
+            agent_did=self._attp_cfg.did,
+            client_config=self._attp_cfg.attp_client,
             session_manager=self._session_manager,
             web_callback = self._web_app.record_message
         )
         self._attp_server = ATTPServer(
-            agent_did=self._anp_cfg.did,    
-            server_config=self._anp_cfg.attp_server,
+            agent_did=self._attp_cfg.did,    
+            server_config=self._attp_cfg.attp_server,
             session_manager=self._session_manager,
             web_callback = self._web_app.record_message,
             attp_channel_callback = self._receive
         )
         self._heartbeat_manager = HeartbeatManager(
-            heartbeat_config=self._anp_cfg.heartbeat,
+            heartbeat_config=self._attp_cfg.heartbeat,
             attp_client=self._attp_client,
         )
         self._send_message_tool = SendMessageTool(
-            tool_config=self._anp_cfg.tool,
+            tool_config=self._attp_cfg.tool,
             callback = self._attp_client.send_message
         )
 
@@ -161,5 +161,5 @@ class ATTPChannel(BaseChannel):
                 new_cfg.web_app.host, new_cfg.web_app.port,
             )
 
-        self._anp_cfg = new_cfg
+        self._attp_cfg = new_cfg
         logger.info("hot-reload complete")

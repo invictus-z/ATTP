@@ -28,11 +28,11 @@ class ATTPClient:
         session_manager: SessionManager | None = None,
         web_callback = None,
     ):
-        """Initialize ANP client.
+        """Initialize ATTP client.
 
         Args:
             agent_did: The DID of the local agent.
-            client_config: ANPClientConfig parsed from anp_config.json.
+            client_config: ATTPClientConfig parsed from attp_config.json.
             session_manager: Optional SessionManager (shared or standalone).
             web_callback: Direct callback to WebUIChannel.send_to_ui.
         """

@@ -80,7 +80,7 @@ class ATTPServer:
         return DidWbaVerifier(config)
 
     def _create_agent(self):
-        """Create the ANP agent class dynamically."""
+        """Create the ATTP agent class dynamically."""
 
         # 通过闭包捕获实例属性，供 Agent 内部方法使用
         session_manager = self.session_manager

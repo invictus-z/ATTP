@@ -6,7 +6,7 @@ export function renderSettingsView() {
         <div class="max-w-4xl mx-auto">
             <div class="flex items-center gap-2.5 mb-1.5">
                 <h2 class="text-xl font-semibold text-gray-900 tracking-tight">Settings</h2>
-                <span id="settings-anp-badge" class="px-2 py-0.5 rounded-md text-[10px] font-medium text-gray-400 bg-gray-50 border border-gray-200">
+                <span id="settings-attp-badge" class="px-2 py-0.5 rounded-md text-[10px] font-medium text-gray-400 bg-gray-50 border border-gray-200">
                     Loading...
                 </span>
             </div>
