@@ -32,3 +32,8 @@ class Session:
 
     def get_metadata(self, key: str, default: Any = None) -> Any:
         return self.metadata.get(key, default)
+
+    def update_metadata(self, data: dict[str, Any]) -> None:
+        """Bulk-merge *data* into metadata."""
+        self.metadata.update(data)
+        self.updated_at = time.time()

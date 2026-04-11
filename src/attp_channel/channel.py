@@ -107,6 +107,7 @@ class ATTPChannel(BaseChannel):
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send message back to UI via WebSocket (called by ChannelManager)."""
+        msg.metadata["Session_ID"] = msg.get("chat_id", "unknown_session")
         await self._web_app.record_message(msg.content, msg.metadata)
 
     async def _receive(self, sender: str, chat_id: str, content: str, media: list[str]) -> str:

@@ -134,15 +134,18 @@ class ATTPServer:
                 try:
                     session_id = metadata.get("Session_ID")
 
-                    # Store/update Session_Id via SessionManager
+                    # Store/update full metadata for the session
                     if session_id and session_manager:
                         session = session_manager.get_or_create(session_id)
-                        session.set_metadata("Session_ID", session_id)
+                        session.update_metadata(metadata)
                         session.set_metadata("sender_did", sender_did)
+                        session.set_metadata("message_type", message_type)
                         session_manager.save(session)
                         logger.debug(
-                            "Session stored/updated: id={}, sender={}",
+                            "Session stored/updated: id={}, sender={}, "
+                            "metadata keys={}",
                             session_id, sender_did,
+                            list(session.metadata.keys()),
                         )
                     if attp_channel_callback:
                         await attp_channel_callback(
