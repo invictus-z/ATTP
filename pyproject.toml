@@ -22,5 +22,8 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+"attp_channel.web_app" = ["static/**/*"]
+
 [tool.uv.extra-build-dependencies]
 nanobot-channel-attp = ["setuptools", "wheel"]

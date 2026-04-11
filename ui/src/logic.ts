@@ -180,7 +180,7 @@ window.toggleNodes = function () {
   
   // Fetch real data
   try {
-      const res = await fetch(`http://localhost:8001/api/traces/${sessionId}`);
+      const res = await fetch(`/api/traces/${sessionId}`);
       const data = await res.json();
       if (container) {
           if (!data.Path || data.Path.length === 0) {
@@ -468,7 +468,7 @@ window.filterSessions = function (event: any) {
 
 (window as any).renderDynamicNodes = async function() {
     try {
-        const res = await fetch('http://localhost:8001/api/nodes');
+        const res = await fetch('/api/nodes');
         const data = await res.json();
         const nodesList = document.getElementById('nodes-list');
         if (!nodesList) return;
@@ -697,7 +697,7 @@ function _collectNodeAds(): string[] {
     formContainer.classList.add('hidden');
 
     try {
-        const res = await fetch('http://localhost:8001/api/config');
+        const res = await fetch('/api/config');
         const data = await res.json();
 
         if (data.error || !data.config) {
@@ -729,8 +729,8 @@ function _collectNodeAds(): string[] {
 
         // Store original webApp config for change detection
         _originalWebAppConfig = {
-            host: cfg.webApp?.host || '127.0.0.1',
-            port: cfg.webApp?.port || 8001,
+            host: cfg.webApp?.host || '',
+            port: cfg.webApp?.port || 0,
         };
         if (el('cfg-tool-host')) el('cfg-tool-host')!.value = cfg.tool?.host || '';
         if (el('cfg-tool-port')) el('cfg-tool-port')!.value = String(cfg.tool?.port || '');
@@ -757,7 +757,7 @@ function _collectNodeAds(): string[] {
 (window as any).refreshSettingsConfig = async function() {
     // Re-read config from disk (no hot-reload)
     try {
-        const res = await fetch('http://localhost:8001/api/config?refresh=true');
+        const res = await fetch('/api/config?refresh=true');
         const data = await res.json();
 
         if (data.error) {
@@ -785,7 +785,7 @@ function _collectNodeAds(): string[] {
         if (el('cfg-heartbeat-interval')) el('cfg-heartbeat-interval')!.value = String(cfg.heartbeat?.interval || '');
         if (el('cfg-heartbeat-timeout')) el('cfg-heartbeat-timeout')!.value = String(cfg.heartbeat?.timeout || '');
         if (el('cfg-heartbeat-max-fail')) el('cfg-heartbeat-max-fail')!.value = String(cfg.heartbeat?.maxFail || '');
-        _originalWebAppConfig = { host: cfg.webApp?.host || '127.0.0.1', port: cfg.webApp?.port || 8001 };
+        _originalWebAppConfig = { host: cfg.webApp?.host || '', port: cfg.webApp?.port || 0 };
         _renderNodeAds(cfg.attpClient?.nodeAds || []);
 
         _showSettingsToast('Configuration refreshed from disk', true);
@@ -813,23 +813,23 @@ function _collectNodeAds(): string[] {
             name: el('cfg-server-name')?.value || '',
             prefix: el('cfg-server-prefix')?.value || '',
             description: el('cfg-server-desc')?.value || '',
-            serverHost: el('cfg-server-host')?.value || '127.0.0.1',
-            serverPort: parseInt(el('cfg-server-port')?.value || '8000', 10),
+            serverHost: el('cfg-server-host')?.value || '',
+            serverPort: parseInt(el('cfg-server-port')?.value || '0', 10),
             privateKeyPath: el('cfg-server-private-key')?.value || '',
             publicKeyPath: el('cfg-server-public-key')?.value || '',
         },
         webApp: {
-            host: el('cfg-webapp-host')?.value || '127.0.0.1',
-            port: parseInt(el('cfg-webapp-port')?.value || '8001', 10),
+            host: el('cfg-webapp-host')?.value || '',
+            port: parseInt(el('cfg-webapp-port')?.value || '0', 10),
         },
         tool: {
-            host: el('cfg-tool-host')?.value || '127.0.0.1',
-            port: parseInt(el('cfg-tool-port')?.value || '8002', 10),
+            host: el('cfg-tool-host')?.value || '',
+            port: parseInt(el('cfg-tool-port')?.value || '0', 10),
         },
         heartbeat: {
-            interval: parseInt(el('cfg-heartbeat-interval')?.value || '30', 10),
-            timeout: parseInt(el('cfg-heartbeat-timeout')?.value || '90', 10),
-            maxFail: parseInt(el('cfg-heartbeat-max-fail')?.value || '3', 10),
+            interval: parseInt(el('cfg-heartbeat-interval')?.value || '0', 10),
+            timeout: parseInt(el('cfg-heartbeat-timeout')?.value || '0', 10),
+            maxFail: parseInt(el('cfg-heartbeat-max-fail')?.value || '0', 10),
         },
     };
 
@@ -841,7 +841,7 @@ function _collectNodeAds(): string[] {
     if (window.lucide) window.lucide.createIcons();
 
     try {
-        const res = await fetch('http://localhost:8001/api/config', {
+        const res = await fetch('/api/config', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
@@ -880,7 +880,7 @@ function _collectNodeAds(): string[] {
     if (window.lucide) window.lucide.createIcons();
 
     try {
-        const res = await fetch('http://localhost:8001/api/config/reload', { method: 'POST' });
+        const res = await fetch('/api/config/reload', { method: 'POST' });
         const data = await res.json();
 
         if (data.success) {
@@ -907,7 +907,7 @@ function _collectNodeAds(): string[] {
             _renderNodeAds(cfg.attpClient?.nodeAds || []);
 
             // Warn if WebApp host/port changed (still requires manual restart)
-            const newWebApp = { host: cfg.webApp?.host || '127.0.0.1', port: cfg.webApp?.port || 8001 };
+            const newWebApp = { host: cfg.webApp?.host || '', port: cfg.webApp?.port || 0 };
             if (prevWebAppConfig && (
                 prevWebAppConfig.host !== newWebApp.host || prevWebAppConfig.port !== newWebApp.port
             )) {

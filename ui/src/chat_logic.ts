@@ -24,10 +24,13 @@
     if ((window as any).lucide) (window as any).lucide.createIcons();
   };
 
+  let wsConnected = false;
+
   // Fetch initial status from backend
-  fetch('http://localhost:8001/api/status')
+  fetch('/api/status')
     .then(res => res.json())
     .then(data => {
+      if (wsConnected) return; // WS already connected, skip
       if (data.status === 'active') {
         updateAgentStatus('connecting'); // backend is up, but WS not yet connected
       } else {
@@ -35,6 +38,7 @@
       }
     })
     .catch(() => {
+      if (wsConnected) return;
       updateAgentStatus('offline');
     });
 
@@ -437,9 +441,11 @@ const addMessageToSession = (sessionId: string, role: 'user' | 'agent', content:
 
   renderSessionsList();
 
-  const ws = new WebSocket('ws://localhost:8001/ws');
+  const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const ws = new WebSocket(`${wsProtocol}//${location.host}/ws`);
   
   ws.onopen = () => {
+    wsConnected = true;
     console.log('Connected to Local Agent over WebSocket');
     updateAgentStatus('active');
   };

@@ -3,11 +3,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+from pathlib import Path
 import uvicorn
 from typing import TYPE_CHECKING
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from loguru import logger
 
 from attp_channel.web_app.api import config_setting, node_status
@@ -117,6 +120,23 @@ class WebApp():
         self._app.include_router(node_status.get_api_router(attp_client))
         self._app.include_router(config_setting.get_api_router(attp_config_manager, reload_callback))
         self._app.include_router(trace.get_api_router())
+
+        # Serve frontend static files from package-internal static/ directory
+        static_dir = Path(__file__).resolve().parent / "static"
+        if static_dir.is_dir():
+            assets_dir = static_dir / "assets"
+            if assets_dir.is_dir():
+                self._app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="frontend-assets")
+
+            @self._app.get("/{full_path:path}")
+            async def serve_spa(full_path: str):
+                """Serve index.html for all non-API, non-asset routes (SPA fallback)."""
+                file_path = static_dir / full_path
+                if file_path.is_file():
+                    return FileResponse(str(file_path))
+                return FileResponse(str(static_dir / "index.html"))
+
+            logger.info(f"Frontend static files mounted from {static_dir}")
 
     async def record_message(self, content: str, metadata: dict | None = None) -> None:
         """Directly send message to UI via WebSocket."""
