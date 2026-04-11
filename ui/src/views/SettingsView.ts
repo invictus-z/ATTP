@@ -10,7 +10,7 @@ export function renderSettingsView() {
                     Loading...
                 </span>
             </div>
-            <p class="text-sm text-gray-500">管理 ANP 网络配置，包括 DID 身份、客户端连接和服务器设置。</p>
+            <p class="text-sm text-gray-500">管理 ATTP 网络配置，包括 DID 身份、客户端连接、服务器设置及其他服务配置。</p>
         </div>
     </header>
 
@@ -26,14 +26,14 @@ export function renderSettingsView() {
                 </div>
             </div>
 
-            <!-- ANP 未启用提示 -->
+            <!-- ATTP 未启用提示 -->
             <div id="settings-disabled" class="hidden">
                 <div class="bg-amber-50 border border-amber-100 rounded-xl p-6 text-center">
                     <div class="w-12 h-12 rounded-xl bg-amber-100 flex items-center justify-center mx-auto mb-3">
                         <i data-lucide="alert-triangle" class="w-6 h-6 text-amber-500"></i>
                     </div>
-                    <h3 class="text-sm font-semibold text-amber-800 mb-1">ANP Not Enabled</h3>
-                    <p class="text-xs text-amber-600">请在 ~/.nanobot/config.json 中启用 ANP 以使用配置管理功能。</p>
+                    <h3 class="text-sm font-semibold text-amber-800 mb-1">ATTP Not Enabled</h3>
+                    <p class="text-xs text-amber-600">请在 ~/.nanobot/config.json 中启用 ATTP 并运行 agent 以使用配置管理功能。</p>
                 </div>
             </div>
 
@@ -54,20 +54,20 @@ export function renderSettingsView() {
                     </div>
                 </div>
 
-                <!-- 分组 2: ANP Client -->
+                <!-- 分组 2: ATTP Client -->
                 <div>
                     <div class="flex items-center gap-2 text-[11px] font-semibold text-gray-400 tracking-wider uppercase mb-3 px-1">
                         <i data-lucide="radio" class="w-3.5 h-3.5"></i>
-                        <span>ANP Client</span>
+                        <span>ATTP Client</span>
                     </div>
                     <div class="bg-white p-5 rounded-xl border border-gray-100 space-y-4">
                         <div>
                             <label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">DID Doc Path</label>
-                            <input type="text" id="cfg-did-doc-path" placeholder="~/.nanobot/anp/did.json" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono">
+                            <input type="text" id="cfg-did-doc-path" placeholder="~/.nanobot/attp/did.json" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono">
                         </div>
                         <div>
                             <label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">DID Key Path</label>
-                            <input type="text" id="cfg-did-key-path" placeholder="~/.nanobot/anp/key-1_private.pem" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono">
+                            <input type="text" id="cfg-did-key-path" placeholder="~/.nanobot/attp/key-1_private.pem" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono">
                         </div>
                         <div>
                             <label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">Node ADs</label>
@@ -80,11 +80,11 @@ export function renderSettingsView() {
                     </div>
                 </div>
 
-                <!-- 分组 3: ANP Server -->
+                <!-- 分组 3: ATTP Server -->
                 <div>
                     <div class="flex items-center gap-2 text-[11px] font-semibold text-gray-400 tracking-wider uppercase mb-3 px-1">
                         <i data-lucide="server" class="w-3.5 h-3.5"></i>
-                        <span>ANP Server</span>
+                        <span>ATTP Server</span>
                     </div>
                     <div class="bg-white p-5 rounded-xl border border-gray-100 space-y-4">
                         <div class="grid grid-cols-2 gap-4">
@@ -103,31 +103,104 @@ export function renderSettingsView() {
                         </div>
                         <div class="grid grid-cols-2 gap-4">
                             <div>
+                                <label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">Server Host</label>
+                                <input type="text" id="cfg-server-host" placeholder="127.0.0.1" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono">
+                            </div>
+                            <div>
                                 <label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">Server Port</label>
                                 <input type="number" id="cfg-server-port" placeholder="8000" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono">
                             </div>
-                            <div></div>
                         </div>
                         <div>
                             <label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">Private Key Path</label>
-                            <input type="text" id="cfg-server-private-key" placeholder="~/.nanobot/anp/server_private.pem" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono">
+                            <input type="text" id="cfg-server-private-key" placeholder="~/.nanobot/attp/server_private.pem" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono">
                         </div>
                         <div>
                             <label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">Public Key Path</label>
-                            <input type="text" id="cfg-server-public-key" placeholder="~/.nanobot/anp/server_public.pem" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono">
+                            <input type="text" id="cfg-server-public-key" placeholder="~/.nanobot/attp/server_public.pem" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono">
                         </div>
                     </div>
                 </div>
 
-                <!-- Save 按钮 -->
+                <!-- 分组 4: Web App -->
+                <div>
+                    <div class="flex items-center gap-2 text-[11px] font-semibold text-gray-400 tracking-wider uppercase mb-3 px-1">
+                        <i data-lucide="globe" class="w-3.5 h-3.5"></i>
+                        <span>Web App</span>
+                    </div>
+                    <div class="bg-white p-5 rounded-xl border border-gray-100 space-y-4">
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">Host</label>
+                                <input type="text" id="cfg-webapp-host" placeholder="127.0.0.1" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono">
+                            </div>
+                            <div>
+                                <label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">Port</label>
+                                <input type="number" id="cfg-webapp-port" placeholder="8001" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 分组 5: Tool -->
+                <div>
+                    <div class="flex items-center gap-2 text-[11px] font-semibold text-gray-400 tracking-wider uppercase mb-3 px-1">
+                        <i data-lucide="wrench" class="w-3.5 h-3.5"></i>
+                        <span>Tool</span>
+                    </div>
+                    <div class="bg-white p-5 rounded-xl border border-gray-100 space-y-4">
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">Host</label>
+                                <input type="text" id="cfg-tool-host" placeholder="127.0.0.1" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono">
+                            </div>
+                            <div>
+                                <label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">Port</label>
+                                <input type="number" id="cfg-tool-port" placeholder="8002" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 分组 6: Heartbeat -->
+                <div>
+                    <div class="flex items-center gap-2 text-[11px] font-semibold text-gray-400 tracking-wider uppercase mb-3 px-1">
+                        <i data-lucide="heart-pulse" class="w-3.5 h-3.5"></i>
+                        <span>Heartbeat</span>
+                    </div>
+                    <div class="bg-white p-5 rounded-xl border border-gray-100 space-y-4">
+                        <div class="grid grid-cols-3 gap-4">
+                            <div>
+                                <label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">Interval (s)</label>
+                                <input type="number" id="cfg-heartbeat-interval" placeholder="30" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono">
+                            </div>
+                            <div>
+                                <label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">Timeout (s)</label>
+                                <input type="number" id="cfg-heartbeat-timeout" placeholder="90" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono">
+                            </div>
+                            <div>
+                                <label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">Max Fail</label>
+                                <input type="number" id="cfg-heartbeat-max-fail" placeholder="3" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 操作按钮 -->
                 <div class="flex items-center justify-between pt-2">
-                    <p class="text-[11px] text-gray-400">配置将保存至 ~/.nanobot/anp/anp_config.json</p>
+                    <div class="space-y-0.5">
+                        <p class="text-[11px] text-gray-400">配置将保存至 ~/.nanobot/attp/attp_config.json</p>
+                        <p class="text-[10px] text-gray-300"><strong>Refresh</strong> 从磁盘重读 · <strong>Save</strong> 仅保存 · <strong>Reload</strong> 保存并应用</p>
+                    </div>
                     <div class="flex items-center gap-3">
-                        <button onclick="window.reloadSettingsConfig()" class="px-4 py-2 text-sm text-gray-500 bg-gray-50 border border-gray-200 rounded-xl hover:bg-gray-100 hover:text-gray-700 transition-colors">
-                            <span class="flex items-center gap-1.5"><i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Reload</span>
+                        <button onclick="window.refreshSettingsConfig()" class="px-4 py-2 text-sm text-gray-500 bg-gray-50 border border-gray-200 rounded-xl hover:bg-gray-100 hover:text-gray-700 transition-colors" title="从磁盘重新读取配置文件">
+                            <span class="flex items-center gap-1.5"><i data-lucide="rotate-ccw" class="w-3.5 h-3.5"></i> Refresh</span>
                         </button>
-                        <button onclick="window.saveSettingsConfig()" id="settings-save-btn" class="px-5 py-2 text-sm font-medium text-white bg-gray-900 rounded-xl hover:bg-gray-800 transition-colors shadow-sm">
+                        <button onclick="window.saveSettingsConfig()" id="settings-save-btn" class="px-5 py-2 text-sm font-medium text-white bg-gray-900 rounded-xl hover:bg-gray-800 transition-colors shadow-sm" title="保存配置到文件（不立即生效）">
                             <span class="flex items-center gap-1.5"><i data-lucide="check" class="w-3.5 h-3.5"></i> Save Changes</span>
+                        </button>
+                        <button onclick="window.reloadSettingsConfig()" id="settings-reload-btn" class="px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-xl hover:bg-emerald-700 transition-colors shadow-sm" title="重新读取配置并应用（hot-reload）">
+                            <span class="flex items-center gap-1.5"><i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Reload</span>
                         </button>
                     </div>
                 </div>

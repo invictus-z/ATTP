@@ -79,7 +79,7 @@ class SendMessageTool:
 
         self._task = asyncio.create_task(_run())
         self._uvicorn_server = server
-        logger.info("SendMessageTool started on %s:%d", self.host, self.port)
+        logger.info(f"SendMessageTool   started on {self.host}:{self.port}")
 
     async def stop(self) -> None:
         """Stop the MCP SSE server."""
@@ -96,3 +96,11 @@ class SendMessageTool:
             pass
         self._task = None
         logger.info("SendMessageTool stopped")
+
+    async def reload(self, tool_config: ToolConfig) -> None:
+        """Stop → update host/port → restart. Callback remains unchanged."""
+        await self.stop()
+        self.host = tool_config.host
+        self.port = tool_config.port
+        await self.start()
+        logger.info(f"[SendMessageTool] reloaded on {self.host}:{self.port}")

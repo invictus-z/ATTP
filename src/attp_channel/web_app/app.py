@@ -81,10 +81,10 @@ class WebApp():
                 if ws in self._clients:
                     self._clients.remove(ws)
 
-    async def start(self, attp_client, attp_config_manager) -> None:
+    async def start(self, attp_client, attp_config_manager, reload_callback=None) -> None:
         """Start the FastAPI server (non-blocking)."""
 
-        await self.mount_api(attp_client, attp_config_manager)
+        await self.mount_api(attp_client, attp_config_manager, reload_callback)
         config = uvicorn.Config(
             self._app,
             host=self.host,
@@ -111,11 +111,11 @@ class WebApp():
             await client.close()
         self._clients.clear()
 
-    async def mount_api(self, attp_client, attp_config_manager):
+    async def mount_api(self, attp_client, attp_config_manager, reload_callback=None):
         # Mount API routes from web_app/api
         from attp_channel.web_app.api import trace
         self._app.include_router(node_status.get_api_router(attp_client))
-        self._app.include_router(config_setting.get_api_router(attp_config_manager))
+        self._app.include_router(config_setting.get_api_router(attp_config_manager, reload_callback))
         self._app.include_router(trace.get_api_router())
 
     async def record_message(self, content: str, metadata: dict | None = None) -> None:
