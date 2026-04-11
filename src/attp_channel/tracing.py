@@ -4,10 +4,13 @@ import hashlib
 import time
 from pathlib import Path
 import base64
-from loguru import logger
 from cryptography.hazmat.primitives import hashes
+
+from attp_channel.logging import get_logger
 from cryptography.hazmat.primitives.asymmetric import padding, rsa, ec
 from cryptography.hazmat.primitives import serialization
+
+logger = get_logger("Tracing")
 
 class MessageTracer:
     def __init__(self, db_path: str = "anp_traces.db"):
@@ -139,7 +142,7 @@ class MessageTracer:
             curr_log = path[i]["Log"]
             
             if curr_log.get("Prev_Hash") != prev_log.get("Entry_Hash"):
-                logger.error(f"Security Alert: Broken chain between {prev_log.get('node_did')} and {curr_log.get('node_did')}")
+                logger.error("Security Alert: Broken chain between {} and {}", prev_log.get("node_did"), curr_log.get("node_did"))
                 return False
                 
             recomputed = self._calculate_entry_hash(curr_log.get("Prev_Hash"), {
@@ -150,7 +153,7 @@ class MessageTracer:
                 "node_did": curr_log.get("node_did")
             })
             if recomputed != curr_log.get("Entry_Hash"):
-                logger.error(f"Security Alert: Hash manipulation detected at node {curr_log.get('node_did')}")
+                logger.error("Security Alert: Hash manipulation detected at node {}", curr_log.get("node_did"))
                 return False
         return True
 
@@ -199,10 +202,10 @@ class MessageTracer:
                 signature=log_entry.get("Signature"),
                 timestamp=log_entry.get("Timestamp")
             )
-            logger.info(f"Saved log to db: {log_entry.get('node_did')} -> {log_entry.get('target_did')}")
+            logger.info("Saved log to db: {} -> {}", log_entry.get("node_did"), log_entry.get("target_did"))
             return True
         except Exception as e:
-            logger.error(f"Failed to save log to db: {e}")
+            logger.error("Failed to save log to db: {}", e)
             return False
 
 tracer = MessageTracer()

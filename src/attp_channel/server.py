@@ -10,8 +10,11 @@ import uvicorn
 from fastapi import FastAPI
 from anp.openanp import anp_agent, interface, AgentConfig
 from anp.authentication import DidWbaVerifier, DidWbaVerifierConfig
-from loguru import logger
 from typing import TYPE_CHECKING
+
+from attp_channel.logging import get_logger, UVICORN_SILENT_LOG_CONFIG
+
+logger = get_logger("Server")
 
 from .tracing import tracer
 from attp_channel.sessions import SessionManager
@@ -123,7 +126,7 @@ class ATTPServer:
                     if record_log:
                         success = tracer.save_log_to_db(record_log)
                         if success:
-                            logger.info(f"Record log saved from {sender_did}")
+                            logger.info("Record log saved from {}", sender_did)
                             return "Record saved"
                         else:
                             return "Error: Failed to save record"
@@ -133,8 +136,9 @@ class ATTPServer:
                 metadata = metadata or {}
                 if not tracer.validate_chain(metadata):
                     logger.error(
-                        f"Security Alert: Message from {sender_did} failed "
-                        f"cryptographic chain validation. Task dropped."
+                        "Security Alert: Message from {} failed "
+                        "cryptographic chain validation. Task dropped.",
+                        sender_did,
                     )
                     return "REJECTED: Trace validation failed."
 
@@ -149,10 +153,8 @@ class ATTPServer:
                         session.set_metadata("message_type", message_type)
                         session_manager.save(session)
                         logger.debug(
-                            "Session stored/updated: id={}, sender={}, "
-                            "metadata keys={}",
-                            session_id, sender_did,
-                            list(session.metadata.keys()),
+                            "Session stored/updated: id={}, sender={}, metadata keys={}",
+                            session_id, sender_did, list(session.metadata.keys()),
                         )
                     if attp_channel_callback:
                         await attp_channel_callback(
@@ -171,7 +173,7 @@ class ATTPServer:
                         })
                     return "Message received"
                 except Exception as e:
-                    logger.error("Error processing ATTP message: %s", e)
+                    logger.error("Error processing ATTP message: {}", e)
                     return f"Error: {str(e)}"
 
         return Agent
@@ -187,9 +189,11 @@ class ATTPServer:
             host=self.server_host,
             port=self.server_port,
             log_level="info",
+            log_config=UVICORN_SILENT_LOG_CONFIG,
         )
         self._uvicorn_server = uvicorn.Server(cfg)
         self._serve_task = asyncio.create_task(self._uvicorn_server.serve())
+        logger.info("started at {}:{}", self.server_host, self.server_port)
         self._running = True
 
     async def stop(self):
@@ -224,7 +228,7 @@ class ATTPServer:
         # Check 0.0.0.0 (superset) since uvicorn may bind to it regardless of config
         await self._wait_for_port("0.0.0.0", self.server_port, timeout=10.0)
         await self.start()
-        logger.info(f"[ATTP Server] reloaded on {self.server_host}:{self.server_port}")
+        logger.info("reloaded on {}:{}", self.server_host, self.server_port)
 
     @staticmethod
     async def _wait_for_port(host: str, port: int, timeout: float = 10.0) -> None:

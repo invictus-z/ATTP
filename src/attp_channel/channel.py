@@ -3,7 +3,10 @@ from __future__ import annotations
 import asyncio
 from typing import Any, TYPE_CHECKING
 
-from loguru import logger
+from attp_channel.logging import get_logger
+
+logger = get_logger("Channel")
+
 from pydantic import Field
 
 from nanobot.channels.base import BaseChannel
@@ -131,22 +134,22 @@ class ATTPChannel(BaseChannel):
         """
         # DID or ATTPClient config changed
         if old_cfg.did != new_cfg.did or old_cfg.attp_client.changed_fields(new_cfg.attp_client):
-            logger.info("[Reload] ATTPClient config changed, reloading...")
+            logger.info("ATTPClient config changed, reloading...")
             await self._attp_client.reload(new_cfg.attp_client, new_cfg.did)
 
         # ATTPServer config changed (also triggers on DID change)
         if old_cfg.did != new_cfg.did or old_cfg.attp_server.changed_fields(new_cfg.attp_server):
-            logger.info("[Reload] ATTPServer config changed, reloading...")
+            logger.info("ATTPServer config changed, reloading...")
             await self._attp_server.reload(new_cfg.attp_server, new_cfg.did)
 
         # Heartbeat config changed
         if old_cfg.heartbeat.changed_fields(new_cfg.heartbeat):
-            logger.info("[Reload] Heartbeat config changed, reloading...")
+            logger.info("Heartbeat config changed, reloading...")
             await self._heartbeat_manager.reload(new_cfg.heartbeat)
 
         # Tool config changed
         if old_cfg.tool.changed_fields(new_cfg.tool):
-            logger.info("[Reload] SendMessageTool config changed, reloading...")
+            logger.info("SendMessageTool config changed, reloading...")
             await self._send_message_tool.reload(new_cfg.tool)
 
         # WebApp config changed — cannot restart self, just update attributes
@@ -154,9 +157,9 @@ class ATTPChannel(BaseChannel):
             self._web_app.host = new_cfg.web_app.host
             self._web_app.port = new_cfg.web_app.port
             logger.warning(
-                "[Reload] WebApp host/port changed to %s:%d — requires manual restart",
+                "WebApp host/port changed to {}:{} — requires manual restart",
                 new_cfg.web_app.host, new_cfg.web_app.port,
             )
 
         self._anp_cfg = new_cfg
-        logger.info("[Reload] hot-reload complete")
+        logger.info("hot-reload complete")

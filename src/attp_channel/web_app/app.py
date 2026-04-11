@@ -11,7 +11,9 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-from loguru import logger
+from attp_channel.logging import get_logger, UVICORN_SILENT_LOG_CONFIG
+
+logger = get_logger("WebUI")
 
 from attp_channel.web_app.api import config_setting, node_status
 
@@ -54,7 +56,7 @@ class WebApp():
         async def websocket_endpoint(ws: WebSocket):
             await ws.accept()
             self._clients.append(ws)
-            logger.info(f"WebUI Client connected: {ws.client}")
+            logger.info("Client connected: {}", ws.client)
             try:
                 while True:
                     data = await ws.receive_text()
@@ -76,11 +78,11 @@ class WebApp():
                     except json.JSONDecodeError:
                         logger.warning("Received invalid JSON over WebSocket")
             except WebSocketDisconnect:
-                logger.info(f"WebUI Client disconnected: {ws.client}")
+                logger.info("Client disconnected: {}", ws.client)
                 if ws in self._clients:
                     self._clients.remove(ws)
             except Exception as e:
-                logger.error(f"WebSocket error: {e}")
+                logger.error("WebSocket error: {}", e)
                 if ws in self._clients:
                     self._clients.remove(ws)
 
@@ -93,11 +95,12 @@ class WebApp():
             host=self.host,
             port=self.port,
             log_level="info",
+            log_config=UVICORN_SILENT_LOG_CONFIG,
         )
         self._server = uvicorn.Server(config)
         self._serve_task = asyncio.create_task(self._server.serve())
         self._running = True
-        logger.info(f"WebUI Channel started at http://{self.host}:{self.port}")
+        logger.info("started at http://{}:{}", self.host, self.port)
 
     async def stop(self) -> None:
         """Stop the server."""
@@ -136,7 +139,7 @@ class WebApp():
                     return FileResponse(str(file_path))
                 return FileResponse(str(static_dir / "index.html"))
 
-            logger.info(f"Frontend static files mounted from {static_dir}")
+            logger.info("Frontend static files mounted from {}", static_dir)
 
     async def record_message(self, content: str, metadata: dict | None = None) -> None:
         """Directly send message to UI via WebSocket."""

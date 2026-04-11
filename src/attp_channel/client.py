@@ -8,7 +8,9 @@ from typing import TYPE_CHECKING, Any
 
 from anp.openanp import RemoteAgent
 from anp.authentication import DIDWbaAuthHeader
-from loguru import logger
+from attp_channel.logging import get_logger
+
+logger = get_logger("Client")
 
 from attp_channel.sessions import SessionManager
 from attp_channel.tracing import tracer
@@ -82,7 +84,7 @@ class ATTPClient:
         # Reinitialize
         await self.initialize()
         self._running = True
-        logger.info(f"[ATTP Client] reloaded with {len(self.remote_agents)} agents, {len(self.failed_urls)} failed")
+        logger.info("reloaded with {} agents, {} failed", len(self.remote_agents), len(self.failed_urls))
 
     # ------------------------------------------------------------------
     # Agent discovery & caching
@@ -95,7 +97,7 @@ class ATTPClient:
         Stores them in self._remote_agents for future use.
         Failed URLs are stored in _failed_urls for retry later.
         """
-        logger.info(f"Initializing ATTP client with registry: {self.registry}")
+        logger.info("Initializing with registry: {}", self.registry)
         if not self.registry:
             logger.warning("No registry loaded, skipping agent initialization")
             return
@@ -109,9 +111,9 @@ class ATTPClient:
                 else:
                     self.failed_urls.add(ad_path)
         
-        logger.info(f"Initialized {success_count}/{len(self.registry)} remote agents, {len(self.failed_urls)} failed")
+        logger.info("Initialized {}/{} remote agents, {} failed", success_count, len(self.registry), len(self.failed_urls))
         if self.failed_urls:
-            logger.info(f"Failed URLs (will retry on heartbeat): {', '.join(self.failed_urls)}")
+            logger.info("Failed URLs (will retry on heartbeat): {}", ", ".join(self.failed_urls))
 
     async def _get_remote_agent(self, target_ad: str) -> RemoteAgent | None:
         """Discover and cache a remote agent by ad.json URL."""
@@ -127,7 +129,7 @@ class ATTPClient:
                             identifier = ad_data.get("identifier")
                             if identifier:
                                 self.remote_agents[identifier] = remote
-                                logger.info(f"Successfully discovered agent {identifier} at {target_ad}")
+                                logger.info("Successfully discovered agent {} at {}", identifier, target_ad)
 
                                 self.registered_agents[identifier] = {
                                     "did": identifier,
@@ -139,16 +141,16 @@ class ATTPClient:
 
                                 return remote
                             else:
-                                logger.error(f"No 'identifier' found in JSON from {target_ad}")
+                                logger.error("No 'identifier' found in JSON from {}", target_ad)
                                 return None
                         else:
-                            logger.error(f"HTTP {response.status} from {target_ad}")
+                            logger.error("HTTP {} from {}", response.status, target_ad)
                             return None
             except Exception as e:
-                logger.error(f"Failed to read identifier from {target_ad}: {e}", exc_info=True)
+                logger.error("Failed to read identifier from {}: {}", target_ad, e, exc_info=True)
                 return None
         except Exception as e:
-            logger.error(f"Failed to discover agent at {target_ad}: {e}", exc_info=True)
+            logger.error("Failed to discover agent at {}: {}", target_ad, e, exc_info=True)
             return None
 
     # ------------------------------------------------------------------
@@ -251,7 +253,7 @@ class ATTPClient:
                     private_key_path=private_key_path,
                 )
         except Exception as e:
-            logger.error(f"Failed to append tracing hop: {e}")
+            logger.error("Failed to append tracing hop: {}", e)
             return f"Error: Tracing hook failed - {str(e)}"
 
         try:
@@ -287,7 +289,7 @@ class ATTPClient:
                                 message_type="record",
                                 metadata=record_metadata,
                             )
-                            logger.debug(f"Sent record to origin {origin_did}")
+                            logger.debug("Sent record to origin {}", origin_did)
             except Exception as e:
                 logger.warning("Failed to send record copy: %s", e)
 
@@ -302,7 +304,7 @@ class ATTPClient:
 
             return result if isinstance(result, str) else str(result)
         except Exception as e:
-            logger.error(f"Error sending to agent {target_did}: {e}")
+            logger.error("Error sending to agent {}: {}", target_did, e)
             return f"Error: {str(e)}"
 
     async def send_to_user(
@@ -344,9 +346,9 @@ class ATTPClient:
             return None
 
         if target_did:
-            logger.info(f"Agent {target_did} not found, attempting to reconnect to {len(self.failed_urls)} failed URLs")
+            logger.info("Agent {} not found, attempting to reconnect to {} failed URLs", target_did, len(self.failed_urls))
         else:
-            logger.info(f"[ATTP Client Heartbeat] retrying {len(self.failed_urls)} failed URLs...")
+            logger.info("retrying {} failed URLs...", len(self.failed_urls))
 
         for failed_url in list(self.failed_urls):
             remote = await self._get_remote_agent(failed_url)
@@ -355,10 +357,10 @@ class ATTPClient:
 
                 if target_did:
                     if target_did in self.remote_agents:
-                        logger.info(f"Successfully reconnected to agent {target_did} from {failed_url}")
+                        logger.info("Successfully reconnected to agent {} from {}", target_did, failed_url)
                         return self.remote_agents[target_did]
                 else:
-                    logger.info(f"[Heartbeat] successfully reconnected agent from {failed_url}")
+                    logger.info("successfully reconnected agent from {}", failed_url)
 
         return None
 

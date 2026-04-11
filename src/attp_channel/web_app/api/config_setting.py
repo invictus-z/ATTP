@@ -1,8 +1,11 @@
 import copy
 
 from fastapi import APIRouter, Query, Request
-from loguru import logger
 from typing import Any
+
+from attp_channel.logging import get_logger
+
+logger = get_logger("Config")
 
 
 def get_api_router(config_manager: Any = None, reload_callback: Any = None) -> APIRouter:
@@ -31,7 +34,7 @@ def get_api_router(config_manager: Any = None, reload_callback: Any = None) -> A
                 "config": updated.model_dump(by_alias=True),
             }
         except Exception as e:
-            logger.error(f"Error updating ATTP config: {e}")
+            logger.error("Error updating ATTP config: {}", e)
             return {"success": False, "error": str(e)}
 
     @router.post("/config/reload")
@@ -52,7 +55,7 @@ def get_api_router(config_manager: Any = None, reload_callback: Any = None) -> A
                 "config": new_cfg.model_dump(by_alias=True),
             }
         except Exception as e:
-            logger.error(f"Error reloading ATTP config: {e}")
+            logger.error("Error reloading ATTP config: {}", e)
             return {"success": False, "error": str(e)}
 
     return router

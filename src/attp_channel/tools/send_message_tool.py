@@ -6,8 +6,11 @@ import asyncio
 from typing import Callable, Awaitable
 
 import uvicorn
-from loguru import logger
 from mcp.server.fastmcp import FastMCP
+
+from attp_channel.logging import get_logger, UVICORN_SILENT_LOG_CONFIG
+
+logger = get_logger("Tool")
 
 from attp_channel.config.config import ToolConfig
 
@@ -65,13 +68,13 @@ class SendMessageTool:
     async def start(self) -> None:
         """Start the MCP SSE server in the background."""
         if self._task is not None and not self._task.done():
-            logger.warning("SendMessageTool is already running")
+            logger.warning("already running")
             return
 
         # sse_app() 返回完整配置好的 Starlette 应用
         starlette_app = self._mcp.sse_app()
 
-        config = uvicorn.Config(starlette_app, host=self.host, port=self.port, log_level="info")
+        config = uvicorn.Config(starlette_app, host=self.host, port=self.port, log_level="info", log_config=UVICORN_SILENT_LOG_CONFIG)
         server = uvicorn.Server(config)
 
         async def _run() -> None:
@@ -79,7 +82,7 @@ class SendMessageTool:
 
         self._task = asyncio.create_task(_run())
         self._uvicorn_server = server
-        logger.info(f"SendMessageTool   started on {self.host}:{self.port}")
+        logger.info("started at {}:{}", self.host, self.port)
 
     async def stop(self) -> None:
         """Stop the MCP SSE server."""
@@ -95,7 +98,7 @@ class SendMessageTool:
         except asyncio.CancelledError:
             pass
         self._task = None
-        logger.info("SendMessageTool stopped")
+        logger.info("stopped")
 
     async def reload(self, tool_config: ToolConfig) -> None:
         """Stop → update host/port → restart. Callback remains unchanged."""
@@ -103,4 +106,4 @@ class SendMessageTool:
         self.host = tool_config.host
         self.port = tool_config.port
         await self.start()
-        logger.info(f"[SendMessageTool] reloaded on {self.host}:{self.port}")
+        logger.info("reloaded on {}:{}", self.host, self.port)

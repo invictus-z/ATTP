@@ -7,9 +7,12 @@ import copy
 from pathlib import Path
 from typing import Any
 
-from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
+
+from attp_channel.logging import get_logger
 from pydantic.alias_generators import to_camel
+
+logger = get_logger("Config")
 
 
 # ---------------------------------------------------------------------------
@@ -124,7 +127,7 @@ class ConfigManager:
                     data = json.load(f)
                 self.attp_config = ATTPConfigFile.model_validate(data)
             except (json.JSONDecodeError, ValueError) as e:
-                logger.warning(f"Failed to load ATTP config from {self._attp_path}: {e}")
+                logger.warning("Failed to load ATTP config from {}: {}", self._attp_path, e)
 
     # ---- Write ----
 

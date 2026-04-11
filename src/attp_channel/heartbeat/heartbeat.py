@@ -6,7 +6,9 @@ import asyncio
 from typing import TYPE_CHECKING
 
 from anp.openanp import RemoteAgent
-from loguru import logger
+from attp_channel.logging import get_logger
+
+logger = get_logger("Heartbeat")
 
 if TYPE_CHECKING:
     from attp_channel.client import ATTPClient
@@ -41,10 +43,10 @@ class HeartbeatManager:
     async def start(self):
         """启动后台心跳检测任务。"""
         if self._task is not None and not self._task.done():
-            logger.warning("[Heartbeat] already running")
+            logger.warning("already running")
             return
         self._task = asyncio.create_task(self._loop())
-        logger.info(f"[Heartbeat] started (every {self._interval}s)")
+        logger.info("started (every {}s)", self._interval)
 
     async def stop(self):
         """停止心跳检测任务。"""
@@ -55,7 +57,7 @@ class HeartbeatManager:
             except asyncio.CancelledError:
                 pass
             self._task = None
-            logger.info("[Heartbeat] stopped")
+            logger.info("stopped")
 
     async def reload(self, heartbeat_config: HeartbeatConfig) -> None:
         """Stop → update parameters → restart."""
@@ -65,7 +67,7 @@ class HeartbeatManager:
         self._max_fail = heartbeat_config.max_fail
         self._fail_counts.clear()
         await self.start()
-        logger.info(f"[Heartbeat] reloaded (interval={self._interval}s, timeout={self._timeout}s, max_fail={self._max_fail})")
+        logger.info("reloaded (interval={}s, timeout={}s, max_fail={})", self._interval, self._timeout, self._max_fail)
 
     # ------------------------------------------------------------------
     # Public helpers
@@ -95,7 +97,7 @@ class HeartbeatManager:
             if not remote_agents:
                 continue
 
-            logger.debug(f"[Heartbeat] checking {len(remote_agents)} remote agents...")
+            logger.debug("checking {} remote agents...", len(remote_agents))
             for did, remote in list(remote_agents.items()):
                 await self._check(did, remote)
 
@@ -112,28 +114,28 @@ class HeartbeatManager:
             )
             if result == "ok":
                 self._fail_counts.pop(did, None)
-                logger.debug(f"[Heartbeat] agent {did} is healthy")
+                logger.debug("agent {} is healthy", did)
             else:
                 self._fail_counts[did] = self._fail_counts.get(did, 0) + 1
                 logger.warning(
-                    f"[Heartbeat] agent {did} returned unexpected response: "
-                    f"{result} (fail_count={self._fail_counts[did]})"
+                    "agent {} returned unexpected response: {} (fail_count={})",
+                    did, result, self._fail_counts[did],
                 )
                 if self._fail_counts[did] >= self._max_fail:
                     self._evict(did)
         except asyncio.TimeoutError:
             self._fail_counts[did] = self._fail_counts.get(did, 0) + 1
             logger.warning(
-                f"[Heartbeat] agent {did} timed out ({self._timeout}s) "
-                f"(fail_count={self._fail_counts[did]})"
+                "agent {} timed out ({}s) (fail_count={})",
+                did, self._timeout, self._fail_counts[did],
             )
             if self._fail_counts[did] >= self._max_fail:
                 self._evict(did)
         except Exception as e:
             self._fail_counts[did] = self._fail_counts.get(did, 0) + 1
             logger.warning(
-                f"[Heartbeat] agent {did} error: {e} "
-                f"(fail_count={self._fail_counts[did]})"
+                "agent {} error: {} (fail_count={})",
+                did, e, self._fail_counts[did],
             )
             if self._fail_counts[did] >= self._max_fail:
                 self._evict(did)
@@ -147,11 +149,11 @@ class HeartbeatManager:
         if ad_url:
             self._attp_client.failed_urls.add(ad_url)
             logger.warning(
-                f"[Heartbeat] agent {did} evicted, "
-                f"ad_url={ad_url} added back to failed_urls"
+                "agent {} evicted, ad_url={} added back to failed_urls",
+                did, ad_url,
             )
         else:
             logger.warning(
-                f"[Heartbeat] agent {did} evicted, "
-                f"but no ad_url found in registered_agents"
+                "agent {} evicted, but no ad_url found in registered_agents",
+                did,
             )

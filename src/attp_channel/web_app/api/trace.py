@@ -1,7 +1,10 @@
 from datetime import datetime
 from fastapi import APIRouter
-from loguru import logger
+
+from attp_channel.logging import get_logger
 from attp_channel.tracing import tracer
+
+logger = get_logger("Tracing")
 
 
 def get_api_router() -> APIRouter:
@@ -39,7 +42,7 @@ def get_api_router() -> APIRouter:
                 "Path": path_list,
             }
         except Exception as e:
-            logger.error(f"Error recovering trace for {session_id}: {e}")
+            logger.error("Error recovering trace for {}: {}", session_id, e)
             return {
                 "Session_ID": session_id,
                 "Intent_Tag": "Error",
