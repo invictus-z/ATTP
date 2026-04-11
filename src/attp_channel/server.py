@@ -10,6 +10,11 @@ import uvicorn
 from fastapi import FastAPI
 from anp.openanp import anp_agent, interface, AgentConfig
 from anp.authentication import DidWbaVerifier, DidWbaVerifierConfig
+from anp.authentication.did_wba import (
+    resolve_did_wba_document,
+    _extract_public_key,
+    _find_verification_method,
+)
 from typing import TYPE_CHECKING
 
 from attp_channel.logging import get_logger, UVICORN_SILENT_LOG_CONFIG
@@ -63,6 +68,66 @@ class ATTPServer:
         self.description = server_config.description
         self.private_key_path = Path(server_config.private_key_path).expanduser()
         self.public_key_path = Path(server_config.public_key_path).expanduser()
+
+    async def _resolve_public_key_for_did(self, node_did: str):
+        """异步解析 DID 对应的公钥。
+
+        回退链：
+        1. 本地 agent → 直接读 PEM 公钥文件
+        2. 标准 DID 解析（DNS 可达时）
+        """
+        logger.debug(f"[DID Resolve] 开始解析公钥: {node_did}")
+
+        # 本地 agent：读 PEM 公钥
+        if node_did == self.agent_did:
+            try:
+                from cryptography.hazmat.primitives import serialization
+                pem_data = self.public_key_path.read_bytes()
+                private_or_public = serialization.load_pem_private_key(pem_data, password=None)
+                pub = private_or_public.public_key()
+                logger.debug(f"[DID Resolve] 本地 agent，直接从 PEM 加载公钥成功")
+                return pub
+            except ValueError:
+                pub = serialization.load_pem_public_key(pem_data)
+                logger.debug(f"[DID Resolve] 本地 agent，直接从 PEM 加载公钥成功")
+                return pub
+
+        # 解析 DID 格式
+        parts = node_did.split(":")
+        if len(parts) < 4 or parts[1] != "wba":
+            logger.error(f"[DID Resolve] 不支持的 DID 格式: {node_did}")
+            return None
+        path_segments = parts[3].split(":")
+
+        did_doc = None
+
+        # 标准 DID 解析（仅对公网可达的 DID 尝试，避免 .local 等域名产生无意义 ERROR 日志）
+        host = parts[2]
+        if not host.endswith(".local"):
+            logger.debug(f"[DID Resolve] 途径1: 尝试标准 DNS 解析 https://{host}/.../did.json")
+            try:
+                did_doc = await resolve_did_wba_document(node_did)
+                if did_doc:
+                    logger.info(f"[DID Resolve] 途径1 成功: 标准解析获取到 DID 文档")
+            except Exception as e:
+                logger.debug(f"[DID Resolve] 途径1 失败: {e}")
+        else:
+            logger.debug(f"[DID Resolve] 途径1 跳过: 主机名 {host} 为本地域名，跳过标准 DNS 解析")
+
+        # 提取公钥（支持 secp256k1/secp256r1/Ed25519）
+        try:
+            key_id = f"{node_did}#key-1"
+            method = _find_verification_method(did_doc, key_id)
+            if method:
+                pub_key = _extract_public_key(method)
+                logger.info(f"[DID Resolve] 公钥提取成功: {key_id} (type={method.get('type')})")
+                return pub_key
+            logger.error(f"[DID Resolve] DID 文档中未找到 {key_id}")
+            return None
+        except Exception as e:
+            logger.error(f"[DID Resolve] 公钥提取失败: {e}")
+            return None
+
 
     def _create_did_wba_verifier(self) -> DidWbaVerifier:
         """Initialize the DID WBA verifier with the configured keys."""
@@ -134,6 +199,17 @@ class ATTPServer:
 
 
                 metadata = metadata or {}
+
+                # 预解析 Path 中所有节点的公钥并注入 tracer 缓存
+                path = metadata.get("Path", [])
+                for hop in path:
+                    node_did = hop.get("Log", {}).get("node_did")
+                    if node_did and node_did not in tracer._pub_key_cache:
+                        pub_key = await self._resolve_public_key_for_did(node_did)
+                        if pub_key:
+                            tracer.cache_public_key(node_did, pub_key)
+
+                # 验证消息链路的完整性和真实性
                 if not tracer.validate_chain(metadata):
                     logger.error(
                         "Security Alert: Message from {} failed "
@@ -141,6 +217,18 @@ class ATTPServer:
                         sender_did,
                     )
                     return "REJECTED: Trace validation failed."
+                
+                # 验证通过，继续处理消息并持久化最新节点日志
+                path = metadata.get("Path", [])
+                if path:
+                    latest_node = path[-1]
+                    if isinstance(latest_node, dict):
+                        latest_log = latest_node.get("Log")
+                        if isinstance(latest_log, dict):
+                            if not tracer.save_log_to_db(latest_log):
+                                logger.warning(f"Failed to persist latest trace log from {sender_did}")
+                            else:
+                                logger.info(f"Record log saved from {sender_did}")
 
                 try:
                     session_id = metadata.get("Session_ID")

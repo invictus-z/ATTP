@@ -9,6 +9,7 @@ from cryptography.hazmat.primitives import hashes
 from attp_channel.logging import get_logger
 from cryptography.hazmat.primitives.asymmetric import padding, rsa, ec
 from cryptography.hazmat.primitives import serialization
+from cryptography.exceptions import InvalidSignature
 
 logger = get_logger("Tracing")
 
@@ -16,7 +17,12 @@ class MessageTracer:
     def __init__(self, db_path: str = "attp_traces.db"):
         self.db_path = Path.home() / ".nanobot" / db_path
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._pub_key_cache: dict[str, object] = {}  # node_did → public_key
         self._init_db()
+
+    def cache_public_key(self, node_did: str, public_key) -> None:
+        """注入公钥到缓存（由异步调用方在 validate_chain 前调用）。"""
+        self._pub_key_cache[node_did] = public_key
 
     def _init_db(self):
         with sqlite3.connect(self.db_path, timeout=10) as conn:
@@ -58,6 +64,42 @@ class MessageTracer:
         else:
             return ""
         return base64.b64encode(signature).decode('utf-8')
+
+    def _verify_signature(self, entry_hash: str, signature_b64: str, public_key) -> bool:
+        """用公钥验证 entry_hash 的签名。
+
+        Args:
+            entry_hash: SHA-256 hex 字符串（与 _sign_hash 输入一致）
+            signature_b64: Base64 编码的签名
+            public_key: rsa.RSAPublicKey 或 ec.EllipticCurvePublicKey
+
+        Returns:
+            True 签名合法，False 验证失败
+        """
+        try:
+            sig_bytes = base64.b64decode(signature_b64)
+            data = entry_hash.encode('utf-8')
+
+            if isinstance(public_key, rsa.RSAPublicKey):
+                public_key.verify(
+                    sig_bytes, data,
+                    padding.PSS(
+                        mgf=padding.MGF1(hashes.SHA256()),
+                        salt_length=padding.PSS.MAX_LENGTH,
+                    ),
+                    hashes.SHA256(),
+                )
+            elif isinstance(public_key, ec.EllipticCurvePublicKey):
+                public_key.verify(sig_bytes, data, ec.ECDSA(hashes.SHA256()))
+            else:
+                logger.error(f"Unsupported key type: {type(public_key)}")
+                return False
+            return True
+        except InvalidSignature:
+            return False
+        except Exception as e:
+            logger.error(f"Signature verification error: {e}")
+            return False
 
     def _calculate_entry_hash(self, prev_hash: str, log_data: dict) -> str:
         raw_data = json.dumps({
@@ -126,25 +168,29 @@ class MessageTracer:
         new_path = list(path)
         new_path.append({"Log": log_entry})
         metadata["Path"] = new_path
+        print(f"DEBUG: append_hop called with metadata={metadata}")
         return metadata
 
     def validate_chain(self, metadata: dict) -> bool:
         path = metadata.get("Path", [])
         if not path:
             return True
-        
+
         if time.time() - path[-1]["Log"]["Timestamp"] > 300:
             logger.error("Security Alert: Message TTL expired.")
             return False
-            
-        for i in range(1, len(path)):
-            prev_log = path[i-1]["Log"]
+
+        for i in range(len(path)):
             curr_log = path[i]["Log"]
-            
-            if curr_log.get("Prev_Hash") != prev_log.get("Entry_Hash"):
-                logger.error("Security Alert: Broken chain between {} and {}", prev_log.get("node_did"), curr_log.get("node_did"))
-                return False
-                
+
+            # ---- hash 链检查 ----
+            if i >= 1:
+                prev_log = path[i - 1]["Log"]
+                if curr_log.get("Prev_Hash") != prev_log.get("Entry_Hash"):
+                    logger.error("Security Alert: Broken chain between {} and {}", prev_log.get("node_did"), curr_log.get("node_did"))
+                    return False
+
+            # ---- 重算 hash ----
             recomputed = self._calculate_entry_hash(curr_log.get("Prev_Hash"), {
                 "session_id": curr_log.get("Session_ID"),
                 "hop_count": curr_log.get("Hop_Count"),
@@ -155,6 +201,23 @@ class MessageTracer:
             if recomputed != curr_log.get("Entry_Hash"):
                 logger.error("Security Alert: Hash manipulation detected at node {}", curr_log.get("node_did"))
                 return False
+
+            # ---- 签名验证 ----
+            signature = curr_log.get("Signature")
+            node_did = curr_log.get("node_did")
+            if not signature:
+                logger.warning(f"No signature at hop {i}, skip sig verify")
+                continue
+
+            public_key = self._pub_key_cache.get(node_did)
+            if public_key is None:
+                logger.error(f"Security Alert: No cached public key for {node_did}")
+                return False
+
+            if not self._verify_signature(recomputed, signature, public_key):
+                logger.error(f"Security Alert: Signature verification failed at {node_did}")
+                return False
+
         return True
 
     def recover_trace(self, session_id: str) -> list:
