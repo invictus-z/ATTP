@@ -149,8 +149,6 @@ class ATTPServer:
                     if session_id and session_manager:
                         session = session_manager.get_or_create(session_id)
                         session.update_metadata(metadata)
-                        session.set_metadata("sender_did", sender_did)
-                        session.set_metadata("message_type", message_type)
                         session_manager.save(session)
                         logger.debug(
                             "Session stored/updated: id={}, sender={}, metadata keys={}",
@@ -158,9 +156,10 @@ class ATTPServer:
                         )
                     if attp_channel_callback:
                         await attp_channel_callback(
-                            sender_id=sender_did,
+                            sender=sender_did,
                             chat_id=session_id,
-                            content=content
+                            content=content,
+                            media=[],
                         )
                     
                     # Notify UI of incoming node message
