@@ -21,7 +21,7 @@ from attp_channel.logging import get_logger, UVICORN_SILENT_LOG_CONFIG
 
 logger = get_logger("Server")
 
-from .tracing import tracer
+from attp_channel.protocol import tracer
 from attp_channel.sessions import SessionManager
 if TYPE_CHECKING:
     from attp_channel.config.config import ATTPServerConfig
@@ -46,8 +46,6 @@ class ATTPServer:
         self._serve_task = None
 
         self._apply_config(agent_did, server_config)
-
-        self.verifier = self._create_did_wba_verifier()
 
         # Create ATTP agent and FastAPI app
         self.agent_cls = self._create_agent()
@@ -83,36 +81,39 @@ class ATTPServer:
             try:
                 from cryptography.hazmat.primitives import serialization
                 pem_data = self.public_key_path.read_bytes()
-                private_or_public = serialization.load_pem_private_key(pem_data, password=None)
-                pub = private_or_public.public_key()
-                logger.debug(f"[DID Resolve] 本地 agent，直接从 PEM 加载公钥成功")
-                return pub
-            except ValueError:
-                pub = serialization.load_pem_public_key(pem_data)
-                logger.debug(f"[DID Resolve] 本地 agent，直接从 PEM 加载公钥成功")
-                return pub
+                try:
+                    private_or_public = serialization.load_pem_private_key(pem_data, password=None)
+                    pub = private_or_public.public_key()
+                    logger.debug(f"[DID Resolve] 本地 agent,直接从 PEM 加载公钥成功")
+                    return pub
+                except ValueError:
+                    pub = serialization.load_pem_public_key(pem_data)
+                    logger.debug(f"[DID Resolve] 本地 agent,直接从 PEM 加载公钥成功")
+                    return pub
+            except Exception as e:
+                logger.error("[DID Resolve] 本地公钥加载失败: {}", e)
+                return None
 
         # 解析 DID 格式
         parts = node_did.split(":")
         if len(parts) < 4 or parts[1] != "wba":
-            logger.error(f"[DID Resolve] 不支持的 DID 格式: {node_did}")
+            logger.error("[DID Resolve] 不支持的 DID 格式: {}", node_did)
             return None
-        path_segments = parts[3].split(":")
 
         did_doc = None
 
         # 标准 DID 解析（仅对公网可达的 DID 尝试，避免 .local 等域名产生无意义 ERROR 日志）
         host = parts[2]
         if not host.endswith(".local"):
-            logger.debug(f"[DID Resolve] 途径1: 尝试标准 DNS 解析 https://{host}/.../did.json")
+            logger.debug("[DID Resolve] 尝试标准 DNS 解析 https://{}(...)/did.json", host)
             try:
                 did_doc = await resolve_did_wba_document(node_did)
                 if did_doc:
-                    logger.info(f"[DID Resolve] 途径1 成功: 标准解析获取到 DID 文档")
+                    logger.info("[DID Resolve] 成功: 标准解析获取到 DID 文档")
             except Exception as e:
-                logger.debug(f"[DID Resolve] 途径1 失败: {e}")
+                logger.debug("[DID Resolve] 失败: {}", e)
         else:
-            logger.debug(f"[DID Resolve] 途径1 跳过: 主机名 {host} 为本地域名，跳过标准 DNS 解析")
+            logger.debug("[DID Resolve] 跳过: 主机名 {} 为本地域名，跳过标准 DNS 解析", host)
 
         # 提取公钥（支持 secp256k1/secp256r1/Ed25519）
         try:
@@ -120,29 +121,13 @@ class ATTPServer:
             method = _find_verification_method(did_doc, key_id)
             if method:
                 pub_key = _extract_public_key(method)
-                logger.info(f"[DID Resolve] 公钥提取成功: {key_id} (type={method.get('type')})")
+                logger.info("[DID Resolve] 公钥提取成功: {} (type={})", key_id, method.get('type'))
                 return pub_key
-            logger.error(f"[DID Resolve] DID 文档中未找到 {key_id}")
+            logger.error("[DID Resolve] DID 文档中未找到 {}", key_id)
             return None
         except Exception as e:
-            logger.error(f"[DID Resolve] 公钥提取失败: {e}")
+            logger.error("[DID Resolve] 公钥提取失败: {}", e)
             return None
-
-
-    def _create_did_wba_verifier(self) -> DidWbaVerifier:
-        """Initialize the DID WBA verifier with the configured keys."""
-        with open(self.private_key_path, encoding="utf-8") as f:
-            jwt_private_key = f.read()
-        with open(self.public_key_path, encoding="utf-8") as f:
-            jwt_public_key = f.read()
-
-        config = DidWbaVerifierConfig(
-            jwt_private_key=jwt_private_key,
-            jwt_public_key=jwt_public_key,
-            jwt_algorithm="RS256",
-            access_token_expire_minutes=600,
-        )
-        return DidWbaVerifier(config)
 
     def _create_agent(self):
         """Create the ATTP agent class dynamically."""
@@ -151,6 +136,8 @@ class ATTPServer:
         session_manager = self.session_manager
         web_callback = self._web_callback
         attp_channel_callback = self._attp_channel_callback
+        resolve_public_key = self._resolve_public_key_for_did
+        
 
         @anp_agent(AgentConfig(
             name=self.name,
@@ -205,7 +192,7 @@ class ATTPServer:
                 for hop in path:
                     node_did = hop.get("Log", {}).get("node_did")
                     if node_did and node_did not in tracer._pub_key_cache:
-                        pub_key = await self._resolve_public_key_for_did(node_did)
+                        pub_key = await resolve_public_key(node_did)
                         if pub_key:
                             tracer.cache_public_key(node_did, pub_key)
 
@@ -306,7 +293,6 @@ class ATTPServer:
         await self.stop()
         self._apply_config(agent_did, server_config)
 
-        self.verifier = self._create_did_wba_verifier()
         self.agent_cls = self._create_agent()
         self.app = FastAPI()
         self.app.include_router(self.agent_cls.router())

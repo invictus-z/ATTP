@@ -2,7 +2,7 @@ from datetime import datetime
 from fastapi import APIRouter
 
 from attp_channel.logging import get_logger
-from attp_channel.tracing import tracer
+from attp_channel.protocol import tracer
 
 logger = get_logger("Tracing")
 

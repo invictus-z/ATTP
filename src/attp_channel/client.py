@@ -13,7 +13,7 @@ from attp_channel.logging import get_logger
 logger = get_logger("Client")
 
 from attp_channel.sessions import SessionManager
-from attp_channel.tracing import tracer
+from attp_channel.protocol import tracer
 
 if TYPE_CHECKING:
     from attp_channel.config.config import ATTPClientConfig
@@ -281,7 +281,11 @@ class ATTPClient:
                         }
 
                         # 发送 record 类型消息到最初发出者
-                        origin_remote = await self._get_remote_agent(origin_did)
+                        origin_remote = self.remote_agents.get(origin_did)
+                        if not origin_remote:
+                            reg = self.registered_agents.get(origin_did)
+                            if reg and reg.get("ad_url"):
+                                origin_remote = await self._get_remote_agent(reg["ad_url"])
                         if origin_remote:
                             await origin_remote.receive_message(
                                 sender_did=sender_did,
@@ -291,7 +295,7 @@ class ATTPClient:
                             )
                             logger.debug("Sent record to origin {}", origin_did)
             except Exception as e:
-                logger.warning("Failed to send record copy: %s", e)
+                logger.warning("Failed to send record copy: {}", e)
 
             if self._web_callback:
                 await self._web_callback(content, {
