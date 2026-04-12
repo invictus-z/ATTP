@@ -15,6 +15,12 @@ declare global {
     unpinSession: (event: any, btnElement: any) => void;
     closeTraceModal: () => void;
     pinSession?: (event: any, btnElement: any) => void;
+    toggleBatchMode: () => void;
+    toggleSessionSelect: (e: Event, id: string) => void;
+    toggleSelectAll: (checked: boolean) => void;
+    batchDeleteSessions: () => void;
+    batchPinSessions: () => void;
+    batchUnpinSessions: () => void;
   }
 }
 export {};
