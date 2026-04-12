@@ -2,7 +2,7 @@
     "did": "did:wba:home.local:your-agent-name",
     "attpClient": {
         "didDocPath": "~/.nanobot/did/did.json",
-        "didKeyPath": "~/.nanobot/did/private_key.pem",
+        "didKeyPath": "~/.nanobot/did/key-1_private.pem",
         "nodeAds": [
             "http://other-agent:8000/agent/ad.json"
         ]
@@ -13,8 +13,8 @@
         "description": "My local ATTP agent",
         "serverHost": "0.0.0.0",
         "serverPort": 8000,
-        "privateKeyPath": "~/.nanobot/did/private_key.pem",
-        "publicKeyPath": "~/.nanobot/did/public_key.pem"
+        "privateKeyPath": "~/.nanobot/did/key-1_private.pem",
+        "publicKeyPath": "~/.nanobot/did/key-1_public.pem"
     },
     "webApp": {
         "host": "127.0.0.1",
