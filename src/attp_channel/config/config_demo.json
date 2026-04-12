@@ -1,0 +1,32 @@
+{
+    "did": "did:wba:home.local:your-agent-name",
+    "attpClient": {
+        "didDocPath": "~/.nanobot/did/did.json",
+        "didKeyPath": "~/.nanobot/did/key-1_private.pem",
+        "nodeAds": [
+            "http://other-agent:8000/agent/ad.json"
+        ]
+    },
+    "attpServer": {
+        "name": "local-agent",
+        "prefix": "/agent",
+        "description": "My local ATTP agent",
+        "serverHost": "0.0.0.0",
+        "serverPort": 8000,
+        "privateKeyPath": "~/.nanobot/did/key-1_private.pem",
+        "publicKeyPath": "~/.nanobot/did/key-1_public.pem"
+    },
+    "webApp": {
+        "host": "127.0.0.1",
+        "port": 8001
+    },
+    "tool": {
+        "host": "127.0.0.1",
+        "port": 8002
+    },
+    "heartbeat": {
+        "interval": 30,
+        "timeout": 90,
+        "maxFail": 3
+    }
+}

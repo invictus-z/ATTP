@@ -37,7 +37,7 @@ export function renderNodeView() {
                 </div>
                 <div class="flex items-center gap-2 text-sm">
                     <span class="text-gray-400 font-medium text-[11px] uppercase tracking-wide">Endpoint</span>
-                    <span id="node-header-endpoint" class="text-[13px] text-gray-600 flex items-center gap-1"><i data-lucide="link-2" class="w-3 h-3 text-gray-400"></i>http://192.168.1.100:8081/anp</span>
+                    <span id="node-header-endpoint" class="text-[13px] text-gray-600 flex items-center gap-1"><i data-lucide="link-2" class="w-3 h-3 text-gray-400"></i>http://192.168.1.100:8081/attp</span>
                 </div>
                 <div class="flex items-center gap-2 text-sm">
                     <span class="text-gray-400 font-medium text-[11px] uppercase tracking-wide">Skills</span>
@@ -77,7 +77,7 @@ export function renderNodeView() {
             </button>
         </div>
         <div class="max-w-4xl mx-auto mt-2 text-center">
-            <span class="text-[10px] text-gray-400">Local Agent will send this request via ANP protocol. Press <kbd class="font-sans px-1 rounded bg-gray-100 border border-gray-200">Enter</kbd> to send.</span>
+            <span class="text-[10px] text-gray-400">Local Agent will send this request via ATTP protocol. Press <kbd class="font-sans px-1 rounded bg-gray-100 border border-gray-200">Enter</kbd> to send.</span>
         </div>
     </div>
 </div>

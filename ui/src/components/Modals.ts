@@ -107,7 +107,7 @@ export function renderModals() {
 
                             <!-- Line -->
                             <div class="flex-1 border-t border-emerald-300 border-dashed relative min-w-[70px]">
-                                <div class="absolute top-0 left-1/2 -translate-y-1/2 -translate-x-1/2 px-2 bg-white text-[10px] text-emerald-600 border border-emerald-100 rounded shadow-sm font-mono whitespace-nowrap">ANP</div>
+                                <div class="absolute top-0 left-1/2 -translate-y-1/2 -translate-x-1/2 px-2 bg-white text-[10px] text-emerald-600 border border-emerald-100 rounded shadow-sm font-mono whitespace-nowrap">ATTP</div>
                                 <i data-lucide="chevron-right" class="w-4 h-4 text-emerald-500 absolute right-0 top-0 -translate-y-1/2 translate-x-1/2 bg-white"></i>
                             </div>
 

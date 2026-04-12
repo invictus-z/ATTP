@@ -165,7 +165,7 @@ window.toggleNodes = function () {
 
   const container = document.getElementById('trace-timeline-container');
   if (container) {
-      container.innerHTML = '<div class="text-center text-sm py-4 text-gray-400">Loading trace via ANP...</div>';
+      container.innerHTML = '<div class="text-center text-sm py-4 text-gray-400">Loading trace via ATTP...</div>';
   }
   
   // Show modal with animation
@@ -180,7 +180,7 @@ window.toggleNodes = function () {
   
   // Fetch real data
   try {
-      const res = await fetch(`http://localhost:8001/api/traces/${sessionId}`);
+      const res = await fetch(`/api/traces/${sessionId}`);
       const data = await res.json();
       if (container) {
           if (!data.Path || data.Path.length === 0) {
@@ -468,7 +468,7 @@ window.filterSessions = function (event: any) {
 
 (window as any).renderDynamicNodes = async function() {
     try {
-        const res = await fetch('http://localhost:8001/api/nodes');
+        const res = await fetch('/api/nodes');
         const data = await res.json();
         const nodesList = document.getElementById('nodes-list');
         if (!nodesList) return;
@@ -568,10 +568,12 @@ setTimeout(() => {
 }, 500);
 
 // ============================================================================
-// Settings - ANP Config Management
+// Settings - ATTP Config Management
 // ============================================================================
 
-function _showSettingsToast(message: string, isSuccess: boolean) {
+let _originalWebAppConfig: { host: string; port: number } | null = null;
+
+function _showSettingsToast(message: string, isSuccess: boolean, duration = 3000) {
     const toast = document.getElementById('settings-toast');
     const inner = document.getElementById('settings-toast-inner') as HTMLElement;
     const icon = document.getElementById('settings-toast-icon') as HTMLElement;
@@ -593,7 +595,27 @@ function _showSettingsToast(message: string, isSuccess: boolean) {
     setTimeout(() => {
         toast.classList.remove('opacity-100', 'translate-x-0');
         toast.classList.add('opacity-0', 'translate-x-10', 'pointer-events-none');
-    }, 3000);
+    }, duration);
+}
+
+function _showSettingsWarningToast(message: string) {
+    const toast = document.getElementById('settings-toast');
+    const inner = document.getElementById('settings-toast-inner') as HTMLElement;
+    const icon = document.getElementById('settings-toast-icon') as HTMLElement;
+    const text = document.getElementById('settings-toast-text') as HTMLElement;
+    if (!toast || !inner || !icon || !text) return;
+
+    text.innerText = message;
+    inner.className = 'flex items-center gap-2.5 px-4 py-3 rounded-xl border shadow-lg text-sm bg-amber-50 border-amber-100 text-amber-700';
+    icon.setAttribute('data-lucide', 'alert-circle');
+    if (window.lucide) window.lucide.createIcons();
+
+    toast.classList.remove('opacity-0', 'translate-x-10', 'pointer-events-none');
+    toast.classList.add('opacity-100', 'translate-x-0');
+    setTimeout(() => {
+        toast.classList.remove('opacity-100', 'translate-x-0');
+        toast.classList.add('opacity-0', 'translate-x-10', 'pointer-events-none');
+    }, 5000);
 }
 
 function _renderNodeAds(ads: string[]) {
@@ -667,7 +689,7 @@ function _collectNodeAds(): string[] {
     const loading = document.getElementById('settings-loading');
     const disabled = document.getElementById('settings-disabled');
     const formContainer = document.getElementById('settings-form-container');
-    const badge = document.getElementById('settings-anp-badge');
+    const badge = document.getElementById('settings-attp-badge');
     if (!loading || !disabled || !formContainer || !badge) return;
 
     loading.classList.remove('hidden');
@@ -675,7 +697,7 @@ function _collectNodeAds(): string[] {
     formContainer.classList.add('hidden');
 
     try {
-        const res = await fetch('http://localhost:8001/api/config');
+        const res = await fetch('/api/config');
         const data = await res.json();
 
         if (data.error || !data.config) {
@@ -692,16 +714,31 @@ function _collectNodeAds(): string[] {
         // Fill form
         const el = (id: string) => document.getElementById(id) as HTMLInputElement | null;
         if (el('cfg-did')) el('cfg-did')!.value = cfg.did || '';
-        if (el('cfg-did-doc-path')) el('cfg-did-doc-path')!.value = cfg.anpClient?.didDocPath || '';
-        if (el('cfg-did-key-path')) el('cfg-did-key-path')!.value = cfg.anpClient?.didKeyPath || '';
-        if (el('cfg-server-name')) el('cfg-server-name')!.value = cfg.anpServer?.name || '';
-        if (el('cfg-server-prefix')) el('cfg-server-prefix')!.value = cfg.anpServer?.prefix || '';
-        if (el('cfg-server-desc')) el('cfg-server-desc')!.value = cfg.anpServer?.description || '';
-        if (el('cfg-server-port')) el('cfg-server-port')!.value = String(cfg.anpServer?.serverPort || '');
-        if (el('cfg-server-private-key')) el('cfg-server-private-key')!.value = cfg.anpServer?.privateKeyPath || '';
-        if (el('cfg-server-public-key')) el('cfg-server-public-key')!.value = cfg.anpServer?.publicKeyPath || '';
+        if (el('cfg-did-doc-path')) el('cfg-did-doc-path')!.value = cfg.attpClient?.didDocPath || '';
+        if (el('cfg-did-key-path')) el('cfg-did-key-path')!.value = cfg.attpClient?.didKeyPath || '';
+        if (el('cfg-server-name')) el('cfg-server-name')!.value = cfg.attpServer?.name || '';
+        if (el('cfg-server-prefix')) el('cfg-server-prefix')!.value = cfg.attpServer?.prefix || '';
+        if (el('cfg-server-desc')) el('cfg-server-desc')!.value = cfg.attpServer?.description || '';
+        if (el('cfg-server-host')) el('cfg-server-host')!.value = cfg.attpServer?.serverHost || '';
+        if (el('cfg-server-port')) el('cfg-server-port')!.value = String(cfg.attpServer?.serverPort || '');
+        if (el('cfg-server-private-key')) el('cfg-server-private-key')!.value = cfg.attpServer?.privateKeyPath || '';
+        if (el('cfg-server-public-key')) el('cfg-server-public-key')!.value = cfg.attpServer?.publicKeyPath || '';
 
-        _renderNodeAds(cfg.anpClient?.nodeAds || []);
+        if (el('cfg-webapp-host')) el('cfg-webapp-host')!.value = cfg.webApp?.host || '';
+        if (el('cfg-webapp-port')) el('cfg-webapp-port')!.value = String(cfg.webApp?.port || '');
+
+        // Store original webApp config for change detection
+        _originalWebAppConfig = {
+            host: cfg.webApp?.host || '',
+            port: cfg.webApp?.port || 0,
+        };
+        if (el('cfg-tool-host')) el('cfg-tool-host')!.value = cfg.tool?.host || '';
+        if (el('cfg-tool-port')) el('cfg-tool-port')!.value = String(cfg.tool?.port || '');
+        if (el('cfg-heartbeat-interval')) el('cfg-heartbeat-interval')!.value = String(cfg.heartbeat?.interval || '');
+        if (el('cfg-heartbeat-timeout')) el('cfg-heartbeat-timeout')!.value = String(cfg.heartbeat?.timeout || '');
+        if (el('cfg-heartbeat-max-fail')) el('cfg-heartbeat-max-fail')!.value = String(cfg.heartbeat?.maxFail || '');
+
+        _renderNodeAds(cfg.attpClient?.nodeAds || []);
 
         loading.classList.add('hidden');
         formContainer.classList.remove('hidden');
@@ -717,11 +754,48 @@ function _collectNodeAds(): string[] {
     }
 };
 
-(window as any).reloadSettingsConfig = function() {
-    (window as any).loadSettingsConfig();
+(window as any).refreshSettingsConfig = async function() {
+    // Re-read config from disk (no hot-reload)
+    try {
+        const res = await fetch('/api/config?refresh=true');
+        const data = await res.json();
+
+        if (data.error) {
+            _showSettingsToast('Failed to refresh configuration', false);
+            return;
+        }
+
+        // Update form fields with refreshed values
+        const cfg = data.config;
+        const el = (id: string) => document.getElementById(id) as HTMLInputElement | null;
+        if (el('cfg-did')) el('cfg-did')!.value = cfg.did || '';
+        if (el('cfg-did-doc-path')) el('cfg-did-doc-path')!.value = cfg.attpClient?.didDocPath || '';
+        if (el('cfg-did-key-path')) el('cfg-did-key-path')!.value = cfg.attpClient?.didKeyPath || '';
+        if (el('cfg-server-name')) el('cfg-server-name')!.value = cfg.attpServer?.name || '';
+        if (el('cfg-server-prefix')) el('cfg-server-prefix')!.value = cfg.attpServer?.prefix || '';
+        if (el('cfg-server-desc')) el('cfg-server-desc')!.value = cfg.attpServer?.description || '';
+        if (el('cfg-server-host')) el('cfg-server-host')!.value = cfg.attpServer?.serverHost || '';
+        if (el('cfg-server-port')) el('cfg-server-port')!.value = String(cfg.attpServer?.serverPort || '');
+        if (el('cfg-server-private-key')) el('cfg-server-private-key')!.value = cfg.attpServer?.privateKeyPath || '';
+        if (el('cfg-server-public-key')) el('cfg-server-public-key')!.value = cfg.attpServer?.publicKeyPath || '';
+        if (el('cfg-webapp-host')) el('cfg-webapp-host')!.value = cfg.webApp?.host || '';
+        if (el('cfg-webapp-port')) el('cfg-webapp-port')!.value = String(cfg.webApp?.port || '');
+        if (el('cfg-tool-host')) el('cfg-tool-host')!.value = cfg.tool?.host || '';
+        if (el('cfg-tool-port')) el('cfg-tool-port')!.value = String(cfg.tool?.port || '');
+        if (el('cfg-heartbeat-interval')) el('cfg-heartbeat-interval')!.value = String(cfg.heartbeat?.interval || '');
+        if (el('cfg-heartbeat-timeout')) el('cfg-heartbeat-timeout')!.value = String(cfg.heartbeat?.timeout || '');
+        if (el('cfg-heartbeat-max-fail')) el('cfg-heartbeat-max-fail')!.value = String(cfg.heartbeat?.maxFail || '');
+        _originalWebAppConfig = { host: cfg.webApp?.host || '', port: cfg.webApp?.port || 0 };
+        _renderNodeAds(cfg.attpClient?.nodeAds || []);
+
+        _showSettingsToast('Configuration refreshed from disk', true);
+    } catch (e) {
+        _showSettingsToast('Network error: failed to refresh', false);
+    }
 };
 
 (window as any).saveSettingsConfig = async function() {
+    // Save to disk only — no hot-reload
     const btn = document.getElementById('settings-save-btn') as HTMLButtonElement;
     if (!btn) return;
 
@@ -730,18 +804,32 @@ function _collectNodeAds(): string[] {
 
     const payload: any = {
         did: el('cfg-did')?.value || '',
-        anpClient: {
+        attpClient: {
             didDocPath: el('cfg-did-doc-path')?.value || '',
             didKeyPath: el('cfg-did-key-path')?.value || '',
             nodeAds: nodeAds,
         },
-        anpServer: {
+        attpServer: {
             name: el('cfg-server-name')?.value || '',
             prefix: el('cfg-server-prefix')?.value || '',
             description: el('cfg-server-desc')?.value || '',
-            serverPort: parseInt(el('cfg-server-port')?.value || '8000', 10),
+            serverHost: el('cfg-server-host')?.value || '',
+            serverPort: parseInt(el('cfg-server-port')?.value || '0', 10),
             privateKeyPath: el('cfg-server-private-key')?.value || '',
             publicKeyPath: el('cfg-server-public-key')?.value || '',
+        },
+        webApp: {
+            host: el('cfg-webapp-host')?.value || '',
+            port: parseInt(el('cfg-webapp-port')?.value || '0', 10),
+        },
+        tool: {
+            host: el('cfg-tool-host')?.value || '',
+            port: parseInt(el('cfg-tool-port')?.value || '0', 10),
+        },
+        heartbeat: {
+            interval: parseInt(el('cfg-heartbeat-interval')?.value || '0', 10),
+            timeout: parseInt(el('cfg-heartbeat-timeout')?.value || '0', 10),
+            maxFail: parseInt(el('cfg-heartbeat-max-fail')?.value || '0', 10),
         },
     };
 
@@ -753,7 +841,7 @@ function _collectNodeAds(): string[] {
     if (window.lucide) window.lucide.createIcons();
 
     try {
-        const res = await fetch('http://localhost:8001/api/config', {
+        const res = await fetch('/api/config', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
@@ -761,14 +849,80 @@ function _collectNodeAds(): string[] {
         const data = await res.json();
 
         if (data.success) {
-            _showSettingsToast('Configuration saved successfully', true);
-            // Refresh form with server-validated values
-            (window as any).loadSettingsConfig();
+            // Update _originalWebAppConfig to track what's now on disk
+            _originalWebAppConfig = { host: payload.webApp.host, port: payload.webApp.port };
+            _showSettingsToast('Configuration saved (not yet applied)', true);
         } else {
             _showSettingsToast(data.error || 'Failed to save configuration', false);
         }
     } catch (e) {
         _showSettingsToast('Network error: failed to save', false);
+    } finally {
+        btn.disabled = false;
+        btn.classList.remove('opacity-70');
+        btn.innerHTML = origHtml;
+        if (window.lucide) window.lucide.createIcons();
+    }
+};
+
+(window as any).reloadSettingsConfig = async function() {
+    // Re-read from disk + trigger hot-reload of all components
+    const btn = document.getElementById('settings-reload-btn') as HTMLButtonElement;
+    if (!btn) return;
+
+    // Snapshot current WebApp config BEFORE reload for change detection
+    const prevWebAppConfig = _originalWebAppConfig ? { ..._originalWebAppConfig } : null;
+
+    btn.disabled = true;
+    btn.classList.add('opacity-70');
+    const origHtml = btn.innerHTML;
+    btn.innerHTML = '<span class="flex items-center gap-1.5"><i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin"></i> Reloading...</span>';
+    if (window.lucide) window.lucide.createIcons();
+
+    try {
+        const res = await fetch('/api/config/reload', { method: 'POST' });
+        const data = await res.json();
+
+        if (data.success) {
+            // Update form with the reloaded values
+            const cfg = data.config;
+            const el = (id: string) => document.getElementById(id) as HTMLInputElement | null;
+            if (el('cfg-did')) el('cfg-did')!.value = cfg.did || '';
+            if (el('cfg-did-doc-path')) el('cfg-did-doc-path')!.value = cfg.attpClient?.didDocPath || '';
+            if (el('cfg-did-key-path')) el('cfg-did-key-path')!.value = cfg.attpClient?.didKeyPath || '';
+            if (el('cfg-server-name')) el('cfg-server-name')!.value = cfg.attpServer?.name || '';
+            if (el('cfg-server-prefix')) el('cfg-server-prefix')!.value = cfg.attpServer?.prefix || '';
+            if (el('cfg-server-desc')) el('cfg-server-desc')!.value = cfg.attpServer?.description || '';
+            if (el('cfg-server-host')) el('cfg-server-host')!.value = cfg.attpServer?.serverHost || '';
+            if (el('cfg-server-port')) el('cfg-server-port')!.value = String(cfg.attpServer?.serverPort || '');
+            if (el('cfg-server-private-key')) el('cfg-server-private-key')!.value = cfg.attpServer?.privateKeyPath || '';
+            if (el('cfg-server-public-key')) el('cfg-server-public-key')!.value = cfg.attpServer?.publicKeyPath || '';
+            if (el('cfg-webapp-host')) el('cfg-webapp-host')!.value = cfg.webApp?.host || '';
+            if (el('cfg-webapp-port')) el('cfg-webapp-port')!.value = String(cfg.webApp?.port || '');
+            if (el('cfg-tool-host')) el('cfg-tool-host')!.value = cfg.tool?.host || '';
+            if (el('cfg-tool-port')) el('cfg-tool-port')!.value = String(cfg.tool?.port || '');
+            if (el('cfg-heartbeat-interval')) el('cfg-heartbeat-interval')!.value = String(cfg.heartbeat?.interval || '');
+            if (el('cfg-heartbeat-timeout')) el('cfg-heartbeat-timeout')!.value = String(cfg.heartbeat?.timeout || '');
+            if (el('cfg-heartbeat-max-fail')) el('cfg-heartbeat-max-fail')!.value = String(cfg.heartbeat?.maxFail || '');
+            _renderNodeAds(cfg.attpClient?.nodeAds || []);
+
+            // Warn if WebApp host/port changed (still requires manual restart)
+            const newWebApp = { host: cfg.webApp?.host || '', port: cfg.webApp?.port || 0 };
+            if (prevWebAppConfig && (
+                prevWebAppConfig.host !== newWebApp.host || prevWebAppConfig.port !== newWebApp.port
+            )) {
+                setTimeout(() => {
+                    _showSettingsWarningToast('Web App host/port 已变更，需要手动重启 agent 使其完全生效');
+                }, 500);
+            }
+            _originalWebAppConfig = newWebApp;
+
+            _showSettingsToast('Configuration reloaded and applied', true);
+        } else {
+            _showSettingsToast(data.error || 'Failed to reload configuration', false);
+        }
+    } catch (e) {
+        _showSettingsToast('Network error: failed to reload', false);
     } finally {
         btn.disabled = false;
         btn.classList.remove('opacity-70');

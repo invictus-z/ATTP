@@ -1,4 +1,6 @@
-﻿export function setupChatLogic() {
+﻿import { renderMarkdown } from './markdown';
+
+export function setupChatLogic() {
   const chatInput = document.getElementById('home-chat-input') as HTMLTextAreaElement;
   const sendBtn = document.getElementById('home-send-btn');
   const messagesContainer = document.querySelector('#home-messages-container');
@@ -24,10 +26,13 @@
     if ((window as any).lucide) (window as any).lucide.createIcons();
   };
 
+  let wsConnected = false;
+
   // Fetch initial status from backend
-  fetch('http://localhost:8001/api/status')
+  fetch('/api/status')
     .then(res => res.json())
     .then(data => {
+      if (wsConnected) return; // WS already connected, skip
       if (data.status === 'active') {
         updateAgentStatus('connecting'); // backend is up, but WS not yet connected
       } else {
@@ -35,6 +40,7 @@
       }
     })
     .catch(() => {
+      if (wsConnected) return;
       updateAgentStatus('offline');
     });
 
@@ -60,6 +66,8 @@
 
   let sessions: ChatSession[] = JSON.parse(localStorage.getItem('nanobot_sessions') || '[]');
   let currentSessionId: string | null = null;
+  let batchMode = false;
+  let selectedSessionIds = new Set<string>();
 
   const saveSessions = () => {
     localStorage.setItem('nanobot_sessions', JSON.stringify(sessions));
@@ -196,8 +204,8 @@
                     <span class="text-[11px] font-medium text-gray-600">${displaySender}</span>
                     ${timeStr ? `<span class="text-[11px] text-gray-400">${timeStr}</span>` : ''}
                 </div>
-                <div class="bg-white border border-gray-100 rounded-2xl rounded-tl-sm p-4 w-full shadow-[0_2px_10px_-4px_rgba(0,0,0,0.05)] text-gray-700 text-[14px] leading-relaxed">
-                    ${msg.content}
+                <div class="bg-white border border-gray-100 rounded-2xl rounded-tl-sm p-4 w-full shadow-[0_2px_10px_-4px_rgba(0,0,0,0.05)] text-gray-700 text-[14px] leading-relaxed markdown-body">
+                    ${renderMarkdown(msg.content)}
                 </div>
             </div>
         </div>
@@ -328,6 +336,112 @@ const addMessageToSession = (sessionId: string, role: 'user' | 'agent', content:
     saveSessions();
   };
 
+  // --- Batch operations ---
+  const updateBatchUI = () => {
+    const toolbar = document.getElementById('batch-toolbar');
+    const batchBtn = document.getElementById('batch-mode-btn');
+    const countEl = document.getElementById('batch-selected-count');
+    const selectAllCb = document.getElementById('select-all-checkbox') as HTMLInputElement;
+    if (!toolbar || !batchBtn) return;
+
+    if (batchMode) {
+      toolbar.classList.remove('hidden');
+      batchBtn.innerHTML = '<i data-lucide="x" class="w-4 h-4"></i><span>取消管理</span>';
+      batchBtn.className = 'px-3 py-2 text-[13px] font-medium text-gray-800 bg-gray-200 border border-gray-300 rounded-xl hover:bg-gray-300 transition-colors flex items-center gap-1.5';
+    } else {
+      toolbar.classList.add('hidden');
+      batchBtn.innerHTML = '<i data-lucide="list-checks" class="w-4 h-4"></i><span>管理</span>';
+      batchBtn.className = 'px-3 py-2 text-[13px] font-medium text-gray-600 bg-gray-50 border border-gray-200 rounded-xl hover:bg-gray-100 hover:border-gray-300 transition-colors flex items-center gap-1.5';
+    }
+    if (countEl) countEl.textContent = `已选 ${selectedSessionIds.size} 项`;
+    if (selectAllCb) {
+      const allIds = sessions.map(s => s.id);
+      selectAllCb.checked = allIds.length > 0 && allIds.every(id => selectedSessionIds.has(id));
+    }
+    if ((window as any).lucide) (window as any).lucide.createIcons();
+  };
+
+  (window as any).toggleBatchMode = () => {
+    batchMode = !batchMode;
+    if (!batchMode) selectedSessionIds.clear();
+    renderSessionsList((document.getElementById('session-search') as HTMLInputElement)?.value?.toLowerCase() || '');
+    updateBatchUI();
+  };
+
+  (window as any).toggleSessionSelect = (e: Event, id: string) => {
+    e.stopPropagation();
+    if (selectedSessionIds.has(id)) {
+      selectedSessionIds.delete(id);
+    } else {
+      selectedSessionIds.add(id);
+    }
+    const cb = (e.target as HTMLElement).querySelector('input[type=checkbox]') as HTMLInputElement
+      || (e.target as HTMLInputElement);
+    if (cb && cb.type === 'checkbox') cb.checked = selectedSessionIds.has(id);
+    updateBatchUI();
+  };
+
+  (window as any).toggleSelectAll = (checked: boolean) => {
+    if (checked) {
+      sessions.forEach(s => selectedSessionIds.add(s.id));
+    } else {
+      selectedSessionIds.clear();
+    }
+    document.querySelectorAll('.session-checkbox').forEach((cb: Element) => {
+      (cb as HTMLInputElement).checked = checked;
+    });
+    updateBatchUI();
+  };
+
+  (window as any).batchDeleteSessions = () => {
+    if (selectedSessionIds.size === 0) return;
+    const count = selectedSessionIds.size;
+    sessions = sessions.filter(s => !selectedSessionIds.has(s.id));
+    if (selectedSessionIds.has(currentSessionId || '')) {
+      currentSessionId = sessions.length > 0 ? sessions[0].id : null;
+      (window as any).currentSessionId = currentSessionId;
+      if (!currentSessionId) createSession('New Chat');
+      else renderCurrentSession();
+    }
+    selectedSessionIds.clear();
+    batchMode = false;
+    saveSessions();
+    updateBatchUI();
+    console.log(`Deleted ${count} sessions`);
+  };
+
+  (window as any).batchPinSessions = () => {
+    if (selectedSessionIds.size === 0) return;
+    let count = 0;
+    sessions.forEach(s => {
+      if (selectedSessionIds.has(s.id) && !s.isPinned) {
+        s.isPinned = true;
+        count++;
+      }
+    });
+    selectedSessionIds.clear();
+    batchMode = false;
+    saveSessions();
+    updateBatchUI();
+    console.log(`Pinned ${count} sessions`);
+  };
+
+  (window as any).batchUnpinSessions = () => {
+    if (selectedSessionIds.size === 0) return;
+    let count = 0;
+    sessions.forEach(s => {
+      if (selectedSessionIds.has(s.id) && s.isPinned) {
+        s.isPinned = false;
+        count++;
+      }
+    });
+    selectedSessionIds.clear();
+    batchMode = false;
+    saveSessions();
+    updateBatchUI();
+    console.log(`Unpinned ${count} sessions`);
+  };
+
   // Update Sessions button unread badge
   const updateSessionsBadge = () => {
     const unreadSessions = sessions.filter(s => s.isUnread && s.unreadCount && s.unreadCount > 0);
@@ -362,15 +476,15 @@ const addMessageToSession = (sessionId: string, role: 'user' | 'agent', content:
     const pinnedList = document.getElementById('pinned-list');
     const pinnedSection = document.getElementById('pinned-section');
     const sessionCount = document.getElementById('session-count');
-    
+
     if (sessionCount) sessionCount.innerText = `${sessions.length} Total`;
     if (!recentList || !pinnedList || !pinnedSection) return;
 
     recentList.innerHTML = '';
     pinnedList.innerHTML = '';
-    
+
     const filteredSessions = sessions.filter(s => s.title.toLowerCase().includes(query));
-    
+
     let hasPinned = false;
 
     filteredSessions.forEach(s => {
@@ -378,23 +492,19 @@ const addMessageToSession = (sessionId: string, role: 'user' | 'agent', content:
       const timeStr = `${d.toLocaleDateString()} - ${d.toLocaleTimeString()}`;
       const pinText = s.isPinned ? "取消置顶" : "置顶";
       const pinIconClass = s.isPinned ? "text-brand-600" : "text-gray-600";
-      const htmlStr = `
-        <div onclick="window.loadSession('${s.id}')" class="session-item group relative flex items-center justify-between p-4 bg-white border border-gray-200 rounded-2xl hover:border-gray-300 hover:shadow-[0_2px_10px_-4px_rgba(0,0,0,0.05)] transition-all mb-3 cursor-pointer">
-            <div class="flex items-center gap-4 flex-1">
-                <div class="w-10 h-10 rounded-full bg-gray-50 border border-gray-200 text-gray-600 flex items-center justify-center shrink-0 relative">
-                    <i data-lucide="message-square" class="w-5 h-5"></i>
-                    ${s.unreadCount && s.unreadCount > 0 ? `<span class="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-xs rounded-full flex items-center justify-center font-medium">${s.unreadCount > 9 ? '9+' : s.unreadCount}</span>` : ''}
-                </div>
-                <div>
-                    <h3 class="text-[14px] font-medium text-gray-900 mb-0.5 ${s.isUnread ? 'font-semibold' : ''}">${s.title || 'Empty chat'}</h3>
-                    <div class="flex items-center gap-2 text-[12px] text-gray-500">
-                        <span>${s.senderName || 'Local Agent'}</span>
-                        <span class="w-1 h-1 rounded-full bg-gray-300"></span>
-                        <span>${timeStr}</span>
-                    </div>
-                </div>
-            </div>
+      const isSelected = selectedSessionIds.has(s.id);
 
+      const clickAction = batchMode
+        ? `onclick="window.toggleSessionSelect(event, '${s.id}')"`
+        : `onclick="window.loadSession('${s.id}')"`;
+      const selectedBorder = batchMode && isSelected ? 'border-gray-400 ring-1 ring-gray-300' : 'border-gray-200';
+
+      const checkboxHtml = batchMode ? `
+        <div class="flex items-center pl-1 pr-2" onclick="event.stopPropagation(); window.toggleSessionSelect(event, '${s.id}')">
+            <input type="checkbox" class="session-checkbox w-4 h-4 rounded border-gray-300 accent-gray-800 cursor-pointer" ${isSelected ? 'checked' : ''} onclick="event.stopPropagation(); window.toggleSessionSelect(event, '${s.id}')">
+        </div>` : '';
+
+      const menuHtml = batchMode ? '' : `
             <div class="relative">
                 <button onclick="window.toggleMenu(event, 'menu-${s.id}')" class="p-2 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-xl transition-colors">
                     <i data-lucide="more-horizontal" class="w-5 h-5 pointer-events-none"></i>
@@ -414,10 +524,29 @@ const addMessageToSession = (sessionId: string, role: 'user' | 'agent', content:
                         <i data-lucide="trash-2" class="w-3.5 h-3.5 group-hover:scale-110 transition-transform"></i> 删除
                       </button>
                 </div>
+            </div>`;
+
+      const htmlStr = `
+        <div ${clickAction} class="session-item group relative flex items-center justify-between p-4 bg-white ${selectedBorder} rounded-2xl hover:border-gray-300 hover:shadow-[0_2px_10px_-4px_rgba(0,0,0,0.05)] transition-all mb-3 cursor-pointer">
+            ${checkboxHtml}
+            <div class="flex items-center gap-4 flex-1">
+                <div class="w-10 h-10 rounded-full bg-gray-50 border border-gray-200 text-gray-600 flex items-center justify-center shrink-0 relative">
+                    <i data-lucide="message-square" class="w-5 h-5"></i>
+                    ${s.unreadCount && s.unreadCount > 0 ? `<span class="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-xs rounded-full flex items-center justify-center font-medium">${s.unreadCount > 9 ? '9+' : s.unreadCount}</span>` : ''}
+                </div>
+                <div>
+                    <h3 class="text-[14px] font-medium text-gray-900 mb-0.5 ${s.isUnread ? 'font-semibold' : ''}">${s.title || 'Empty chat'}</h3>
+                    <div class="flex items-center gap-2 text-[12px] text-gray-500">
+                        <span>${s.senderName || 'Local Agent'}</span>
+                        <span class="w-1 h-1 rounded-full bg-gray-300"></span>
+                        <span>${timeStr}</span>
+                    </div>
+                </div>
             </div>
+            ${menuHtml}
         </div>
       `;
-      
+
       if (s.isPinned) {
           hasPinned = true;
           pinnedList.insertAdjacentHTML('beforeend', htmlStr);
@@ -425,7 +554,7 @@ const addMessageToSession = (sessionId: string, role: 'user' | 'agent', content:
           recentList.insertAdjacentHTML('beforeend', htmlStr);
       }
     });
-    
+
     if (hasPinned) {
         pinnedSection.classList.remove('hidden');
     } else {
@@ -437,9 +566,11 @@ const addMessageToSession = (sessionId: string, role: 'user' | 'agent', content:
 
   renderSessionsList();
 
-  const ws = new WebSocket('ws://localhost:8001/ws');
+  const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const ws = new WebSocket(`${wsProtocol}//${location.host}/ws`);
   
   ws.onopen = () => {
+    wsConnected = true;
     console.log('Connected to Local Agent over WebSocket');
     updateAgentStatus('active');
   };
@@ -601,8 +732,8 @@ const addMessageToSession = (sessionId: string, role: 'user' | 'agent', content:
                       <span class="text-[11px] font-medium text-gray-500 uppercase tracking-wide">${role === 'user' ? 'Local Agent Request' : 'Node Trace'}</span>
                       <span class="text-[10px] text-gray-400 font-mono">${timeStr}</span>
                   </div>
-                  <div class="text-[14px] leading-relaxed relative group ${contentClass}">
-                      <p class="whitespace-pre-wrap">${text}</p>
+                  <div class="text-[14px] leading-relaxed relative group ${contentClass} markdown-body">
+                      ${role === 'agent' ? renderMarkdown(text) : text.replace(/\n/g, '<br>')}
                   </div>
               </div>
               ${role === 'user' ? '<div class="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-50 to-purple-50 border border-indigo-100 flex items-center justify-center shrink-0 shadow-sm mt-1"><i data-lucide="blocks" class="w-4 h-4 text-indigo-600"></i></div>' : ''}
