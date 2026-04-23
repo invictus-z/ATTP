@@ -1,17 +1,33 @@
-"""节点 Entry_Hash 计算。"""
+"""哈希计算：genesis 标识哈希和每跳签名哈希。"""
 
 import json
 import hashlib
 
 
-def calculate_entry_hash(prev_hash: str, log_data: dict) -> str:
-    """计算单跳的 SHA-256 entry hash。"""
-    raw_data = json.dumps({
-        "prev_hash": prev_hash,
-        "session_id": log_data.get("session_id"),
-        "hop_count": log_data.get("hop_count"),
-        "content_snapshot": log_data.get("content_snapshot"),
-        "timestamp": log_data.get("timestamp"),
-        "node_did": log_data.get("node_did"),
+def calculate_genesis_hash(session_id: str, origin_did: str) -> str:
+    """计算创世标识的 SHA-256 哈希，用于防篡改验证。"""
+    raw = json.dumps({
+        "session_id": session_id,
+        "origin_did": origin_did,
     }, sort_keys=True)
-    return hashlib.sha256(raw_data.encode("utf-8")).hexdigest()
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def calculate_hop_hash(
+    content: str,
+    node_did: str,
+    target_did: str,
+    hop_count: int,
+    timestamp: float,
+    session_id: str,
+) -> str:
+    """计算单跳消息字段的 SHA-256 哈希，用于身份验证签名。"""
+    raw = json.dumps({
+        "content": content,
+        "node_did": node_did,
+        "target_did": target_did,
+        "hop_count": hop_count,
+        "timestamp": timestamp,
+        "session_id": session_id,
+    }, sort_keys=True)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()

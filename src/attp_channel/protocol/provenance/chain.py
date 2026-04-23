@@ -5,131 +5,130 @@ import time
 from attp_channel.logging import get_logger
 from attp_channel.protocol.authentication import KeyStore
 from attp_channel.protocol.authentication import sign_hash, verify_signature
-from attp_channel.protocol.provenance import calculate_entry_hash
+from attp_channel.protocol.provenance import calculate_genesis_hash, calculate_hop_hash
 
 logger = get_logger("Tracing")
 
 
 class ChainManager:
-    """管理哈希链的追加和验证。"""
+    """管理消息跳的追加和验证。"""
 
     def __init__(self, key_store: KeyStore, storage=None):
         self._key_store = key_store
         self._storage = storage
 
-    def append_hop(self, metadata: dict, content_snapshot: str, node_did: str,
+    def append_hop(self, metadata: dict, content: str, node_did: str,
                    target_did: str, private_key_path: str,
                    save_to_db: bool = True) -> dict:
         metadata = metadata.copy()
         session_id = metadata.get("Session_ID")
         if not session_id or session_id == "UNKNOWN_SESSION":
             session_id = f"session_{int(time.time() * 1000)}"
-        path = metadata.get("Path", [])
 
-        hop_count = len(path)
-        prev_hash = path[-1]["Log"]["Entry_Hash"] if hop_count > 0 else "Genesis"
+        latest_hop = metadata.get("Latest_Hop")
+        hop_count = (latest_hop["Hop_Count"] + 1) if latest_hop else 0
+
         timestamp = time.time()
-
-        snapshot = content_snapshot[:100] if content_snapshot else ""
-
-        log_data = {
-            "session_id": session_id,
-            "hop_count": hop_count,
-            "content_snapshot": snapshot,
-            "timestamp": timestamp,
-            "node_did": node_did,
-        }
-
-        entry_hash = calculate_entry_hash(prev_hash, log_data)
+        hop_hash = calculate_hop_hash(
+            content=content,
+            node_did=node_did,
+            target_did=target_did,
+            hop_count=hop_count,
+            timestamp=timestamp,
+            session_id=session_id,
+        )
 
         private_key = self._key_store.load_private_key(private_key_path)
-        signature = sign_hash(entry_hash, private_key)
+        signature = sign_hash(hop_hash, private_key)
 
-        log_entry = {
+        new_log_entry = {
             "node_did": node_did,
             "target_did": target_did,
-            "Entry_Hash": entry_hash,
-            "Prev_Hash": prev_hash,
-            "Session_ID": session_id,
             "Hop_Count": hop_count,
-            "Content_Snapshot": snapshot,
-            "Signature": signature,
             "Timestamp": timestamp,
+            "Signature": signature,
+            "Content": content[:100],
         }
+
+        # 创世节点：设置 Origin_DID 和 Genesis_Signature
+        if hop_count == 0:
+            metadata["Origin_DID"] = node_did
+            genesis_hash = calculate_genesis_hash(session_id, node_did)
+            metadata["Genesis_Signature"] = sign_hash(genesis_hash, private_key)
+        else:
+            metadata["Origin_DID"] = metadata.get("Origin_DID", "")
+            metadata["Genesis_Signature"] = metadata.get("Genesis_Signature", "")
+
+        origin_did = metadata.get("Origin_DID", "")
+        genesis_signature = metadata.get("Genesis_Signature", "")
 
         if save_to_db and self._storage is not None:
             self._storage.save_to_db(
-                node_did, target_did, entry_hash, prev_hash,
-                session_id, hop_count, snapshot, signature, timestamp,
+                node_did, target_did, session_id, hop_count,
+                signature, timestamp, origin_did, genesis_signature,
+                content[:100],
             )
 
         metadata["Session_ID"] = session_id
-
-        new_path = list(path)
-        new_path.append({"Log": log_entry})
-        metadata["Path"] = new_path
+        metadata["Latest_Hop"] = new_log_entry
         logger.debug("append_hop called with metadata={}", metadata)
         return metadata
 
-    def validate_chain(self, metadata: dict) -> bool:
-        path = metadata.get("Path", [])
-        if not path:
+    def validate_chain(self, metadata: dict, content: str) -> bool:
+        latest = metadata.get("Latest_Hop")
+
+        if not latest:
             return True
 
-        if time.time() - path[-1]["Log"]["Timestamp"] > 300:
+        # TTL 检查
+        if time.time() - latest["Timestamp"] > 300:
             logger.error("Security Alert: Message TTL expired.")
             return False
 
-        for i in range(len(path)):
-            curr_log = path[i]["Log"]
+        # Genesis 签名验证：确认 session_id 和 origin_did 未被篡改
+        origin_did = metadata.get("Origin_DID")
+        genesis_signature = metadata.get("Genesis_Signature")
+        session_id = metadata.get("Session_ID")
 
-            # ---- hash 链检查 ----
-            if i >= 1:
-                prev_log = path[i - 1]["Log"]
-                if curr_log.get("Prev_Hash") != prev_log.get("Entry_Hash"):
-                    logger.error(
-                        "Security Alert: Broken chain between {} and {}",
-                        prev_log.get("node_did"), curr_log.get("node_did"),
-                    )
-                    return False
-
-            # ---- 重算 hash ----
-            recomputed = calculate_entry_hash(curr_log.get("Prev_Hash"), {
-                "session_id": curr_log.get("Session_ID"),
-                "hop_count": curr_log.get("Hop_Count"),
-                "content_snapshot": curr_log.get("Content_Snapshot"),
-                "timestamp": curr_log.get("Timestamp"),
-                "node_did": curr_log.get("node_did"),
-            })
-            if recomputed != curr_log.get("Entry_Hash"):
-                logger.error(
-                    "Security Alert: Hash manipulation detected at node {}",
-                    curr_log.get("node_did"),
-                )
+        if origin_did and genesis_signature:
+            genesis_hash = calculate_genesis_hash(session_id, origin_did)
+            genesis_pub_key = self._key_store.get(origin_did)
+            if genesis_pub_key is None:
+                logger.error(f"Security Alert: No cached public key for origin {origin_did}")
                 return False
-
-            # ---- 签名验证 ----
-            signature = curr_log.get("Signature")
-            node_did = curr_log.get("node_did")
-            if not signature:
-                logger.warning(f"No signature at hop {i}, skip sig verify")
-                continue
-
-            public_key = self._key_store.get(node_did)
-            if public_key is None:
-                logger.error(f"Security Alert: No cached public key for {node_did}")
+            if not verify_signature(genesis_hash, genesis_signature, genesis_pub_key):
+                logger.error("Security Alert: Genesis signature verification failed")
                 return False
+        else:
+            logger.error("Security Alert: Missing Origin_DID or Genesis_Signature")
+            return False
 
-            if not verify_signature(recomputed, signature, public_key):
-                logger.error(f"Security Alert: Signature verification failed at {node_did}")
-                return False
+        # Latest_Hop 身份验证
+        hop_hash = calculate_hop_hash(
+            content=content,
+            node_did=latest["node_did"],
+            target_did=latest["target_did"],
+            hop_count=latest["Hop_Count"],
+            timestamp=latest["Timestamp"],
+            session_id=session_id,
+        )
+        signature = latest.get("Signature")
+        if not signature:
+            logger.error("Security Alert: Missing Signature in Latest_Hop")
+            return False
+
+        node_did = latest["node_did"]
+        public_key = self._key_store.get(node_did)
+        if public_key is None:
+            logger.error(f"Security Alert: No cached public key for {node_did}")
+            return False
+        if not verify_signature(hop_hash, signature, public_key):
+            logger.error(f"Security Alert: Signature failed for {node_did}")
+            return False
 
         return True
 
     @staticmethod
     def get_origin_did(metadata: dict) -> str | None:
-        """获取 metadata 中 Path 的第一个节点 DID（消息最初发出者）。"""
-        path = metadata.get("Path", [])
-        if path:
-            return path[0]["Log"].get("node_did")
-        return None
+        """获取 metadata 中消息最初发出者的 DID。"""
+        return metadata.get("Origin_DID")

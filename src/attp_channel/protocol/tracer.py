@@ -26,24 +26,21 @@ class MessageTracer:
 
     @property
     def _pub_key_cache(self) -> dict:
-        """Backward-compatible access to the internal cache dict.
-
-        server.py reads tracer._pub_key_cache directly (line 194).
-        """
+        """Backward-compatible access to the internal cache dict."""
         return self._key_store.cache_dict
 
     # -- chain operations (delegated to ChainManager) --
 
-    def append_hop(self, metadata: dict, content_snapshot: str, node_did: str,
+    def append_hop(self, metadata: dict, content: str, node_did: str,
                    target_did: str, private_key_path: str,
                    save_to_db: bool = True) -> dict:
         return self._chain.append_hop(
-            metadata, content_snapshot, node_did, target_did,
+            metadata, content, node_did, target_did,
             private_key_path, save_to_db,
         )
 
-    def validate_chain(self, metadata: dict) -> bool:
-        return self._chain.validate_chain(metadata)
+    def validate_chain(self, metadata: dict, content: str) -> bool:
+        return self._chain.validate_chain(metadata, content)
 
     def get_origin_did(self, metadata: dict) -> str | None:
         return self._chain.get_origin_did(metadata)

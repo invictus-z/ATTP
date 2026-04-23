@@ -200,9 +200,14 @@ class ATTPClient:
                 metadata=metadata,
             )
 
-            # Persist updated trace path back to session
-            if "Path" in metadata:
-                session.set_trace_metadata({"Path": metadata["Path"]})
+            # Persist updated trace back to session
+            if "Latest_Hop" in metadata:
+                session.set_trace_metadata({
+                    "Latest_Hop": metadata["Latest_Hop"],
+                    "Session_ID": metadata.get("Session_ID"),
+                    "Origin_DID": metadata.get("Origin_DID"),
+                    "Genesis_Signature": metadata.get("Genesis_Signature"),
+                })
                 self._session_manager.save(session)
 
             return result if isinstance(result, str) else str(result)
@@ -247,7 +252,7 @@ class ATTPClient:
             if private_key_path:
                 metadata = tracer.append_hop(
                     metadata=metadata,
-                    content_snapshot=content[:100],
+                    content=content,
                     node_did=sender_did,
                     target_did=target_did,
                     private_key_path=private_key_path,
@@ -269,15 +274,15 @@ class ATTPClient:
             try:
                 origin_did = tracer.get_origin_did(metadata)
                 if origin_did and origin_did != sender_did:
-                    # 获取最新的 log（即 append_hop 刚添加的）
-                    path = metadata.get("Path", [])
-                    if path:
-                        latest_log = path[-1]["Log"]
+                    latest_log = metadata.get("Latest_Hop")
+                    if latest_log:
 
                         # 构造 record 消息的 metadata（只包含最新 log）
                         record_metadata = {
                             "Session_ID": metadata.get("Session_ID"),
                             "Record_Log": latest_log,
+                            "Origin_DID": metadata.get("Origin_DID"),
+                            "Genesis_Signature": metadata.get("Genesis_Signature"),
                         }
 
                         # 发送 record 类型消息到最初发出者

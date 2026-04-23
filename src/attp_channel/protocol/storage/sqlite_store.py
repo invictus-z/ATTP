@@ -19,32 +19,36 @@ class SqliteStore:
     def _init_db(self):
         with sqlite3.connect(self.db_path, timeout=10) as conn:
             conn.execute('''
-                CREATE TABLE IF NOT EXISTS traces (
+                CREATE TABLE IF NOT EXISTS traces_v2 (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     node_did TEXT,
                     target_did TEXT,
-                    entry_hash TEXT,
-                    prev_hash TEXT,
                     session_id TEXT,
                     hop_count INTEGER,
-                    content_snapshot TEXT,
                     signature TEXT,
-                    timestamp REAL
+                    timestamp REAL,
+                    origin_did TEXT,
+                    genesis_signature TEXT,
+                    content TEXT
                 )
             ''')
             conn.commit()
 
-    def save_to_db(self, node_did: str, target_did: str, entry_hash: str,
-                   prev_hash: str, session_id: str, hop_count: int,
-                   content_snapshot: str, signature: str, timestamp: float) -> None:
+    def save_to_db(self, node_did: str, target_did: str,
+                   session_id: str, hop_count: int,
+                   signature: str, timestamp: float,
+                   origin_did: str, genesis_signature: str,
+                   content: str) -> None:
         """将日志条目存入数据库。"""
         with sqlite3.connect(self.db_path, timeout=10) as conn:
             conn.execute('''
-                INSERT INTO traces (node_did, target_did, entry_hash, prev_hash,
-                                    session_id, hop_count, content_snapshot, signature, timestamp)
+                INSERT INTO traces_v2 (node_did, target_did, session_id,
+                                       hop_count, signature, timestamp,
+                                       origin_did, genesis_signature, content)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (node_did, target_did, entry_hash, prev_hash,
-                  session_id, hop_count, content_snapshot, signature, timestamp))
+            ''', (node_did, target_did, session_id, hop_count,
+                  signature, timestamp, origin_did, genesis_signature,
+                  content))
             conn.commit()
 
     def recover_trace(self, session_id: str) -> list:
@@ -52,7 +56,7 @@ class SqliteStore:
         with sqlite3.connect(self.db_path, timeout=10) as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
-                "SELECT * FROM traces WHERE session_id = ? ORDER BY hop_count DESC",
+                "SELECT * FROM traces_v2 WHERE session_id = ? ORDER BY hop_count DESC",
                 (session_id,),
             ).fetchall()
             return [dict(r) for r in rows]
@@ -65,13 +69,13 @@ class SqliteStore:
                 {
                     "node_did": str,
                     "target_did": str,
-                    "Entry_Hash": str,
-                    "Prev_Hash": str,
-                    "Session_ID": str,
                     "Hop_Count": int,
-                    "Content_Snapshot": str,
                     "Signature": str,
-                    "Timestamp": float
+                    "Timestamp": float,
+                    "Session_ID": str,
+                    "origin_did": str,
+                    "genesis_signature": str,
+                    "Content": str,
                 }
 
         Returns:
@@ -81,13 +85,13 @@ class SqliteStore:
             self.save_to_db(
                 node_did=log_entry.get("node_did"),
                 target_did=log_entry.get("target_did"),
-                entry_hash=log_entry.get("Entry_Hash"),
-                prev_hash=log_entry.get("Prev_Hash"),
                 session_id=log_entry.get("Session_ID"),
                 hop_count=log_entry.get("Hop_Count"),
-                content_snapshot=log_entry.get("Content_Snapshot"),
                 signature=log_entry.get("Signature"),
                 timestamp=log_entry.get("Timestamp"),
+                origin_did=log_entry.get("origin_did"),
+                genesis_signature=log_entry.get("genesis_signature"),
+                content=log_entry.get("Content", ""),
             )
             logger.info(
                 "Saved log to db: {} -> {}",

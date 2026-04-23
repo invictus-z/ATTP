@@ -16,12 +16,13 @@ class Session:
     updated_at: float = field(default_factory=time.time)
 
     def get_trace_metadata(self) -> dict[str, Any]:
-        """Extract trace-related keys (Path, Session_ID) from metadata."""
-        return {k: self.metadata[k] for k in ("Path", "Session_ID") if k in self.metadata}
+        """Extract trace-related keys from metadata."""
+        keys = ("Latest_Hop", "Session_ID", "Origin_DID", "Genesis_Signature")
+        return {k: self.metadata[k] for k in keys if k in self.metadata}
 
     def set_trace_metadata(self, trace_data: dict[str, Any]) -> None:
         """Merge trace keys into metadata."""
-        for k in ("Path", "Session_ID"):
+        for k in ("Latest_Hop", "Session_ID", "Origin_DID", "Genesis_Signature"):
             if k in trace_data:
                 self.metadata[k] = trace_data[k]
         self.updated_at = time.time()

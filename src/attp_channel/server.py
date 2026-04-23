@@ -176,6 +176,9 @@ class ATTPServer:
                     metadata = metadata or {}
                     record_log = metadata.get("Record_Log")
                     if record_log:
+                        # 注入 origin_did 和 genesis_signature 到 log entry
+                        record_log["origin_did"] = metadata.get("Origin_DID", "")
+                        record_log["genesis_signature"] = metadata.get("Genesis_Signature", "")
                         success = tracer.save_log_to_db(record_log)
                         if success:
                             logger.info("Record log saved from {}", sender_did)
@@ -187,17 +190,26 @@ class ATTPServer:
 
                 metadata = metadata or {}
 
-                # 预解析 Path 中所有节点的公钥并注入 tracer 缓存
-                path = metadata.get("Path", [])
-                for hop in path:
-                    node_did = hop.get("Log", {}).get("node_did")
+                # 预解析发送者和创世节点的公钥并注入 tracer 缓存
+                node_dids = set()
+
+                latest_hop = metadata.get("Latest_Hop")
+                if latest_hop:
+                    did = latest_hop.get("node_did")
+                    if did:
+                        node_dids.add(did)
+                origin_did = metadata.get("Origin_DID")
+                if origin_did:
+                    node_dids.add(origin_did)
+
+                for node_did in node_dids:
                     if node_did and node_did not in tracer._pub_key_cache:
                         pub_key = await resolve_public_key(node_did)
                         if pub_key:
                             tracer.cache_public_key(node_did, pub_key)
 
                 # 验证消息链路的完整性和真实性
-                if not tracer.validate_chain(metadata):
+                if not tracer.validate_chain(metadata, content):
                     logger.error(
                         "Security Alert: Message from {} failed "
                         "cryptographic chain validation. Task dropped.",
@@ -206,16 +218,14 @@ class ATTPServer:
                     return "REJECTED: Trace validation failed."
                 
                 # 验证通过，继续处理消息并持久化最新节点日志
-                path = metadata.get("Path", [])
-                if path:
-                    latest_node = path[-1]
-                    if isinstance(latest_node, dict):
-                        latest_log = latest_node.get("Log")
-                        if isinstance(latest_log, dict):
-                            if not tracer.save_log_to_db(latest_log):
-                                logger.warning(f"Failed to persist latest trace log from {sender_did}")
-                            else:
-                                logger.info(f"Record log saved from {sender_did}")
+                latest_log = metadata.get("Latest_Hop")
+                if isinstance(latest_log, dict):
+                    latest_log["origin_did"] = metadata.get("Origin_DID", "")
+                    latest_log["genesis_signature"] = metadata.get("Genesis_Signature", "")
+                    if not tracer.save_log_to_db(latest_log):
+                        logger.warning(f"Failed to persist latest trace log from {sender_did}")
+                    else:
+                        logger.info(f"Record log saved from {sender_did}")
 
                 try:
                     session_id = metadata.get("Session_ID")
