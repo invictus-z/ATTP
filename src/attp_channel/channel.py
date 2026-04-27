@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
 from attp_channel.logging import get_logger
@@ -21,6 +22,7 @@ from attp_channel.heartbeat import HeartbeatManager
 from attp_channel.web_app import WebApp
 from attp_channel.sessions import SessionManager
 from attp_channel.tools import SendMessageTool
+from attp_channel.protocol.tracer import MessageTracer
 
 if TYPE_CHECKING:
     from attp_channel.config.config import ATTPConfigFile
@@ -58,10 +60,16 @@ class ATTPChannel(BaseChannel):
         self._config_manager.load()
         self._attp_cfg = self._config_manager.attp_config
 
+        # 构建Tracer
+        storage_cfg = self._attp_cfg.storage
+        tracer_db_path = str(Path(storage_cfg.data_dir).expanduser() / storage_cfg.db_path)
+        self._tracer = MessageTracer(db_path=tracer_db_path)
+
         # 构建后端服务器 web_app/
         self._web_app = WebApp(
             web_config=self._attp_cfg.web_app,
-            channel_callback=self._receive
+            channel_callback=self._receive,
+            tracer=self._tracer,
         )
 
         # 构建SessionManager
@@ -72,14 +80,16 @@ class ATTPChannel(BaseChannel):
             agent_did=self._attp_cfg.did,
             client_config=self._attp_cfg.attp_client,
             session_manager=self._session_manager,
-            web_callback = self._web_app.record_message
+            web_callback = self._web_app.record_message,
+            tracer=self._tracer,
         )
         self._attp_server = ATTPServer(
-            agent_did=self._attp_cfg.did,    
+            agent_did=self._attp_cfg.did,
             server_config=self._attp_cfg.attp_server,
             session_manager=self._session_manager,
             web_callback = self._web_app.record_message,
-            attp_channel_callback = self._receive
+            attp_channel_callback = self._receive,
+            tracer=self._tracer,
         )
         self._heartbeat_manager = HeartbeatManager(
             heartbeat_config=self._attp_cfg.heartbeat,
@@ -96,7 +106,12 @@ class ATTPChannel(BaseChannel):
             tg.create_task(self._attp_server.start())
             tg.create_task(self._heartbeat_manager.start())
             tg.create_task(self._send_message_tool.start())
-            tg.create_task(self._web_app.start(self._attp_client, self._config_manager, reload_callback=self.reload))
+            tg.create_task(self._web_app.start(
+                self._attp_client, self._config_manager,
+                reload_callback=self.reload,
+                session_manager=self._session_manager,
+                agent_did=self._attp_cfg.did,
+            ))
 
         # start() must block forever (or until stop() is called).
         while self._running:

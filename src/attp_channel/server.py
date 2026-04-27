@@ -21,10 +21,11 @@ from attp_channel.logging import get_logger, UVICORN_SILENT_LOG_CONFIG
 
 logger = get_logger("Server")
 
-from attp_channel.protocol import tracer
 from attp_channel.sessions import SessionManager
+from attp_channel.sessions.node_message import NodeMessage
 if TYPE_CHECKING:
     from attp_channel.config.config import ATTPServerConfig
+    from attp_channel.protocol.tracer import MessageTracer
 
 
 class ATTPServer:
@@ -36,8 +37,10 @@ class ATTPServer:
         server_config: ATTPServerConfig,
         session_manager: SessionManager,
         web_callback=None,
-        attp_channel_callback = None
+        attp_channel_callback = None,
+        tracer: MessageTracer = None,
     ):
+        self._tracer = tracer
         self.session_manager = session_manager
         self._web_callback = web_callback
         self._attp_channel_callback = attp_channel_callback
@@ -137,7 +140,46 @@ class ATTPServer:
         web_callback = self._web_callback
         attp_channel_callback = self._attp_channel_callback
         resolve_public_key = self._resolve_public_key_for_did
-        
+        active_tracer = self._tracer
+
+        async def _verify_back_record(prev_hop: dict, session_id: str, origin_did: str) -> tuple[bool, str]:
+            """回传验证：检查 PrevHop 与已存储 record 的一致性。
+
+            Returns:
+                (True, "") 验证通过或无需验证。
+                (False, error_desc) 验证失败。
+            """
+            if not session_id or not session_manager:
+                return True, ""
+            session = session_manager.get_or_create(session_id)
+            stored = session.get_metadata("LastRecord")
+            if not stored:
+                return True, ""
+
+            # 预解析 prev_hop 节点的公钥
+            prev_node_did = prev_hop.get("node_did")
+            if prev_node_did and prev_node_did not in active_tracer._pub_key_cache:
+                pub_key = await resolve_public_key(prev_node_did)
+                if pub_key:
+                    active_tracer.cache_public_key(prev_node_did, pub_key)
+
+            ok, error = active_tracer.verify_back_propagation(
+                stored_hop=stored,
+                prev_hop=prev_hop,
+                session_id=session_id,
+                origin_did=origin_did,
+            )
+            if not ok:
+                logger.error(
+                    "Back-propagation verification failed: session={}, error={}",
+                    session_id, error,
+                )
+                session.set_metadata("VerifyStatus", f"FAILED: {error}")
+            else:
+                session.set_metadata("VerifyStatus", "OK")
+            session_manager.save(session)
+            return ok, error
+
 
         @anp_agent(AgentConfig(
             name=self.name,
@@ -175,90 +217,74 @@ class ATTPServer:
                 if message_type == "record":
                     metadata = metadata or {}
                     record_log = metadata.get("Record_Log")
+                    prev_hop = metadata.get("PrevHop")
+                    session_id = metadata.get("Session_ID")
+                    origin_did = metadata.get("Origin_DID")
+
+                    # Extract and persist NodeMessage from remote node
+                    node_msg_data = metadata.get("NodeMessage")
+                    if node_msg_data:
+                        try:
+                            node_message = NodeMessage.from_dict(node_msg_data)
+                            active_tracer.save_node_message(node_message)
+                            logger.info(
+                                "NodeMessage saved from node={}, hop={}",
+                                node_message.node_did, node_message.hop_count,
+                            )
+                        except Exception as e:
+                            logger.warning("Failed to save NodeMessage: {}", e)
+
                     if record_log:
-                        # 注入 origin_did 和 genesis_signature 到 log entry
-                        record_log["origin_did"] = metadata.get("Origin_DID", "")
-                        record_log["genesis_signature"] = metadata.get("Genesis_Signature", "")
-                        success = tracer.save_log_to_db(record_log)
-                        if success:
-                            logger.info("Record log saved from {}", sender_did)
-                            return "Record saved"
-                        else:
-                            return "Error: Failed to save record"
+                        # 注入 origin_did and session_id 到 record_log，供后续验证使用
+                        record_log["session_id"] = session_id
+                        record_log["origin_did"] = origin_did
+
+                        # 回传验证：与上次存储的 record 交叉比对
+                        if session_id and origin_did and session_manager:
+                            await _verify_back_record(prev_hop, session_id, origin_did)
+
+                            # 存储当前 record 供下次验证使用
+                            session = session_manager.get_or_create(session_id)
+                            session.set_metadata("LastRecord", record_log)
+                            session_manager.save(session)
+
+                        logger.info("Record log saved from {}", sender_did)
+                        return "Record saved"
                     return "Error: No log in record metadata"
 
+                if message_type == "agent_response":                    
+                    try:
+                        session_id = metadata.get("Session_ID")
 
-                metadata = metadata or {}
-
-                # 预解析发送者和创世节点的公钥并注入 tracer 缓存
-                node_dids = set()
-
-                latest_hop = metadata.get("Latest_Hop")
-                if latest_hop:
-                    did = latest_hop.get("node_did")
-                    if did:
-                        node_dids.add(did)
-                origin_did = metadata.get("Origin_DID")
-                if origin_did:
-                    node_dids.add(origin_did)
-
-                for node_did in node_dids:
-                    if node_did and node_did not in tracer._pub_key_cache:
-                        pub_key = await resolve_public_key(node_did)
-                        if pub_key:
-                            tracer.cache_public_key(node_did, pub_key)
-
-                # 验证消息链路的完整性和真实性
-                if not tracer.validate_chain(metadata, content):
-                    logger.error(
-                        "Security Alert: Message from {} failed "
-                        "cryptographic chain validation. Task dropped.",
-                        sender_did,
-                    )
-                    return "REJECTED: Trace validation failed."
-                
-                # 验证通过，继续处理消息并持久化最新节点日志
-                latest_log = metadata.get("Latest_Hop")
-                if isinstance(latest_log, dict):
-                    latest_log["origin_did"] = metadata.get("Origin_DID", "")
-                    latest_log["genesis_signature"] = metadata.get("Genesis_Signature", "")
-                    if not tracer.save_log_to_db(latest_log):
-                        logger.warning(f"Failed to persist latest trace log from {sender_did}")
-                    else:
-                        logger.info(f"Record log saved from {sender_did}")
-
-                try:
-                    session_id = metadata.get("Session_ID")
-
-                    # Store/update full metadata for the session
-                    if session_id and session_manager:
-                        session = session_manager.get_or_create(session_id)
-                        session.update_metadata(metadata)
-                        session_manager.save(session)
-                        logger.debug(
-                            "Session stored/updated: id={}, sender={}, metadata keys={}",
-                            session_id, sender_did, list(session.metadata.keys()),
-                        )
-                    if attp_channel_callback:
-                        await attp_channel_callback(
-                            sender=sender_did,
-                            chat_id=session_id,
-                            content=content,
-                            media=[],
-                        )
-                    
-                    # Notify UI of incoming node message
-                    if web_callback:
-                        await web_callback(content, {
-                            "is_node_message": True,
-                            "direction": "in",
-                            "other_did": sender_did,
-                            "Session_ID": metadata.get("Session_ID"),
-                        })
-                    return "Message received"
-                except Exception as e:
-                    logger.error("Error processing ATTP message: {}", e)
-                    return f"Error: {str(e)}"
+                        # Store/update full metadata for the session
+                        if session_id and session_manager:
+                            session = session_manager.get_or_create(session_id)
+                            session.update_metadata(metadata)
+                            session_manager.save(session)
+                            logger.debug(
+                                "Session stored/updated: id={}, sender={}, metadata keys={}",
+                                session_id, sender_did, list(session.metadata.keys()),
+                            )
+                        if attp_channel_callback:
+                            await attp_channel_callback(
+                                sender=sender_did,
+                                chat_id=session_id,
+                                content=content,
+                                media=[],
+                            )
+                        
+                        # Notify UI of incoming node message
+                        if web_callback:
+                            await web_callback(content, {
+                                "is_node_message": True,
+                                "direction": "in",
+                                "other_did": sender_did,
+                                "Session_ID": metadata.get("Session_ID"),
+                            })
+                        return "Message received"
+                    except Exception as e:
+                        logger.error("Error processing ATTP message: {}", e)
+                        return f"Error: {str(e)}"
 
         return Agent
 

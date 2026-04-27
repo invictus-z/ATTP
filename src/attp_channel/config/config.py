@@ -64,6 +64,12 @@ class HeartbeatConfig(ATTPBase):
     timeout: int = 90
     max_fail: int = 3
 
+class StorageConfig(ATTPBase):
+    """Storage configuration for tracer database."""
+
+    data_dir: str = Field(alias="dataDir")
+    db_path: str = Field(default="attp_traces.db", alias="dbPath")
+
 class ATTPConfigFile(ATTPBase):
     """Root model for ~/.nanobot/attp/attp_config.json."""
 
@@ -73,6 +79,7 @@ class ATTPConfigFile(ATTPBase):
     web_app: WebAppConfig = Field(default_factory=WebAppConfig)
     tool: ToolConfig = Field(default_factory=ToolConfig)
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
+    storage: StorageConfig = Field(default_factory=StorageConfig)
 
 
 def _deep_merge(base: dict, override: dict, list_strategy: str = "extend") -> dict:

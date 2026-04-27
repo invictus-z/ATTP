@@ -28,5 +28,9 @@
         "interval": 30,
         "timeout": 90,
         "maxFail": 3
+    },
+    "storage": {
+        "dataDir": "~/.nanobot",
+        "dbPath": "attp_traces.db"
     }
 }

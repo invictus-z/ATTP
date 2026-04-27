@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 import aiohttp
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -13,10 +14,10 @@ from attp_channel.logging import get_logger
 logger = get_logger("Client")
 
 from attp_channel.sessions import SessionManager
-from attp_channel.protocol import tracer
 
 if TYPE_CHECKING:
     from attp_channel.config.config import ATTPClientConfig
+    from attp_channel.protocol.tracer import MessageTracer
 
 class ATTPClient:
     """ATTP 客户端实现"""
@@ -27,15 +28,9 @@ class ATTPClient:
         client_config: ATTPClientConfig,
         session_manager: SessionManager | None = None,
         web_callback = None,
+        tracer: MessageTracer = None,
     ):
-        """Initialize ATTP client.
-
-        Args:
-            agent_did: The DID of the local agent.
-            client_config: ATTPClientConfig parsed from attp_config.json.
-            session_manager: Optional SessionManager (shared or standalone).
-            web_callback: Direct callback to WebUIChannel.send_to_ui.
-        """
+        self._tracer = tracer
         self.agent_did = agent_did
         self._session_manager = session_manager or SessionManager()
         self._web_callback = web_callback
@@ -154,6 +149,40 @@ class ATTPClient:
             return None
 
     # ------------------------------------------------------------------
+    # Behavior recording
+    # ------------------------------------------------------------------
+
+    def _record_behavior(
+        self,
+        session,
+        field_type: str,
+        content: str,
+        target: str = "",
+    ) -> None:
+        """Append a behavior entry to the session's NodeMessage and persist to DB."""
+        trace = session.get_trace_metadata()
+        origin_did = trace.get("Origin_DID", self.agent_did)
+        hop_count = session._current_hop_count()
+
+        nm = session.get_or_create_node_message(
+            node_did=self.agent_did,
+            origin_did=origin_did,
+            hop_count=hop_count,
+        )
+        nm.add_entry(field_type=field_type, content=content, target=target)
+
+        self._tracer.save_behavior_entry(
+            session_id=session.key,
+            origin_did=origin_did,
+            node_did=self.agent_did,
+            hop_count=hop_count,
+            field_type=field_type,
+            content=content,
+            target=target,
+            timestamp=time.time(),
+        )
+
+    # ------------------------------------------------------------------
     # Unified message entry-point
     # ------------------------------------------------------------------
 
@@ -175,6 +204,9 @@ class ATTPClient:
             return "Error: target, content and chat_id are all required."
 
         session = self._session_manager.get_or_create(chat_id)
+
+        # Record field a: Agent→Tool (nanobot invoked send_message_tool)
+        self._record_behavior(session=session, field_type="a", content=content, target=target)
 
         # ----- send to user -----
         if target.startswith("user:"):
@@ -201,12 +233,11 @@ class ATTPClient:
             )
 
             # Persist updated trace back to session
-            if "Latest_Hop" in metadata:
+            if "Hop" in metadata:
                 session.set_trace_metadata({
-                    "Latest_Hop": metadata["Latest_Hop"],
+                    "Hop": metadata["Hop"],
                     "Session_ID": metadata.get("Session_ID"),
-                    "Origin_DID": metadata.get("Origin_DID"),
-                    "Genesis_Signature": metadata.get("Genesis_Signature"),
+                    "Origin_DID": metadata.get("Origin_DID")
                 })
                 self._session_manager.save(session)
 
@@ -247,10 +278,11 @@ class ATTPClient:
                 return f"Error: Agent {target_did} not found or unreachable"
 
         metadata = metadata or {}
+        prev_hop = metadata.get("Hop")  # append_hop 会覆盖 Hop
         try:
             private_key_path = str(self.auth.private_key_path) if getattr(self.auth, "private_key_path", None) else None
             if private_key_path:
-                metadata = tracer.append_hop(
+                metadata = self._tracer.append_hop(
                     metadata=metadata,
                     content=content,
                     node_did=sender_did,
@@ -260,6 +292,19 @@ class ATTPClient:
         except Exception as e:
             logger.error("Failed to append tracing hop: {}", e)
             return f"Error: Tracing hook failed - {str(e)}"
+
+        # Record field d: Agent→Agent
+        hop_count = metadata["Hop"]["Hop_Count"]
+        session_id = metadata.get("Session_ID", "")
+        session = self._session_manager.get_or_create(session_id)
+        self._record_behavior(
+            session=session, field_type="d",
+            content=content, target=target_did,
+        )
+        self._session_manager.save(session)
+
+        # Retrieve the complete NodeMessage for propagation
+        node_message = session.get_node_message(hop_count)
 
         try:
             # 发送原始消息
@@ -272,17 +317,18 @@ class ATTPClient:
 
             # 向消息最初发出者发送 record 副本
             try:
-                origin_did = tracer.get_origin_did(metadata)
-                if origin_did and origin_did != sender_did:
-                    latest_log = metadata.get("Latest_Hop")
-                    if latest_log:
+                origin_did = metadata.get("Origin_DID")
+                if origin_did:
+                    record_log = metadata.get("Hop")
+                    if record_log:
 
-                        # 构造 record 消息的 metadata（只包含最新 log）
+                        # 构造 record 消息的 metadata
                         record_metadata = {
                             "Session_ID": metadata.get("Session_ID"),
-                            "Record_Log": latest_log,
+                            "Record_Log": record_log,
+                            "PrevHop": prev_hop,
                             "Origin_DID": metadata.get("Origin_DID"),
-                            "Genesis_Signature": metadata.get("Genesis_Signature"),
+                            "NodeMessage": node_message.to_dict() if node_message else None,
                         }
 
                         # 发送 record 类型消息到最初发出者
@@ -318,7 +364,6 @@ class ATTPClient:
 
     async def send_to_user(
         self,
-        channel: str,
         current_session_id: str,
         content: str,
     ) -> str:

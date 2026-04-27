@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from pathlib import Path
 import uvicorn
 from typing import TYPE_CHECKING
@@ -27,7 +28,8 @@ class WebApp():
     Focuses on enabling communication with the 'Home (Local Agent)' view.
     """
 
-    def __init__(self, web_config: WebAppConfig, channel_callback=None):
+    def __init__(self, web_config: WebAppConfig, channel_callback=None, tracer=None):
+        self._tracer = tracer
         self.host = web_config.host
         self.port = web_config.port
         self._server = None
@@ -35,6 +37,8 @@ class WebApp():
         self._clients: list[WebSocket] = []
         self._channel_callback = channel_callback
         self._app = FastAPI()
+        self._session_manager = None
+        self._agent_did = ""
 
         self._app.add_middleware(
             CORSMiddleware,
@@ -68,6 +72,9 @@ class WebApp():
                         session_id = message_data.get("Session_ID") or message_data.get("session_id", "home")
 
                         if msg_type == "chat" and content:
+                            # Record field c: User→Agent
+                            self._record_field_c(session_id, content)
+
                             if self._channel_callback:
                                 await self._channel_callback(
                                     sender="user",
@@ -86,8 +93,12 @@ class WebApp():
                 if ws in self._clients:
                     self._clients.remove(ws)
 
-    async def start(self, attp_client, attp_config_manager, reload_callback=None) -> None:
+    async def start(self, attp_client, attp_config_manager, reload_callback=None,
+                    session_manager=None, agent_did: str = "") -> None:
         """Start the FastAPI server (non-blocking)."""
+
+        self._session_manager = session_manager
+        self._agent_did = agent_did
 
         await self.mount_api(attp_client, attp_config_manager, reload_callback)
         config = uvicorn.Config(
@@ -122,7 +133,7 @@ class WebApp():
         from attp_channel.web_app.api import trace
         self._app.include_router(node_status.get_api_router(attp_client))
         self._app.include_router(config_setting.get_api_router(attp_config_manager, reload_callback))
-        self._app.include_router(trace.get_api_router())
+        self._app.include_router(trace.get_behavior_router(self._tracer))
 
         # Serve frontend static files from package-internal static/ directory
         static_dir = Path(__file__).resolve().parent / "static"
@@ -145,6 +156,17 @@ class WebApp():
         """Directly send message to UI via WebSocket."""
         session_id = metadata.get("Session_ID") if metadata else None
 
+        # Record field b: Agent→User (exclude node message notifications)
+        if session_id and not (metadata and metadata.get("is_node_message")):
+            self._record_field_b(session_id, content)
+
+        logger.debug(
+            "record_message: session={}, is_node_msg={}, clients={}",
+            session_id,
+            metadata.get("is_node_message") if metadata else None,
+            len(self._clients),
+        )
+
         payload = {
             "type": "chat",
             "sender": "Local Agent",
@@ -164,3 +186,63 @@ class WebApp():
         for client in disconnected:
             if client in self._clients:
                 self._clients.remove(client)
+
+    # ------------------------------------------------------------------
+    # Behavior recording helpers (fields b and c)
+    # ------------------------------------------------------------------
+
+    def _record_field_b(self, session_id: str, content: str) -> None:
+        """Record field b: Agent→User."""
+        if not self._session_manager:
+            return
+        session = self._session_manager.get_or_create(session_id)
+        trace = session.get_trace_metadata()
+        origin_did = trace.get("Origin_DID", self._agent_did)
+        hop_count = session._current_hop_count()
+
+        nm = session.get_or_create_node_message(
+            node_did=self._agent_did,
+            origin_did=origin_did,
+            hop_count=hop_count,
+        )
+        nm.add_entry(field_type="b", content=content)
+        self._session_manager.save(session)
+
+        self._tracer.save_behavior_entry(
+            session_id=session_id,
+            origin_did=origin_did,
+            node_did=self._agent_did,
+            hop_count=hop_count,
+            field_type="b",
+            content=content,
+            timestamp=time.time(),
+        )
+        logger.debug("Recorded field b: session={}, hop={}", session_id, hop_count)
+
+    def _record_field_c(self, session_id: str, content: str) -> None:
+        """Record field c: User→Agent."""
+        if not self._session_manager:
+            return
+        session = self._session_manager.get_or_create(session_id)
+        trace = session.get_trace_metadata()
+        origin_did = trace.get("Origin_DID", self._agent_did)
+        hop_count = session._current_hop_count()
+
+        nm = session.get_or_create_node_message(
+            node_did=self._agent_did,
+            origin_did=origin_did,
+            hop_count=hop_count,
+        )
+        nm.add_entry(field_type="c", content=content)
+        self._session_manager.save(session)
+
+        self._tracer.save_behavior_entry(
+            session_id=session_id,
+            origin_did=origin_did,
+            node_did=self._agent_did,
+            hop_count=hop_count,
+            field_type="c",
+            content=content,
+            timestamp=time.time(),
+        )
+        logger.debug("Recorded field c: session={}, hop={}", session_id, hop_count)

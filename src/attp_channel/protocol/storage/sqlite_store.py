@@ -1,9 +1,12 @@
 """数据持久化：SQLite 存储层。"""
 
+import json
 import sqlite3
 from pathlib import Path
+from typing import Any
 
 from attp_channel.logging import get_logger
+from attp_channel.sessions.node_message import NodeMessage
 
 logger = get_logger("Tracing")
 
@@ -11,93 +14,121 @@ logger = get_logger("Tracing")
 class SqliteStore:
     """SQLite-based trace log storage."""
 
-    def __init__(self, db_path: str = "attp_traces.db"):
-        self.db_path = Path.home() / ".nanobot" / db_path
+    def __init__(self, db_path: str | Path):
+        self.db_path = Path(db_path).expanduser()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
 
     def _init_db(self):
         with sqlite3.connect(self.db_path, timeout=10) as conn:
             conn.execute('''
-                CREATE TABLE IF NOT EXISTS traces_v2 (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    node_did TEXT,
-                    target_did TEXT,
-                    session_id TEXT,
-                    hop_count INTEGER,
-                    signature TEXT,
-                    timestamp REAL,
-                    origin_did TEXT,
-                    genesis_signature TEXT,
-                    content TEXT
+                CREATE TABLE IF NOT EXISTS behavior_traces (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id  TEXT NOT NULL,
+                    origin_did  TEXT NOT NULL,
+                    node_did    TEXT NOT NULL,
+                    hop_count   INTEGER NOT NULL,
+                    field_type  TEXT NOT NULL,
+                    content     TEXT,
+                    target      TEXT DEFAULT '',
+                    timestamp   REAL,
+                    extra       TEXT DEFAULT '{}'
                 )
             ''')
-            conn.commit()
-
-    def save_to_db(self, node_did: str, target_did: str,
-                   session_id: str, hop_count: int,
-                   signature: str, timestamp: float,
-                   origin_did: str, genesis_signature: str,
-                   content: str) -> None:
-        """将日志条目存入数据库。"""
-        with sqlite3.connect(self.db_path, timeout=10) as conn:
             conn.execute('''
-                INSERT INTO traces_v2 (node_did, target_did, session_id,
-                                       hop_count, signature, timestamp,
-                                       origin_did, genesis_signature, content)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (node_did, target_did, session_id, hop_count,
-                  signature, timestamp, origin_did, genesis_signature,
-                  content))
+                CREATE INDEX IF NOT EXISTS idx_bt_session
+                    ON behavior_traces(session_id, origin_did)
+            ''')
+            conn.execute('''
+                CREATE INDEX IF NOT EXISTS idx_bt_hop
+                    ON behavior_traces(session_id, origin_did, hop_count)
+            ''')
             conn.commit()
+        logger.info("Database initialized at {}", self.db_path)
 
-    def recover_trace(self, session_id: str) -> list:
-        """按 session_id 恢复所有 trace 记录，按 hop_count DESC 排序。"""
+    # -- behavior_traces (a/b/c/d) --
+
+    def save_behavior_entry(
+        self,
+        session_id: str,
+        origin_did: str,
+        node_did: str,
+        hop_count: int,
+        field_type: str,
+        content: str,
+        target: str = "",
+        timestamp: float = 0.0,
+        extra: dict[str, Any] | None = None,
+    ) -> None:
+        """Save a single a/b/c/d behavior entry."""
+        extra_json = json.dumps(extra or {}, ensure_ascii=False)
+        with sqlite3.connect(self.db_path, timeout=10) as conn:
+            conn.execute(
+                """INSERT INTO behavior_traces
+                   (session_id, origin_did, node_did, hop_count,
+                    field_type, content, target, timestamp, extra)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (session_id, origin_did, node_did, hop_count,
+                 field_type, content, target, timestamp, extra_json),
+            )
+            conn.commit()
+        logger.debug(
+            "Saved behavior entry: session={}, node={}, hop={}, field={}, target={}",
+            session_id, node_did, hop_count, field_type, target,
+        )
+
+    def save_node_message(self, node_message: NodeMessage) -> None:
+        """Bulk-save all entries from a NodeMessage (called at Genesis)."""
+        with sqlite3.connect(self.db_path, timeout=10) as conn:
+            for entry in node_message.entries:
+                extra_json = json.dumps(entry.extra, ensure_ascii=False)
+                conn.execute(
+                    """INSERT INTO behavior_traces
+                       (session_id, origin_did, node_did, hop_count,
+                        field_type, content, target, timestamp, extra)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (node_message.session_id,
+                     node_message.origin_did,
+                     node_message.node_did,
+                     node_message.hop_count,
+                     entry.field_type,
+                     entry.content,
+                     entry.target,
+                     entry.timestamp,
+                     extra_json),
+                )
+            conn.commit()
+        logger.info(
+            "Saved NodeMessage: session={}, node={}, hop={}, entries={}",
+            node_message.session_id, node_message.node_did,
+            node_message.hop_count, len(node_message.entries),
+        )
+
+    def recover_behavior_trace(
+        self,
+        session_id: str,
+        origin_did: str | None = None,
+    ) -> list[dict]:
+        """Recover all a/b/c/d entries for a session, ordered by hop_count."""
         with sqlite3.connect(self.db_path, timeout=10) as conn:
             conn.row_factory = sqlite3.Row
-            rows = conn.execute(
-                "SELECT * FROM traces_v2 WHERE session_id = ? ORDER BY hop_count DESC",
-                (session_id,),
-            ).fetchall()
-            return [dict(r) for r in rows]
-
-    def save_log_to_db(self, log_entry: dict) -> bool:
-        """将单个 log 条目存入数据库（用于 record 类型消息）。
-
-        Args:
-            log_entry: 包含日志信息的字典，格式为:
-                {
-                    "node_did": str,
-                    "target_did": str,
-                    "Hop_Count": int,
-                    "Signature": str,
-                    "Timestamp": float,
-                    "Session_ID": str,
-                    "origin_did": str,
-                    "genesis_signature": str,
-                    "Content": str,
-                }
-
-        Returns:
-            bool: 存储成功返回 True，失败返回 False
-        """
-        try:
-            self.save_to_db(
-                node_did=log_entry.get("node_did"),
-                target_did=log_entry.get("target_did"),
-                session_id=log_entry.get("Session_ID"),
-                hop_count=log_entry.get("Hop_Count"),
-                signature=log_entry.get("Signature"),
-                timestamp=log_entry.get("Timestamp"),
-                origin_did=log_entry.get("origin_did"),
-                genesis_signature=log_entry.get("genesis_signature"),
-                content=log_entry.get("Content", ""),
-            )
-            logger.info(
-                "Saved log to db: {} -> {}",
-                log_entry.get("node_did"), log_entry.get("target_did"),
-            )
-            return True
-        except Exception as e:
-            logger.error("Failed to save log to db: {}", e)
-            return False
+            if origin_did:
+                rows = conn.execute(
+                    """SELECT * FROM behavior_traces
+                       WHERE session_id = ? AND origin_did = ?
+                       ORDER BY hop_count, timestamp""",
+                    (session_id, origin_did),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """SELECT * FROM behavior_traces
+                       WHERE session_id = ?
+                       ORDER BY hop_count, timestamp""",
+                    (session_id,),
+                ).fetchall()
+            result = [dict(r) for r in rows]
+        logger.debug(
+            "Recovered behavior trace: session={}, origin={}, count={}",
+            session_id, origin_did, len(result),
+        )
+        return result

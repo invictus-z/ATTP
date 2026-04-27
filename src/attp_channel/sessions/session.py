@@ -6,6 +6,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from attp_channel.sessions.node_message import NodeMessage
+
 
 @dataclass
 class Session:
@@ -17,12 +19,12 @@ class Session:
 
     def get_trace_metadata(self) -> dict[str, Any]:
         """Extract trace-related keys from metadata."""
-        keys = ("Latest_Hop", "Session_ID", "Origin_DID", "Genesis_Signature")
+        keys = ("Hop", "Session_ID", "Origin_DID")
         return {k: self.metadata[k] for k in keys if k in self.metadata}
 
     def set_trace_metadata(self, trace_data: dict[str, Any]) -> None:
         """Merge trace keys into metadata."""
-        for k in ("Latest_Hop", "Session_ID", "Origin_DID", "Genesis_Signature"):
+        for k in ("Hop", "Session_ID", "Origin_DID"):
             if k in trace_data:
                 self.metadata[k] = trace_data[k]
         self.updated_at = time.time()
@@ -38,3 +40,38 @@ class Session:
         """Bulk-merge *data* into metadata."""
         self.metadata.update(data)
         self.updated_at = time.time()
+
+    # -- NodeMessage management --
+
+    def _current_hop_count(self) -> int:
+        """Derive the current hop_count from existing trace metadata."""
+        latest = self.metadata.get("Hop")
+        return (latest["Hop_Count"] + 1) if latest else 0
+
+    def get_or_create_node_message(
+        self,
+        node_did: str,
+        origin_did: str = "",
+        hop_count: int | None = None,
+    ) -> NodeMessage:
+        """Get or create the NodeMessage for the given hop."""
+        if hop_count is None:
+            hop_count = self._current_hop_count()
+        store_key = f"node_msg_{hop_count}"
+        nm = self.metadata.get(store_key)
+        if not isinstance(nm, NodeMessage):
+            nm = NodeMessage(
+                node_did=node_did,
+                session_id=self.key,
+                hop_count=hop_count,
+                origin_did=origin_did,
+            )
+            self.metadata[store_key] = nm
+        if origin_did and not nm.origin_did:
+            nm.origin_did = origin_did
+        return nm
+
+    def get_node_message(self, hop_count: int) -> NodeMessage | None:
+        """Retrieve the NodeMessage for a given hop."""
+        nm = self.metadata.get(f"node_msg_{hop_count}")
+        return nm if isinstance(nm, NodeMessage) else None
