@@ -39,6 +39,9 @@ class WebApp():
         self._app = FastAPI()
         self._session_manager = None
         self._agent_did = ""
+        self._active_session_id: str | None = None
+        self._on_field_c_recorded = None  # callback(session_id, content)
+        self._on_session_end = None       # callback(session_id)
 
         self._app.add_middleware(
             CORSMiddleware,
@@ -71,9 +74,27 @@ class WebApp():
                         # 兼容前端可能使用的小写，但内部统一使用大写 Session_ID
                         session_id = message_data.get("Session_ID") or message_data.get("session_id", "home")
 
+                        # Handle explicit session end
+                        if msg_type == "end_session":
+                            if self._on_session_end and session_id:
+                                await self._on_session_end(session_id)
+                            self._active_session_id = None
+                            continue
+
+                        # Detect session transition → end old session
+                        if msg_type == "chat" and self._active_session_id and session_id != self._active_session_id:
+                            if self._on_session_end:
+                                await self._on_session_end(self._active_session_id)
+
                         if msg_type == "chat" and content:
+                            self._active_session_id = session_id
+
                             # Record field c: User→Agent
                             self._record_field_c(session_id, content)
+
+                            # Notify analysis: field c recorded
+                            if self._on_field_c_recorded:
+                                await self._on_field_c_recorded(session_id, content)
 
                             if self._channel_callback:
                                 await self._channel_callback(
@@ -86,10 +107,20 @@ class WebApp():
                         logger.warning("Received invalid JSON over WebSocket")
             except WebSocketDisconnect:
                 logger.info("Client disconnected: {}", ws.client)
+                # End active session on disconnect
+                if self._active_session_id and self._on_session_end:
+                    await self._on_session_end(self._active_session_id)
+                    self._active_session_id = None
                 if ws in self._clients:
                     self._clients.remove(ws)
             except Exception as e:
                 logger.error("WebSocket error: {}", e)
+                if self._active_session_id and self._on_session_end:
+                    try:
+                        await self._on_session_end(self._active_session_id)
+                    except Exception:
+                        pass
+                    self._active_session_id = None
                 if ws in self._clients:
                     self._clients.remove(ws)
 

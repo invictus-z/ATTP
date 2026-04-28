@@ -63,3 +63,12 @@ class MessageTracer:
     def recover_behavior_trace(self, session_id: str,
                                origin_did: str | None = None) -> list:
         return self._storage.recover_behavior_trace(session_id, origin_did)
+
+    def recover_traces_since(self, session_id: str, since_id: int) -> tuple[list, int]:
+        return self._storage.recover_traces_since(session_id, since_id)
+
+    def save_analysis_report(self, report_json: str, context_summary: str = "") -> None:
+        self._storage.save_analysis_report(report_json, context_summary)
+
+    def recover_analysis_reports(self, session_id: str) -> list:
+        return self._storage.recover_analysis_reports(session_id)

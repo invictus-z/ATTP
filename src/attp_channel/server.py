@@ -39,11 +39,13 @@ class ATTPServer:
         web_callback=None,
         attp_channel_callback = None,
         tracer: MessageTracer = None,
+        on_record_received=None,
     ):
         self._tracer = tracer
         self.session_manager = session_manager
         self._web_callback = web_callback
         self._attp_channel_callback = attp_channel_callback
+        self._on_record_received = on_record_received
         self._running = False
         self._uvicorn_server = None
         self._serve_task = None
@@ -141,6 +143,7 @@ class ATTPServer:
         attp_channel_callback = self._attp_channel_callback
         resolve_public_key = self._resolve_public_key_for_did
         active_tracer = self._tracer
+        on_record_received = self._on_record_received
 
         async def _verify_back_record(prev_hop: dict, session_id: str, origin_did: str) -> tuple[bool, str]:
             """回传验证：检查 PrevHop 与已存储 record 的一致性。
@@ -249,6 +252,11 @@ class ATTPServer:
                             session_manager.save(session)
 
                         logger.info("Record log saved from {}", sender_did)
+
+                        # Notify analysis trigger
+                        if on_record_received and session_id:
+                            await on_record_received(session_id)
+
                         return "Record saved"
                     return "Error: No log in record metadata"
 

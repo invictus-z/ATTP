@@ -49,4 +49,34 @@ def get_behavior_router(tracer: MessageTracer) -> APIRouter:
                 "nodes": [],
             }
 
+    @router.get("/analysis/{session_id}")
+    async def get_analysis_reports(session_id: str):
+        """Return all semantic taint analysis reports for a session."""
+        try:
+            reports = tracer.recover_analysis_reports(session_id)
+            import json
+            parsed = []
+            for r in reports:
+                parsed.append({
+                    "id": r["id"],
+                    "batch_index": r["batch_index"],
+                    "from_trace_id": r["from_trace_id"],
+                    "to_trace_id": r["to_trace_id"],
+                    "context_summary": r.get("context_summary", ""),
+                    "timestamp": r.get("timestamp"),
+                    "report": json.loads(r["report_json"]) if r.get("report_json") else {},
+                })
+            return {
+                "session_id": session_id,
+                "reports": parsed,
+                "total_batches": len(parsed),
+            }
+        except Exception as e:
+            logger.error("Error recovering analysis reports for {}: {}", session_id, e)
+            return {
+                "session_id": session_id,
+                "reports": [],
+                "total_batches": 0,
+            }
+
     return router

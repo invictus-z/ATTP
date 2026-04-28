@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
@@ -75,6 +76,22 @@ class ATTPChannel(BaseChannel):
         # 构建SessionManager
         self._session_manager = SessionManager()
 
+        # 构建语义污点分析器
+        self._analyzer = None
+        analysis_cfg = self._attp_cfg.analysis
+        if analysis_cfg.enabled and analysis_cfg.api_key:
+            from attp_channel.analysis import SemanticTaintAnalyzer
+            self._analyzer = SemanticTaintAnalyzer(
+                api_key=analysis_cfg.api_key,
+                base_url=analysis_cfg.base_url,
+                model=analysis_cfg.model,
+            )
+            self._analysis_batch_size = analysis_cfg.report_batch_size
+            logger.info("Semantic taint analysis enabled (model={}, batch_size={})",
+                        analysis_cfg.model, analysis_cfg.report_batch_size)
+        else:
+            self._analysis_batch_size = 10
+
         # 构建所有组件
         self._attp_client = ATTPClient(
             agent_did=self._attp_cfg.did,
@@ -90,6 +107,7 @@ class ATTPChannel(BaseChannel):
             web_callback = self._web_app.record_message,
             attp_channel_callback = self._receive,
             tracer=self._tracer,
+            on_record_received=self._on_record_received,
         )
         self._heartbeat_manager = HeartbeatManager(
             heartbeat_config=self._attp_cfg.heartbeat,
@@ -99,6 +117,10 @@ class ATTPChannel(BaseChannel):
             tool_config=self._attp_cfg.tool,
             callback = self._attp_client.send_message
         )
+
+        # Wire analysis callbacks into WebApp
+        self._web_app._on_field_c_recorded = self._on_field_c_recorded
+        self._web_app._on_session_end = self._on_session_end
 
         # 并发启动所有组件 启动阶段无依赖关系
         async with asyncio.TaskGroup() as tg:
@@ -167,6 +189,22 @@ class ATTPChannel(BaseChannel):
             logger.info("SendMessageTool config changed, reloading...")
             await self._send_message_tool.reload(new_cfg.tool)
 
+        # Analysis config changed
+        if old_cfg.analysis.changed_fields(new_cfg.analysis):
+            logger.info("Analysis config changed, rebuilding analyzer...")
+            analysis_cfg = new_cfg.analysis
+            if analysis_cfg.enabled and analysis_cfg.api_key:
+                from attp_channel.analysis import SemanticTaintAnalyzer
+                self._analyzer = SemanticTaintAnalyzer(
+                    api_key=analysis_cfg.api_key,
+                    base_url=analysis_cfg.base_url,
+                    model=analysis_cfg.model,
+                )
+                self._analysis_batch_size = analysis_cfg.report_batch_size
+            else:
+                self._analyzer = None
+            logger.info("Analyzer reloaded: enabled={}", new_cfg.analysis.enabled)
+
         # WebApp config changed — cannot restart self, just update attributes
         if old_cfg.web_app.changed_fields(new_cfg.web_app):
             self._web_app.host = new_cfg.web_app.host
@@ -178,3 +216,144 @@ class ATTPChannel(BaseChannel):
 
         self._attp_cfg = new_cfg
         logger.info("hot-reload complete")
+
+    # ------------------------------------------------------------------
+    # Semantic taint analysis orchestration
+    # ------------------------------------------------------------------
+
+    async def _on_field_c_recorded(self, session_id: str, content: str) -> None:
+        """Called when a User→Agent message (field c) is recorded.
+
+        Extracts intent on the first user message of a session.
+        """
+        if not self._analyzer:
+            return
+        session = self._session_manager.get_or_create(session_id)
+        if session.get_intent():
+            return  # intent already extracted
+
+        intent = await self._analyzer.extract_intent(content)
+        if intent:
+            session.set_intent(intent.to_dict())
+            self._session_manager.save(session)
+            logger.info("Intent extracted for session={}", session_id)
+
+    async def _on_record_received(self, session_id: str) -> None:
+        """Called by server when a record message is received.
+
+        Increments report counter and triggers analysis if batch size reached.
+        """
+        if not self._analyzer:
+            return
+        session = self._session_manager.get_or_create(session_id)
+        count = session.increment_report_count()
+        self._session_manager.save(session)
+
+        if count >= self._analysis_batch_size:
+            logger.info(
+                "Report batch size reached ({}/{}), triggering analysis for session={}",
+                count, self._analysis_batch_size, session_id,
+            )
+            await self._run_analysis(session_id, is_final=False)
+
+    async def _on_session_end(self, session_id: str) -> None:
+        """Called when a session ends (user starts new session, disconnects, or explicit end).
+
+        Runs final analysis on any remaining unchecked traces.
+        """
+        if not self._analyzer:
+            return
+        session = self._session_manager.get(session_id)
+        if not session:
+            return
+        state = session.get_analysis_state()
+        if state["report_count"] > 0:
+            logger.info("Session {} ending, running final analysis", session_id)
+            await self._run_analysis(session_id, is_final=True)
+
+    async def _run_analysis(self, session_id: str, is_final: bool = False) -> None:
+        """Run semantic taint analysis for a session.
+
+        Recovers unchecked traces, calls LLM, and updates state.
+        """
+        session = self._session_manager.get_or_create(session_id)
+        state = session.get_analysis_state()
+        intent_data = state.get("intent")
+
+        if not intent_data:
+            logger.warning("Cannot run analysis for session={}: no intent extracted", session_id)
+            return
+
+        from attp_channel.analysis.models import IntentDescriptor
+        intent = IntentDescriptor.from_dict(intent_data)
+
+        # Recover unchecked traces
+        last_id = state["last_trace_id"]
+        traces, max_id = self._tracer.recover_traces_since(session_id, last_id)
+
+        if not traces:
+            session.reset_report_count()
+            self._session_manager.save(session)
+            return
+
+        batch_index = state["batch_index"] + 1
+        previous_context = state["context"]
+
+        logger.info(
+            "Running analysis: session={}, batch={}, traces={}, is_final={}",
+            session_id, batch_index, len(traces), is_final,
+        )
+
+        report = await self._analyzer.analyze(
+            session_id=session_id,
+            batch_index=batch_index,
+            from_trace_id=last_id,
+            to_trace_id=max_id,
+            traces=traces,
+            intent=intent,
+            previous_context=previous_context,
+        )
+
+        # Persist report
+        report_json = json.dumps(report.to_dict(), ensure_ascii=False)
+        self._tracer.save_analysis_report(report_json, report.context_summary)
+
+        # Update session state
+        session.reset_report_count()
+        session.update_analysis_cursor(
+            batch_index=batch_index,
+            last_trace_id=max_id,
+            context=report.context_summary,
+        )
+        self._session_manager.save(session)
+
+        # Notify user if suspicious or malicious
+        if report.overall_verdict in ("suspicious", "malicious"):
+            await self._notify_analysis_result(session_id, report)
+
+        logger.info(
+            "Analysis complete: session={}, verdict={}, nodes_checked={}",
+            session_id, report.overall_verdict, len(report.node_verdicts),
+        )
+
+    async def _notify_analysis_result(self, session_id: str, report) -> None:
+        """Push analysis result to the WebUI as a system notification."""
+        verdict = report.overall_verdict
+        summary = report.summary
+        malicious_nodes = [
+            v.node_did for v in report.node_verdicts
+            if v.severity in ("medium", "high")
+        ]
+        notification = (
+            f"[Security Alert] Semantic Taint Analysis detected: {verdict}\n"
+            f"Summary: {summary}\n"
+        )
+        if malicious_nodes:
+            notification += f"Suspicious nodes: {', '.join(malicious_nodes)}"
+
+        await self._web_app.record_message(notification, {
+            "Session_ID": session_id,
+            "is_analysis_alert": True,
+            "verdict": verdict,
+            "summary": summary,
+        })
