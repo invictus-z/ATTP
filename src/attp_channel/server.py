@@ -199,7 +199,7 @@ class ATTPServer:
                 self,
                 sender_did: str,
                 content: str,
-                message_type: str = "agent_request",
+                message_type: str,
                 metadata: dict | None = None,
             ) -> str:
                 """接收来自其他 Agent 的 ATTP 消息。
@@ -207,7 +207,7 @@ class ATTPServer:
                 Args:
                     sender_did: 发送者 DID
                     content: 消息内容
-                    message_type: 消息类型 (agent_request / agent_response / record)
+                    message_type: 消息类型 (agent_request / record)
                     metadata: 附加元数据
 
                 Returns:
@@ -252,14 +252,14 @@ class ATTPServer:
                         return "Record saved"
                     return "Error: No log in record metadata"
 
-                if message_type == "agent_response":                    
+                if message_type == "agent_request":                    
                     try:
                         session_id = metadata.get("Session_ID")
 
-                        # Store/update full metadata for the session
+                        # Store trace metadata (Hop, Session_ID, Origin_DID only)
                         if session_id and session_manager:
                             session = session_manager.get_or_create(session_id)
-                            session.update_metadata(metadata)
+                            session.set_trace_metadata(metadata)
                             session_manager.save(session)
                             logger.debug(
                                 "Session stored/updated: id={}, sender={}, metadata keys={}",
