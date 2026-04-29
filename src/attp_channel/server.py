@@ -9,7 +9,6 @@ from pathlib import Path
 import uvicorn
 from fastapi import FastAPI
 from anp.openanp import anp_agent, interface, AgentConfig
-from anp.authentication import DidWbaVerifier, DidWbaVerifierConfig
 from anp.authentication.did_wba import (
     resolve_did_wba_document,
     _extract_public_key,
@@ -46,6 +45,7 @@ class ATTPServer:
         self._web_callback = web_callback
         self._attp_channel_callback = attp_channel_callback
         self._on_record_received = on_record_received
+        self._record_cb_holder = [on_record_received]
         self._running = False
         self._uvicorn_server = None
         self._serve_task = None
@@ -71,6 +71,11 @@ class ATTPServer:
         self.description = server_config.description
         self.private_key_path = Path(server_config.private_key_path).expanduser()
         self.public_key_path = Path(server_config.public_key_path).expanduser()
+
+    def set_record_callback(self, callback) -> None:
+        """Update the on_record_received callback (used by channel for analysis wiring)."""
+        self._on_record_received = callback
+        self._record_cb_holder[0] = callback
 
     async def _resolve_public_key_for_did(self, node_did: str):
         """异步解析 DID 对应的公钥。
@@ -143,7 +148,9 @@ class ATTPServer:
         attp_channel_callback = self._attp_channel_callback
         resolve_public_key = self._resolve_public_key_for_did
         active_tracer = self._tracer
-        on_record_received = self._on_record_received
+        # Reference the instance-level mutable list so that
+        # set_record_callback() updates are always visible here.
+        _record_cb_holder = self._record_cb_holder
 
         async def _verify_back_record(prev_hop: dict, session_id: str, origin_did: str) -> tuple[bool, str]:
             """回传验证：检查 PrevHop 与已存储 record 的一致性。
@@ -254,8 +261,9 @@ class ATTPServer:
                         logger.info("Record log saved from {}", sender_did)
 
                         # Notify analysis trigger
-                        if on_record_received and session_id:
-                            await on_record_received(session_id)
+                        _record_cb = _record_cb_holder[0]
+                        if _record_cb and session_id:
+                            await _record_cb(session_id)
 
                         return "Record saved"
                     return "Error: No log in record metadata"

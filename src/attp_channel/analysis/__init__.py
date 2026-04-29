@@ -7,9 +7,11 @@ from .models import (
     NodeTaintVerdict,
     TaintReport,
 )
+from .orchestrator import AnalysisOrchestrator
 
 __all__ = [
     "SemanticTaintAnalyzer",
+    "AnalysisOrchestrator",
     "IntentDescriptor",
     "NodeBehaviorProfile",
     "NodeTaintVerdict",

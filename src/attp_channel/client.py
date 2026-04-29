@@ -210,9 +210,7 @@ class ATTPClient:
 
         # ----- send to user -----
         if target.startswith("user:"):
-            channel = target.split(":")[1] if ":" in target else "web_ui"
             return await self.send_to_user(
-                channel=channel,
                 current_session_id=chat_id,
                 content=content,
             )
