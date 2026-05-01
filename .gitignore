@@ -1,9 +1,10 @@
 ui/node_modules/
-src/attp_channel/web_app/static/
+python/attp/app/web/static/
 .vscode/
 .venv/
-src/nanobot_channel_attp.egg-info/
+python/attp.egg-info/
 __pycache__/
+dist/
 
 API.md
 CHANNEL_PLUGIN_GUIDE.md
