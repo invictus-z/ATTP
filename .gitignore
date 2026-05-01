@@ -5,6 +5,7 @@ python/attp/app/web/static/
 python/attp.egg-info/
 __pycache__/
 dist/
+ui/release/
 
 API.md
 CHANNEL_PLUGIN_GUIDE.md
