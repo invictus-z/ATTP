@@ -38,6 +38,7 @@ class WebApp():
         self._channel_callback = channel_callback
         self._app = FastAPI()
         self._session_manager = None
+        self._analysis_orchestrator = None
         self._agent_did = ""
         self._active_session_id: str | None = None
         self._on_field_c_recorded = None  # callback(session_id, content)
@@ -90,7 +91,7 @@ class WebApp():
                             self._active_session_id = session_id
 
                             # Record field c: User→Agent
-                            self._record_field_c(session_id, content)
+                            await self._record_field_c(session_id, content)
 
                             # Notify analysis: field c recorded
                             if self._on_field_c_recorded:
@@ -164,7 +165,9 @@ class WebApp():
         from attp_channel.web_app.api import trace
         self._app.include_router(node_status.get_api_router(attp_client))
         self._app.include_router(config_setting.get_api_router(attp_config_manager, reload_callback))
-        self._app.include_router(trace.get_behavior_router(self._tracer))
+        self._app.include_router(trace.get_behavior_router(
+            self._tracer, self._session_manager, self._analysis_orchestrator,
+        ))
 
         # Serve frontend static files from package-internal static/ directory
         static_dir = Path(__file__).resolve().parent / "static"
@@ -189,7 +192,7 @@ class WebApp():
 
         # Record field b: Agent→User (exclude node message notifications)
         if session_id and not (metadata and metadata.get("is_node_message")):
-            self._record_field_b(session_id, content)
+            await self._record_field_b(session_id, content)
 
         logger.debug(
             "record_message: session={}, is_node_msg={}, clients={}",
@@ -222,7 +225,7 @@ class WebApp():
     # Behavior recording helpers (fields b and c)
     # ------------------------------------------------------------------
 
-    def _record_field_b(self, session_id: str, content: str) -> None:
+    async def _record_field_b(self, session_id: str, content: str) -> None:
         """Record field b: Agent→User."""
         if not self._session_manager:
             return
@@ -239,7 +242,7 @@ class WebApp():
         nm.add_entry(field_type="b", content=content)
         self._session_manager.save(session)
 
-        self._tracer.save_behavior_entry(
+        await self._tracer.save_behavior_entry(
             session_id=session_id,
             origin_did=origin_did,
             node_did=self._agent_did,
@@ -250,7 +253,7 @@ class WebApp():
         )
         logger.debug("Recorded field b: session={}, hop={}", session_id, hop_count)
 
-    def _record_field_c(self, session_id: str, content: str) -> None:
+    async def _record_field_c(self, session_id: str, content: str) -> None:
         """Record field c: User→Agent."""
         if not self._session_manager:
             return
@@ -267,7 +270,7 @@ class WebApp():
         nm.add_entry(field_type="c", content=content)
         self._session_manager.save(session)
 
-        self._tracer.save_behavior_entry(
+        await self._tracer.save_behavior_entry(
             session_id=session_id,
             origin_did=origin_did,
             node_did=self._agent_did,

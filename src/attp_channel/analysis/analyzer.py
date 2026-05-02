@@ -9,6 +9,7 @@ from openai import AsyncOpenAI
 
 from attp_channel.logging import get_logger
 from attp_channel.analysis.models import (
+    EvidenceItem,
     IntentDescriptor,
     NodeBehaviorProfile,
     NodeTaintVerdict,
@@ -101,6 +102,13 @@ class SemanticTaintAnalyzer:
 
             verdicts = []
             for v in result.get("node_verdicts", []):
+                evidence_text = v.get("evidence", "")
+                evidence_items = []
+                for ref in v.get("evidence_refs", []):
+                    evidence_items.append(EvidenceItem(
+                        description=ref.get("reason", evidence_text),
+                        trace_ids=[ref.get("trace_id", 0)],
+                    ))
                 verdicts.append(NodeTaintVerdict(
                     node_did=v.get("node_did", ""),
                     hop_count=v.get("hop_count", 0),
@@ -108,7 +116,8 @@ class SemanticTaintAnalyzer:
                     deviation_type=v.get("deviation_type", "none"),
                     influence_detected=v.get("influence_detected", False),
                     influence_type=v.get("influence_type", "none"),
-                    evidence=v.get("evidence", ""),
+                    evidence=evidence_text,
+                    evidence_items=evidence_items,
                     severity=v.get("severity", "none"),
                     taint_score=v.get("taint_score", 0.0),
                 ))
@@ -149,6 +158,7 @@ class SemanticTaintAnalyzer:
                 )
             profile = profiles_map[key]
             entry = {
+                "id": row.get("id", 0),
                 "content": row.get("content", ""),
                 "target": row.get("target", ""),
                 "timestamp": row.get("timestamp"),
@@ -170,7 +180,7 @@ class SemanticTaintAnalyzer:
             for d in p.field_d:
                 target = d.get("target", "")
                 target_short = target.split(":")[-1] if ":" in target else target
-                lines.append(f"Node [{node}] (hop={p.hop_count}) --(d)--> Node [{target_short}]")
+                lines.append(f"Node [{node}] (hop={p.hop_count}) --(d, trace#{d.get('id', '?')})--> Node [{target_short}]")
         return "\n".join(lines) if lines else "无节点间消息传递"
 
     def _format_behaviors(self, profiles: list[NodeBehaviorProfile]) -> str:
@@ -181,14 +191,14 @@ class SemanticTaintAnalyzer:
             if p.field_a:
                 section += "**Agent->Tool 调用:**\n"
                 for a in p.field_a:
-                    section += f'  - 目标: {a["target"]}, 内容: {a["content"][:300]}\n'
+                    section += f'  - [trace#{a["id"]}] 目标: {a["target"]}, 内容: {a["content"][:300]}\n'
             if p.field_b:
                 section += "**Agent->User 回复:**\n"
                 for b in p.field_b:
-                    section += f'  - 内容: {b["content"][:300]}\n'
+                    section += f'  - [trace#{b["id"]}] 内容: {b["content"][:300]}\n'
             if p.field_d:
                 section += "**Agent->Agent 消息:**\n"
                 for d in p.field_d:
-                    section += f'  - 目标: {d["target"]}, 内容: {d["content"][:300]}\n'
+                    section += f'  - [trace#{d["id"]}] 目标: {d["target"]}, 内容: {d["content"][:300]}\n'
             parts.append(section)
         return "\n".join(parts)

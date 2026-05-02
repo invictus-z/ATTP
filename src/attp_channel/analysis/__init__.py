@@ -2,6 +2,7 @@
 
 from .analyzer import SemanticTaintAnalyzer
 from .models import (
+    EvidenceItem,
     IntentDescriptor,
     NodeBehaviorProfile,
     NodeTaintVerdict,
@@ -12,6 +13,7 @@ from .orchestrator import AnalysisOrchestrator
 __all__ = [
     "SemanticTaintAnalyzer",
     "AnalysisOrchestrator",
+    "EvidenceItem",
     "IntentDescriptor",
     "NodeBehaviorProfile",
     "NodeTaintVerdict",

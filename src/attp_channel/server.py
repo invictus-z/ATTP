@@ -44,7 +44,6 @@ class ATTPServer:
         self.session_manager = session_manager
         self._web_callback = web_callback
         self._attp_channel_callback = attp_channel_callback
-        self._on_record_received = on_record_received
         self._record_cb_holder = [on_record_received]
         self._running = False
         self._uvicorn_server = None
@@ -74,7 +73,6 @@ class ATTPServer:
 
     def set_record_callback(self, callback) -> None:
         """Update the on_record_received callback (used by channel for analysis wiring)."""
-        self._on_record_received = callback
         self._record_cb_holder[0] = callback
 
     async def _resolve_public_key_for_did(self, node_did: str):
@@ -209,7 +207,7 @@ class ATTPServer:
                 self,
                 sender_did: str,
                 content: str,
-                message_type: str = "agent_request",
+                message_type: str,
                 metadata: dict | None = None,
             ) -> str:
                 """接收来自其他 Agent 的 ATTP 消息。
@@ -217,7 +215,7 @@ class ATTPServer:
                 Args:
                     sender_did: 发送者 DID
                     content: 消息内容
-                    message_type: 消息类型 (agent_request / agent_response / record)
+                    message_type: 消息类型 (agent_request / record)
                     metadata: 附加元数据
 
                 Returns:
@@ -236,7 +234,7 @@ class ATTPServer:
                     if node_msg_data:
                         try:
                             node_message = NodeMessage.from_dict(node_msg_data)
-                            active_tracer.save_node_message(node_message)
+                            await active_tracer.save_node_message(node_message)
                             logger.info(
                                 "NodeMessage saved from node={}, hop={}",
                                 node_message.node_did, node_message.hop_count,
@@ -268,14 +266,14 @@ class ATTPServer:
                         return "Record saved"
                     return "Error: No log in record metadata"
 
-                if message_type == "agent_response":                    
+                if message_type == "agent_request":                    
                     try:
                         session_id = metadata.get("Session_ID")
 
-                        # Store/update full metadata for the session
+                        # Store trace metadata (Hop, Session_ID, Origin_DID only)
                         if session_id and session_manager:
                             session = session_manager.get_or_create(session_id)
-                            session.update_metadata(metadata)
+                            session.set_trace_metadata(metadata)
                             session_manager.save(session)
                             logger.debug(
                                 "Session stored/updated: id={}, sender={}, metadata keys={}",

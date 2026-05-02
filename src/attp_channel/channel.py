@@ -63,7 +63,7 @@ class ATTPChannel(BaseChannel):
         # 构建Tracer
         storage_cfg = self._attp_cfg.storage
         tracer_db_path = str(Path(storage_cfg.data_dir).expanduser() / storage_cfg.db_path)
-        self._tracer = MessageTracer(db_path=tracer_db_path)
+        self._tracer = await MessageTracer.create(db_path=tracer_db_path)
 
         # 构建后端服务器 web_app/
         self._web_app = WebApp(
@@ -106,6 +106,7 @@ class ATTPChannel(BaseChannel):
             self._attp_server.set_record_callback(self._analysis_orchestrator.on_record_received)
             self._web_app._on_field_c_recorded = self._analysis_orchestrator.on_field_c_recorded
             self._web_app._on_session_end = self._analysis_orchestrator.on_session_end
+        self._web_app._analysis_orchestrator = self._analysis_orchestrator
 
         # 并发启动所有组件 启动阶段无依赖关系
         async with asyncio.TaskGroup() as tg:
@@ -186,6 +187,7 @@ class ATTPChannel(BaseChannel):
                 self._attp_server.set_record_callback(None)
                 self._web_app._on_field_c_recorded = None
                 self._web_app._on_session_end = None
+            self._web_app._analysis_orchestrator = self._analysis_orchestrator
             logger.info("Analyzer reloaded: enabled={}", new_cfg.analysis.enabled)
 
         # WebApp config changed — cannot restart self, just update attributes
