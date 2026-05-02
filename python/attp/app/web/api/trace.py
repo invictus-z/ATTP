@@ -1,7 +1,7 @@
 from datetime import datetime
 from fastapi import APIRouter
 
-from attp.core.logging import get_logger
+from attp.app.logging import get_logger
 from attp.core.tracer import MessageTracer
 
 logger = get_logger("Tracing")

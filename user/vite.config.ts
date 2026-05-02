@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite'
 
 export default defineConfig({
+  base: './',
   server: {
     proxy: {
       '/api': {
@@ -14,7 +15,7 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: '../src/attp_channel/web_app/static',
+    outDir: 'dist',
     emptyOutDir: true,
   },
 })

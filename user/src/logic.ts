@@ -1,3 +1,5 @@
+import { apiUrl, getActiveAgent } from './agent_manager';
+
 let currentTraceData: any[] = [];
 let currentTracePage = 0;
 const TRACE_ITEMS_PER_PAGE = 2; // Number of items per page
@@ -180,7 +182,7 @@ window.toggleNodes = function () {
   
   // Fetch real data
   try {
-      const res = await fetch(`/api/traces/${sessionId}`);
+      const res = await fetch(apiUrl(`/api/traces/${sessionId}`));
       const data = await res.json();
       if (container) {
           if (!data.Path || data.Path.length === 0) {
@@ -467,8 +469,10 @@ window.filterSessions = function (event: any) {
 
 
 (window as any).renderDynamicNodes = async function() {
+    // Only fetch nodes when an agent is active
+    if (!getActiveAgent()) return;
     try {
-        const res = await fetch('/api/nodes');
+        const res = await fetch(apiUrl('/api/nodes'));
         const data = await res.json();
         const nodesList = document.getElementById('nodes-list');
         if (!nodesList) return;
@@ -562,9 +566,11 @@ window.filterSessions = function (event: any) {
     (window as any).switchPage('view-node-sec', btnId);
 };
 
-// Auto fetch nodes on load
+// Auto fetch nodes on load (only if an agent is active)
 setTimeout(() => {
-    if ((window as any).renderDynamicNodes) (window as any).renderDynamicNodes();
+    if (getActiveAgent() && (window as any).renderDynamicNodes) {
+        (window as any).renderDynamicNodes();
+    }
 }, 500);
 
 // ============================================================================
@@ -697,7 +703,7 @@ function _collectNodeAds(): string[] {
     formContainer.classList.add('hidden');
 
     try {
-        const res = await fetch('/api/config');
+        const res = await fetch(apiUrl('/api/config'));
         const data = await res.json();
 
         if (data.error || !data.config) {
@@ -757,7 +763,7 @@ function _collectNodeAds(): string[] {
 (window as any).refreshSettingsConfig = async function() {
     // Re-read config from disk (no hot-reload)
     try {
-        const res = await fetch('/api/config?refresh=true');
+        const res = await fetch(apiUrl('/api/config?refresh=true'));
         const data = await res.json();
 
         if (data.error) {
@@ -841,7 +847,7 @@ function _collectNodeAds(): string[] {
     if (window.lucide) window.lucide.createIcons();
 
     try {
-        const res = await fetch('/api/config', {
+        const res = await fetch(apiUrl('/api/config'), {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
@@ -880,7 +886,7 @@ function _collectNodeAds(): string[] {
     if (window.lucide) window.lucide.createIcons();
 
     try {
-        const res = await fetch('/api/config/reload', { method: 'POST' });
+        const res = await fetch(apiUrl('/api/config/reload'), { method: 'POST' });
         const data = await res.json();
 
         if (data.success) {

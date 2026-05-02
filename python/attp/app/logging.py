@@ -58,7 +58,7 @@ def get_logger(component: str) -> _ComponentLogger:
 
     Example::
 
-        from attp.core.logging import get_logger
+        from attp.app.logging import get_logger
         log = get_logger("Server")
         log.info("started on {}:{}", "0.0.0.0", 8000)
         # 输出: ... | INFO | ... - [ATTP Server] started on 0.0.0.0:8000

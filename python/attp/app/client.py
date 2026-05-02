@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from anp.openanp import RemoteAgent
 from anp.authentication import DIDWbaAuthHeader
-from attp.core.logging import get_logger
+from attp.app.logging import get_logger
 
 logger = get_logger("Client")
 

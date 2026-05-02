@@ -1,10 +1,10 @@
-ui/node_modules/
-python/attp/app/web/static/
 .vscode/
 .venv/
+
 python/attp.egg-info/
 __pycache__/
 dist/
 
-API.md
-CHANNEL_PLUGIN_GUIDE.md
+user/release/
+user/dist/
+user/node_modules/
