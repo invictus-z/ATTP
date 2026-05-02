@@ -2,7 +2,7 @@
 
 import time
 
-from attp.core.logging import get_logger
+from attp.app.logging import get_logger
 from attp.core.authentication import KeyStore
 from attp.core.authentication import sign_hash, verify_signature
 from attp.core.provenance import calculate_genesis_hash, calculate_hop_hash

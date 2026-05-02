@@ -6,7 +6,7 @@ import asyncio
 from typing import TYPE_CHECKING
 
 from anp.openanp import RemoteAgent
-from attp.core.logging import get_logger
+from attp.app.logging import get_logger
 
 logger = get_logger("Heartbeat")
 

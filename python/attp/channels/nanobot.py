@@ -4,7 +4,7 @@ import asyncio
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
-from attp.core.logging import get_logger
+from attp.app.logging import get_logger
 
 logger = get_logger("Channel")
 

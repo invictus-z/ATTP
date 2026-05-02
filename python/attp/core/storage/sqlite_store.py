@@ -5,7 +5,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-from attp.core.logging import get_logger
+from attp.app.logging import get_logger
 from attp.core.sessions.node_message import NodeMessage
 
 logger = get_logger("Tracing")

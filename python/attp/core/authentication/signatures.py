@@ -5,7 +5,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding, rsa, ec
 from cryptography.exceptions import InvalidSignature
 
-from attp.core.logging import get_logger
+from attp.app.logging import get_logger
 
 logger = get_logger("Tracing")
 

@@ -9,7 +9,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from attp.core.logging import get_logger
+from attp.app.logging import get_logger
 from pydantic.alias_generators import to_camel
 
 logger = get_logger("Config")

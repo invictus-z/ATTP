@@ -3,7 +3,7 @@ import copy
 from fastapi import APIRouter, Query, Request
 from typing import Any
 
-from attp.core.logging import get_logger
+from attp.app.logging import get_logger
 
 logger = get_logger("Config")
 

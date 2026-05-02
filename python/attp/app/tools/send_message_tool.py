@@ -8,7 +8,7 @@ from typing import Callable, Awaitable
 import uvicorn
 from mcp.server.fastmcp import FastMCP
 
-from attp.core.logging import get_logger, UVICORN_SILENT_LOG_CONFIG
+from attp.app.logging import get_logger, UVICORN_SILENT_LOG_CONFIG
 
 logger = get_logger("Tool")
 

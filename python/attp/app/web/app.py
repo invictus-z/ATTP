@@ -12,7 +12,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-from attp.core.logging import get_logger, UVICORN_SILENT_LOG_CONFIG
+from attp.app.logging import get_logger, UVICORN_SILENT_LOG_CONFIG
 
 logger = get_logger("WebUI")
 

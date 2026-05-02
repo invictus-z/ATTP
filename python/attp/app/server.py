@@ -17,7 +17,7 @@ from anp.authentication.did_wba import (
 )
 from typing import TYPE_CHECKING
 
-from attp.core.logging import get_logger, UVICORN_SILENT_LOG_CONFIG
+from attp.app.logging import get_logger, UVICORN_SILENT_LOG_CONFIG
 
 logger = get_logger("Server")
 
