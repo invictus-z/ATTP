@@ -63,7 +63,7 @@ class ATTPChannel(BaseChannel):
         # 构建Tracer
         storage_cfg = self._attp_cfg.storage
         tracer_db_path = str(Path(storage_cfg.data_dir).expanduser() / storage_cfg.db_path)
-        self._tracer = MessageTracer(db_path=tracer_db_path)
+        self._tracer = await MessageTracer.create(db_path=tracer_db_path)
 
         # 构建后端服务器 web_app/
         self._web_app = WebApp(
@@ -99,6 +99,14 @@ class ATTPChannel(BaseChannel):
             tool_config=self._attp_cfg.tool,
             callback = self._attp_client.send_message
         )
+
+        # 构建语义污点分析编排器
+        self._analysis_orchestrator = self._build_analysis_orchestrator()
+        if self._analysis_orchestrator:
+            self._attp_server.set_record_callback(self._analysis_orchestrator.on_record_received)
+            self._web_app._on_field_c_recorded = self._analysis_orchestrator.on_field_c_recorded
+            self._web_app._on_session_end = self._analysis_orchestrator.on_session_end
+        self._web_app._analysis_orchestrator = self._analysis_orchestrator
 
         # 并发启动所有组件 启动阶段无依赖关系
         async with asyncio.TaskGroup() as tg:
@@ -167,6 +175,21 @@ class ATTPChannel(BaseChannel):
             logger.info("SendMessageTool config changed, reloading...")
             await self._send_message_tool.reload(new_cfg.tool)
 
+        # Analysis config changed — rebuild orchestrator
+        if old_cfg.analysis.changed_fields(new_cfg.analysis):
+            logger.info("Analysis config changed, rebuilding orchestrator...")
+            self._analysis_orchestrator = self._build_analysis_orchestrator(new_cfg)
+            if self._analysis_orchestrator:
+                self._attp_server.set_record_callback(self._analysis_orchestrator.on_record_received)
+                self._web_app._on_field_c_recorded = self._analysis_orchestrator.on_field_c_recorded
+                self._web_app._on_session_end = self._analysis_orchestrator.on_session_end
+            else:
+                self._attp_server.set_record_callback(None)
+                self._web_app._on_field_c_recorded = None
+                self._web_app._on_session_end = None
+            self._web_app._analysis_orchestrator = self._analysis_orchestrator
+            logger.info("Analyzer reloaded: enabled={}", new_cfg.analysis.enabled)
+
         # WebApp config changed — cannot restart self, just update attributes
         if old_cfg.web_app.changed_fields(new_cfg.web_app):
             self._web_app.host = new_cfg.web_app.host
@@ -178,3 +201,32 @@ class ATTPChannel(BaseChannel):
 
         self._attp_cfg = new_cfg
         logger.info("hot-reload complete")
+
+    # ------------------------------------------------------------------
+    # Analysis orchestrator factory
+    # ------------------------------------------------------------------
+
+    def _build_analysis_orchestrator(self, cfg: ATTPConfigFile | None = None):
+        """Create an AnalysisOrchestrator from config, or return None if disabled."""
+        cfg = cfg or self._attp_cfg
+        analysis_cfg = cfg.analysis
+        if not analysis_cfg.enabled or not analysis_cfg.api_key:
+            return None
+
+        from attp_channel.analysis import SemanticTaintAnalyzer, AnalysisOrchestrator
+        analyzer = SemanticTaintAnalyzer(
+            api_key=analysis_cfg.api_key,
+            base_url=analysis_cfg.base_url,
+            model=analysis_cfg.model,
+        )
+        logger.info(
+            "Semantic taint analysis enabled (model={}, batch_size={})",
+            analysis_cfg.model, analysis_cfg.report_batch_size,
+        )
+        return AnalysisOrchestrator(
+            analyzer=analyzer,
+            session_manager=self._session_manager,
+            tracer=self._tracer,
+            web_app=self._web_app,
+            batch_size=analysis_cfg.report_batch_size,
+        )

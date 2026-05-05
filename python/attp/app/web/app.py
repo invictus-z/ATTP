@@ -38,7 +38,11 @@ class WebApp():
         self._channel_callback = channel_callback
         self._app = FastAPI()
         self._session_manager = None
+        self._analysis_orchestrator = None
         self._agent_did = ""
+        self._active_session_id: str | None = None
+        self._on_field_c_recorded = None  # callback(session_id, content)
+        self._on_session_end = None       # callback(session_id)
 
         self._app.add_middleware(
             CORSMiddleware,
@@ -71,9 +75,27 @@ class WebApp():
                         # 兼容前端可能使用的小写，但内部统一使用大写 Session_ID
                         session_id = message_data.get("Session_ID") or message_data.get("session_id", "home")
 
+                        # Handle explicit session end
+                        if msg_type == "end_session":
+                            if self._on_session_end and session_id:
+                                await self._on_session_end(session_id)
+                            self._active_session_id = None
+                            continue
+
+                        # Detect session transition → end old session
+                        if msg_type == "chat" and self._active_session_id and session_id != self._active_session_id:
+                            if self._on_session_end:
+                                await self._on_session_end(self._active_session_id)
+
                         if msg_type == "chat" and content:
+                            self._active_session_id = session_id
+
                             # Record field U2A: User→Agent
-                            self._record_field_c(session_id, content)
+                            await self._record_field_c(session_id, content)
+
+                            # Notify analysis: field c recorded
+                            if self._on_field_c_recorded:
+                                await self._on_field_c_recorded(session_id, content)
 
                             if self._channel_callback:
                                 await self._channel_callback(
@@ -86,10 +108,20 @@ class WebApp():
                         logger.warning("Received invalid JSON over WebSocket")
             except WebSocketDisconnect:
                 logger.info("Client disconnected: {}", ws.client)
+                # End active session on disconnect
+                if self._active_session_id and self._on_session_end:
+                    await self._on_session_end(self._active_session_id)
+                    self._active_session_id = None
                 if ws in self._clients:
                     self._clients.remove(ws)
             except Exception as e:
                 logger.error("WebSocket error: {}", e)
+                if self._active_session_id and self._on_session_end:
+                    try:
+                        await self._on_session_end(self._active_session_id)
+                    except Exception:
+                        pass
+                    self._active_session_id = None
                 if ws in self._clients:
                     self._clients.remove(ws)
 
@@ -133,7 +165,9 @@ class WebApp():
         from attp.app.web.api import trace
         self._app.include_router(node_status.get_api_router(attp_client))
         self._app.include_router(config_setting.get_api_router(attp_config_manager, reload_callback))
-        self._app.include_router(trace.get_behavior_router(self._tracer))
+        self._app.include_router(trace.get_behavior_router(
+            self._tracer, self._session_manager, self._analysis_orchestrator,
+        ))
 
         # Serve frontend static files from package-internal static/ directory
         static_dir = Path(__file__).resolve().parent / "static"
@@ -158,7 +192,7 @@ class WebApp():
 
         # Record field A2U: Agent→User (exclude node message notifications)
         if session_id and not (metadata and metadata.get("is_node_message")):
-            self._record_field_b(session_id, content)
+            await self._record_field_b(session_id, content)
 
         logger.debug(
             "record_message: session={}, is_node_msg={}, clients={}",
@@ -191,7 +225,7 @@ class WebApp():
     # Behavior recording helpers (fields A2U and U2A)
     # ------------------------------------------------------------------
 
-    def _record_field_b(self, session_id: str, content: str) -> None:
+    async def _record_field_b(self, session_id: str, content: str) -> None:
         """Record field A2U: Agent→User."""
         if not self._session_manager:
             return
@@ -208,7 +242,7 @@ class WebApp():
         nm.add_entry(field_type="A2U", content=content)
         self._session_manager.save(session)
 
-        self._tracer.save_behavior_entry(
+        await self._tracer.save_behavior_entry(
             session_id=session_id,
             origin_did=origin_did,
             node_did=self._agent_did,
@@ -219,7 +253,7 @@ class WebApp():
         )
         logger.debug("Recorded field A2U: session={}, hop={}", session_id, hop_count)
 
-    def _record_field_c(self, session_id: str, content: str) -> None:
+    async def _record_field_c(self, session_id: str, content: str) -> None:
         """Record field U2A: User→Agent."""
         if not self._session_manager:
             return
@@ -236,7 +270,7 @@ class WebApp():
         nm.add_entry(field_type="U2A", content=content)
         self._session_manager.save(session)
 
-        self._tracer.save_behavior_entry(
+        await self._tracer.save_behavior_entry(
             session_id=session_id,
             origin_did=origin_did,
             node_did=self._agent_did,

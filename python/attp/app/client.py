@@ -152,7 +152,7 @@ class ATTPClient:
     # Behavior recording
     # ------------------------------------------------------------------
 
-    def _record_behavior(
+    async def _record_behavior(
         self,
         session,
         field_type: str,
@@ -171,7 +171,7 @@ class ATTPClient:
         )
         nm.add_entry(field_type=field_type, content=content, target=target)
 
-        self._tracer.save_behavior_entry(
+        await self._tracer.save_behavior_entry(
             session_id=session.key,
             origin_did=origin_did,
             node_did=self.agent_did,
@@ -206,13 +206,11 @@ class ATTPClient:
         session = self._session_manager.get_or_create(chat_id)
 
         # Record field A2T: Agent→Tool (nanobot invoked send_message_tool)
-        self._record_behavior(session=session, field_type="A2T", content=content, target=target)
+        await self._record_behavior(session=session, field_type="A2T", content=content, target=target)
 
         # ----- send to user -----
         if target.startswith("user:"):
-            channel = target.split(":")[1] if ":" in target else "web_ui"
             return await self.send_to_user(
-                channel=channel,
                 current_session_id=chat_id,
                 content=content,
             )
@@ -297,7 +295,7 @@ class ATTPClient:
         hop_count = metadata["Hop"]["Hop_Count"]
         session_id = metadata.get("Session_ID", "")
         session = self._session_manager.get_or_create(session_id)
-        self._record_behavior(
+        await self._record_behavior(
             session=session, field_type="A2A",
             content=content, target=target_did,
         )

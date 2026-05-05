@@ -32,5 +32,12 @@
     "storage": {
         "dataDir": "~/.nanobot",
         "dbPath": "attp_traces.db"
+    },
+    "analysis": {
+        "enabled": false,
+        "apiKey": "",
+        "baseUrl": "https://api.openai.com/v1",
+        "model": "gpt-4o",
+        "reportBatchSize": 10
     }
 }

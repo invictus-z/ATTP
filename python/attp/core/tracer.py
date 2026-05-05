@@ -1,5 +1,7 @@
 """Facade 门面模式：组合 authentication / provenance / storage 子模块。"""
 
+from __future__ import annotations
+
 from attp.core.authentication import KeyStore
 from attp.core.provenance import ChainManager
 from attp.core.storage import SqliteStore
@@ -11,8 +13,16 @@ class MessageTracer:
 
     def __init__(self, db_path: str):
         self._key_store = KeyStore()
-        self._storage = SqliteStore(db_path=db_path)
         self._chain = ChainManager(key_store=self._key_store)
+        self._storage: SqliteStore | None = None
+        self._db_path = db_path
+
+    @classmethod
+    async def create(cls, db_path: str) -> MessageTracer:
+        """Async factory: construct instance and initialise storage."""
+        tracer = cls(db_path)
+        tracer._storage = await SqliteStore.create(db_path)
+        return tracer
 
     # -- key management (delegated to KeyStore) --
 
@@ -47,19 +57,28 @@ class MessageTracer:
 
     # -- behavior traces (a/b/c/d) --
 
-    def save_behavior_entry(self, session_id: str, origin_did: str,
-                            node_did: str, hop_count: int,
-                            field_type: str, content: str,
-                            target: str = "", timestamp: float = 0.0,
-                            extra: dict | None = None) -> None:
-        self._storage.save_behavior_entry(
+    async def save_behavior_entry(self, session_id: str, origin_did: str,
+                                  node_did: str, hop_count: int,
+                                  field_type: str, content: str,
+                                  target: str = "", timestamp: float = 0.0,
+                                  extra: dict | None = None) -> None:
+        await self._storage.save_behavior_entry(
             session_id, origin_did, node_did, hop_count,
             field_type, content, target, timestamp, extra,
         )
 
-    def save_node_message(self, node_message: NodeMessage) -> None:
-        self._storage.save_node_message(node_message)
+    async def save_node_message(self, node_message: NodeMessage) -> None:
+        await self._storage.save_node_message(node_message)
 
-    def recover_behavior_trace(self, session_id: str,
-                               origin_did: str | None = None) -> list:
-        return self._storage.recover_behavior_trace(session_id, origin_did)
+    async def recover_behavior_trace(self, session_id: str,
+                                     origin_did: str | None = None) -> list:
+        return await self._storage.recover_behavior_trace(session_id, origin_did)
+
+    async def recover_traces_since(self, session_id: str, since_id: int) -> tuple[list, int]:
+        return await self._storage.recover_traces_since(session_id, since_id)
+
+    async def save_analysis_report(self, report_json: str) -> None:
+        await self._storage.save_analysis_report(report_json)
+
+    async def recover_analysis_reports(self, session_id: str) -> list:
+        return await self._storage.recover_analysis_reports(session_id)
