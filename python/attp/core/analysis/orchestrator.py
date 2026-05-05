@@ -7,14 +7,14 @@ import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from attp_channel.logging import get_logger
-from attp_channel.analysis.models import IntentDescriptor, TaintReport
+from attp.app.logging import get_logger
+from attp.core.analysis.models import IntentDescriptor, TaintReport
 
 if TYPE_CHECKING:
-    from attp_channel.analysis.analyzer import SemanticTaintAnalyzer
-    from attp_channel.protocol.tracer import MessageTracer
-    from attp_channel.sessions import SessionManager
-    from attp_channel.web_app import WebApp
+    from attp.core.analysis.analyzer import SemanticTaintAnalyzer
+    from attp.core.tracer import MessageTracer
+    from attp.core.sessions import SessionManager
+    from attp.app.web import WebApp
 
 logger = get_logger("Analysis")
 

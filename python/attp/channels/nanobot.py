@@ -213,7 +213,7 @@ class ATTPChannel(BaseChannel):
         if not analysis_cfg.enabled or not analysis_cfg.api_key:
             return None
 
-        from attp_channel.analysis import SemanticTaintAnalyzer, AnalysisOrchestrator
+        from attp.core.analysis import SemanticTaintAnalyzer, AnalysisOrchestrator
         analyzer = SemanticTaintAnalyzer(
             api_key=analysis_cfg.api_key,
             base_url=analysis_cfg.base_url,

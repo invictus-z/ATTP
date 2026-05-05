@@ -7,15 +7,15 @@ from typing import Any
 
 from openai import AsyncOpenAI
 
-from attp_channel.logging import get_logger
-from attp_channel.analysis.models import (
+from attp.app.logging import get_logger
+from attp.core.analysis.models import (
     EvidenceItem,
     IntentDescriptor,
     NodeBehaviorProfile,
     NodeTaintVerdict,
     TaintReport,
 )
-from attp_channel.analysis.prompts import INTENT_EXTRACTION_PROMPT, ANALYSIS_PROMPT
+from attp.core.analysis.prompts import INTENT_EXTRACTION_PROMPT, ANALYSIS_PROMPT
 
 logger = get_logger("Analysis")
 
