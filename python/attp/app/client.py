@@ -205,8 +205,8 @@ class ATTPClient:
 
         session = self._session_manager.get_or_create(chat_id)
 
-        # Record field a: Agent→Tool (nanobot invoked send_message_tool)
-        self._record_behavior(session=session, field_type="a", content=content, target=target)
+        # Record field A2T: Agent→Tool (nanobot invoked send_message_tool)
+        self._record_behavior(session=session, field_type="A2T", content=content, target=target)
 
         # ----- send to user -----
         if target.startswith("user:"):
@@ -293,12 +293,12 @@ class ATTPClient:
             logger.error("Failed to append tracing hop: {}", e)
             return f"Error: Tracing hook failed - {str(e)}"
 
-        # Record field d: Agent→Agent
+        # Record field A2A: Agent→Agent
         hop_count = metadata["Hop"]["Hop_Count"]
         session_id = metadata.get("Session_ID", "")
         session = self._session_manager.get_or_create(session_id)
         self._record_behavior(
-            session=session, field_type="d",
+            session=session, field_type="A2A",
             content=content, target=target_did,
         )
         self._session_manager.save(session)
@@ -367,7 +367,7 @@ class ATTPClient:
         current_session_id: str,
         content: str,
     ) -> str:
-        """Send message to user via MessageBus.
+        """Send message to user via websocket.
 
         Args:
             channel: Channel name (e.g., "web_ui")

@@ -12,7 +12,7 @@ def get_behavior_router(tracer: MessageTracer) -> APIRouter:
 
     @router.get("/behavior/{session_id}")
     async def get_behavior_trace(session_id: str, origin_did: str = None):
-        """Return full behavior trace: a/b/c/d entries grouped by hop_count."""
+        """Return full behavior trace: entries grouped by hop_count and field_type."""
         try:
             entries = tracer.recover_behavior_trace(session_id, origin_did)
 
@@ -23,10 +23,11 @@ def get_behavior_router(tracer: MessageTracer) -> APIRouter:
                     nodes[hc] = {
                         "hop_count": hc,
                         "node_did": row["node_did"],
-                        "a": [],
-                        "b": [],
-                        "c": [],
-                        "d": [],
+                        "A2T": [],
+                        "A2U": [],
+                        "U2A": [],
+                        "A2A": [],
+                        "T2A": [],
                     }
                 ft = row["field_type"]
                 if ft in nodes[hc]:

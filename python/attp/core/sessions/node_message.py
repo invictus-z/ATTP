@@ -1,9 +1,12 @@
 """
-NodeMessage — a/b/c/d 行为溯源数据结构。
-a. Agent -> Tool 
-b. Agent -> User 
-c. User -> Agent 
-d. Agent -> Agent 
+NodeMessage — 行为溯源数据结构。
+
+field_type 取值：
+  A2T — Agent → Tool   （Agent 调用工具）
+  A2U — Agent → User   （Agent 发给用户）
+  U2A — User  → Agent  （用户发给 Agent）
+  A2A — Agent → Agent  （Agent 间通信）
+  T2A — Tool  → Agent  （工具返回结果，预留）
 """
 
 from __future__ import annotations
@@ -17,7 +20,7 @@ from typing import Any
 class BehaviorEntry:
     """单条行为记录。"""
 
-    field_type: str  # "a" / "b" / "c" / "d"
+    field_type: str  # "A2T" / "A2U" / "U2A" / "A2A" / "T2A"
     content: str
     timestamp: float = field(default_factory=time.time)
     target: str = ""  # a: tool; d: target_did; b/c: ""

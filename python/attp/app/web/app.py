@@ -72,7 +72,7 @@ class WebApp():
                         session_id = message_data.get("Session_ID") or message_data.get("session_id", "home")
 
                         if msg_type == "chat" and content:
-                            # Record field c: User→Agent
+                            # Record field U2A: User→Agent
                             self._record_field_c(session_id, content)
 
                             if self._channel_callback:
@@ -156,7 +156,7 @@ class WebApp():
         """Directly send message to UI via WebSocket."""
         session_id = metadata.get("Session_ID") if metadata else None
 
-        # Record field b: Agent→User (exclude node message notifications)
+        # Record field A2U: Agent→User (exclude node message notifications)
         if session_id and not (metadata and metadata.get("is_node_message")):
             self._record_field_b(session_id, content)
 
@@ -188,11 +188,11 @@ class WebApp():
                 self._clients.remove(client)
 
     # ------------------------------------------------------------------
-    # Behavior recording helpers (fields b and c)
+    # Behavior recording helpers (fields A2U and U2A)
     # ------------------------------------------------------------------
 
     def _record_field_b(self, session_id: str, content: str) -> None:
-        """Record field b: Agent→User."""
+        """Record field A2U: Agent→User."""
         if not self._session_manager:
             return
         session = self._session_manager.get_or_create(session_id)
@@ -205,7 +205,7 @@ class WebApp():
             origin_did=origin_did,
             hop_count=hop_count,
         )
-        nm.add_entry(field_type="b", content=content)
+        nm.add_entry(field_type="A2U", content=content)
         self._session_manager.save(session)
 
         self._tracer.save_behavior_entry(
@@ -213,14 +213,14 @@ class WebApp():
             origin_did=origin_did,
             node_did=self._agent_did,
             hop_count=hop_count,
-            field_type="b",
+            field_type="A2U",
             content=content,
             timestamp=time.time(),
         )
-        logger.debug("Recorded field b: session={}, hop={}", session_id, hop_count)
+        logger.debug("Recorded field A2U: session={}, hop={}", session_id, hop_count)
 
     def _record_field_c(self, session_id: str, content: str) -> None:
-        """Record field c: User→Agent."""
+        """Record field U2A: User→Agent."""
         if not self._session_manager:
             return
         session = self._session_manager.get_or_create(session_id)
@@ -233,7 +233,7 @@ class WebApp():
             origin_did=origin_did,
             hop_count=hop_count,
         )
-        nm.add_entry(field_type="c", content=content)
+        nm.add_entry(field_type="U2A", content=content)
         self._session_manager.save(session)
 
         self._tracer.save_behavior_entry(
@@ -241,8 +241,8 @@ class WebApp():
             origin_did=origin_did,
             node_did=self._agent_did,
             hop_count=hop_count,
-            field_type="c",
+            field_type="U2A",
             content=content,
             timestamp=time.time(),
         )
-        logger.debug("Recorded field c: session={}, hop={}", session_id, hop_count)
+        logger.debug("Recorded field U2A: session={}, hop={}", session_id, hop_count)

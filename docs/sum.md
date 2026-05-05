@@ -2,7 +2,7 @@
 
 ## 概述
 
-`NodeMessage` 是 ATTP 中的**行为溯源数据结构**，用于记录一个节点（Agent）在一次 hop 中发生的所有行为。它与 `BehaviorEntry` 配合，构成了完整的 a/b/c/d 四类交互追踪体系，为分布式 Agent 网络提供全链路审计能力。
+`NodeMessage` 是 ATTP 中的**行为溯源数据结构**，用于记录一个节点（Agent）在一次 hop 中发生的所有行为。它与 `BehaviorEntry` 配合，构成了完整的 A2T/A2U/U2A/A2A 四类交互追踪体系，为分布式 Agent 网络提供全链路审计能力。
 
 ---
 
@@ -12,10 +12,10 @@
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `field_type` | `str` | 行为类型，取值 `"a"` / `"b"` / `"c"` / `"d"` |
+| `field_type` | `str` | 行为类型，取值 `"A2T"` / `"A2U"` / `"U2A"` / `"A2A"` / `"T2A"` |
 | `content` | `str` | 行为内容（消息文本、工具调用描述等） |
 | `timestamp` | `float` | 行为发生的时间戳，默认 `time.time()` |
-| `target` | `str` | 目标标识：a 类型为工具名，d 类型为目标 Agent DID，b/c 为空 |
+| `target` | `str` | 目标标识：A2T 类型为工具名，A2A 类型为目标 Agent DID，其余为空 |
 | `extra` | `dict` | 扩展元数据 |
 
 支持 `to_dict()` / `from_dict()` 序列化。
@@ -38,14 +38,15 @@
 
 ---
 
-## 四类行为（field_type）
+## 行为类型（field_type）
 
 | 类型 | 方向 | 含义 | 记录位置 |
 |------|------|------|----------|
-| **a** | Agent → Tool | Agent 调用工具（如 nanobot 触发 send_message） | [client.py:209](../src/attp_channel/client.py#L209) |
-| **b** | Agent → User | Agent 向用户发送回复 | [app.py:208](../src/attp_channel/web_app/app.py#L208) |
-| **c** | User → Agent | 用户向 Agent 发送消息 | [app.py:236](../src/attp_channel/web_app/app.py#L236) |
-| **d** | Agent → Agent | Agent 之间互发消息 | [client.py:300-303](../src/attp_channel/client.py#L300-L303) |
+| **A2T** | Agent → Tool | Agent 调用工具（如 nanobot 触发 send_message） | [client.py](../src/attp_channel/client.py) |
+| **A2U** | Agent → User | Agent 向用户发送回复 | [app.py](../src/attp_channel/web_app/app.py) |
+| **U2A** | User → Agent | 用户向 Agent 发送消息 | [app.py](../src/attp_channel/web_app/app.py) |
+| **A2A** | Agent → Agent | Agent 之间互发消息 | [client.py](../src/attp_channel/client.py) |
+| **T2A** | Tool → Agent | 工具返回结果（预留） | — |
 
 ---
 
@@ -54,7 +55,7 @@
 ### 整体流向
 
 ```
-用户输入(c) → 本地Agent → 工具调用(a) → 远程Agent(d) → 远程Agent回复
+用户输入(U2A) → 本地Agent → 工具调用(A2T) → 远程Agent(A2A) → 远程Agent回复
                     ↓                              ↓
               NodeMessage                     NodeMessage
               (session内存)                   (序列化传输)
@@ -85,10 +86,10 @@ Session 通过 metadata 字典管理每个 hop 对应的 NodeMessage：
   - 同时调用 `tracer.save_behavior_entry()` 持久化到 SQLite
 
 - **`send_message()`** ([client.py:189-246](../src/attp_channel/client.py#L189-L246))：
-  - 统一入口，先记录 **field a**（Agent→Tool），再按目标路由
+  - 统一入口，先记录 **field A2T**（Agent→Tool），再按目标路由
 
 - **`send_to_agent()`** ([client.py:252-363](../src/attp_channel/client.py#L252-L363))：
-  - 记录 **field d**（Agent→Agent）
+  - 记录 **field A2A**（Agent→Agent）
   - 获取完整 NodeMessage 并序列化到 record 消息的 metadata 中
   - 向 origin 发送 record 类型消息，携带 NodeMessage 副本用于溯源
 
@@ -108,12 +109,12 @@ if node_msg_data:
 
 > 代码位置：[server.py:217-253](../src/attp_channel/server.py#L217-L253)
 
-#### 4. WebApp — 用户侧行为记录（field b/c）
+#### 4. WebApp — 用户侧行为记录（field A2U/U2A）
 
 Web UI 层负责记录用户与 Agent 之间的交互：
 
-- **`_record_field_b()`** ([app.py:194-220](../src/attp_channel/web_app/app.py#L194-L220))：Agent→User，在 `record_message()` 中触发，排除节点间消息通知
-- **`_record_field_c()`** ([app.py:222-248](../src/attp_channel/web_app/app.py#L222-L248))：User→Agent，在 WebSocket 收到用户 chat 消息时触发
+- **`_record_field_b()`** ([app.py](../src/attp_channel/web_app/app.py))：Agent→User（A2U），在 `record_message()` 中触发，排除节点间消息通知
+- **`_record_field_c()`** ([app.py](../src/attp_channel/web_app/app.py))：User→Agent（U2A），在 WebSocket 收到用户 chat 消息时触发
 
 两者逻辑一致：获取/创建 NodeMessage → add_entry → tracer 持久化。
 
@@ -138,7 +139,7 @@ Web UI 层负责记录用户与 Agent 之间的交互：
 | `origin_did` | TEXT | 消息源 DID |
 | `node_did` | TEXT | 行为发生节点 DID |
 | `hop_count` | INTEGER | hop 序号 |
-| `field_type` | TEXT | a/b/c/d |
+| `field_type` | TEXT | A2T/A2U/U2A/A2A/T2A |
 | `content` | TEXT | 行为内容 |
 | `target` | TEXT | 目标标识 |
 | `timestamp` | REAL | 时间戳 |
@@ -160,9 +161,9 @@ Web UI 层负责记录用户与 Agent 之间的交互：
 
 ```
 1. Agent A 的 Client.send_message()
-   └─ _record_behavior(field_type="a")  → 本地 NodeMessage + SQLite
+   └─ _record_behavior(field_type="A2T")  → 本地 NodeMessage + SQLite
    └─ send_to_agent()
-       └─ _record_behavior(field_type="d")  → 本地 NodeMessage + SQLite
+       └─ _record_behavior(field_type="A2A")  → 本地 NodeMessage + SQLite
        └─ session.get_node_message(hop_count)  → 获取完整 NodeMessage
        └─ remote.receive_message()  → 发送请求到 Agent B
        └─ origin_remote.receive_message(type="record")  → 携带 NodeMessage 副本回传 origin
@@ -178,7 +179,7 @@ Web UI 层负责记录用户与 Agent 之间的交互：
 
 **`GET /api/behavior/{session_id}?origin_did=xxx`**
 
-返回完整行为追踪，按 hop_count 分组，每组包含 a/b/c/d 四类条目：
+返回完整行为追踪，按 hop_count 分组，每组包含各类型行为条目：
 
 ```json
 {
@@ -188,10 +189,10 @@ Web UI 层负责记录用户与 Agent 之间的交互：
     {
       "hop_count": 0,
       "node_did": "did:wba:...",
-      "a": [{"content": "...", "target": "...", "timestamp": 1234.5}],
-      "b": [],
-      "c": [{"content": "...", "target": "", "timestamp": 1234.6}],
-      "d": []
+      "A2T": [{"content": "...", "target": "...", "timestamp": 1234.5}],
+      "A2U": [],
+      "U2A": [{"content": "...", "target": "", "timestamp": 1234.6}],
+      "A2A": []
     }
   ]
 }
@@ -207,9 +208,9 @@ Web UI 层负责记录用户与 Agent 之间的交互：
 |------|----------|
 | [node_message.py](../src/attp_channel/sessions/node_message.py) | `BehaviorEntry` 和 `NodeMessage` 数据类定义 |
 | [session.py](../src/attp_channel/sessions/session.py) | Session 中 NodeMessage 的创建/获取/存储 |
-| [client.py](../src/attp_channel/client.py) | Client 侧行为记录（field a/d）与 NodeMessage 传播 |
+| [client.py](../src/attp_channel/client.py) | Client 侧行为记录（field A2T/A2A）与 NodeMessage 传播 |
 | [server.py](../src/attp_channel/server.py) | Server 侧接收远端 NodeMessage 并持久化 |
-| [app.py](../src/attp_channel/web_app/app.py) | Web UI 侧行为记录（field b/c） |
+| [app.py](../src/attp_channel/web_app/app.py) | Web UI 侧行为记录（field A2U/U2A） |
 | [tracer.py](../src/attp_channel/protocol/tracer.py) | MessageTracer 门面，统一调度存储 |
 | [sqlite_store.py](../src/attp_channel/protocol/storage/sqlite_store.py) | SQLite 持久化，behavior_traces 表 |
 | [trace.py](../src/attp_channel/web_app/api/trace.py) | 行为追踪查询 API |

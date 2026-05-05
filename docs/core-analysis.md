@@ -248,7 +248,7 @@ _HOP_REQUIRED_FIELDS = {
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `field_type` | `str` | 行为类型：`"a"` / `"b"` / `"c"` / `"d"` |
+| `field_type` | `str` | 行为类型：`"A2T"` / `"A2U"` / `"U2A"` / `"A2A"` / `"T2A"` |
 | `content` | `str` | 行为内容 |
 | `timestamp` | `float` | 时间戳 |
 | `target` | `str` | 目标标识 |
@@ -268,10 +268,11 @@ _HOP_REQUIRED_FIELDS = {
 
 | 类型 | 方向 | 含义 | target 字段 |
 |------|------|------|-------------|
-| **a** | Agent → Tool | Agent 调用工具 | 工具名 |
-| **b** | Agent → User | Agent 向用户发送回复 | 空 |
-| **c** | User → Agent | 用户向 Agent 发送消息 | 空 |
-| **d** | Agent → Agent | Agent 之间互发消息 | 目标 Agent DID |
+| **A2T** | Agent → Tool | Agent 调用工具 | 工具名 |
+| **A2U** | Agent → User | Agent 向用户发送回复 | 空 |
+| **U2A** | User → Agent | 用户向 Agent 发送消息 | 空 |
+| **A2A** | Agent → Agent | Agent 之间互发消息 | 目标 Agent DID |
+| **T2A** | Tool → Agent | 工具返回结果（预留） | 空 |
 
 两个数据类均支持 `to_dict()` / `from_dict()` 序列化，用于网络传输和持久化。
 
@@ -308,7 +309,7 @@ class SessionManager:
 | `origin_did` | TEXT | NOT NULL | 消息源 DID |
 | `node_did` | TEXT | NOT NULL | 行为发生节点 DID |
 | `hop_count` | INTEGER | NOT NULL | hop 序号 |
-| `field_type` | TEXT | NOT NULL | a/b/c/d |
+| `field_type` | TEXT | NOT NULL | A2T/A2U/U2A/A2A/T2A |
 | `content` | TEXT | — | 行为内容 |
 | `target` | TEXT | DEFAULT '' | 目标标识 |
 | `timestamp` | REAL | — | 时间戳 |
@@ -444,7 +445,7 @@ metadata = tracer_a.append_hop(
    → Base64 编码的签名字符串
 ```
 
-#### Step 2: Agent A 记录行为（field a: Agent→Tool）
+#### Step 2: Agent A 记录行为（field A2T: Agent→Tool）
 
 ```python
 # 记录 Agent A 调用了 "send_message" 工具
@@ -453,7 +454,7 @@ tracer_a.save_behavior_entry(
     origin_did="did:wba:agent_A",
     node_did="did:wba:agent_A",
     hop_count=0,
-    field_type="a",
+    field_type="A2T",
     content="调用 send_message 工具发送消息到 Agent B",
     target="send_message"
 )
@@ -552,11 +553,11 @@ traces = tracer_a.recover_behavior_trace(
 
 # 返回按 hop_count 和 timestamp 排序的完整行为记录：
 # [
-#   {"hop_count": 0, "node_did": "did:wba:agent_A", "field_type": "a",
+#   {"hop_count": 0, "node_did": "did:wba:agent_A", "field_type": "A2T",
 #    "content": "调用 send_message 工具...", "target": "send_message", ...},
-#   {"hop_count": 0, "node_did": "did:wba:agent_A", "field_type": "d",
+#   {"hop_count": 0, "node_did": "did:wba:agent_A", "field_type": "A2A",
 #    "content": "发送消息到 Agent B", "target": "did:wba:agent_B", ...},
-#   {"hop_count": 1, "node_did": "did:wba:agent_B", "field_type": "a",
+#   {"hop_count": 1, "node_did": "did:wba:agent_B", "field_type": "A2T",
 #    "content": "调用 send_message 工具...", "target": "send_message", ...},
 #   ...
 # ]
@@ -575,6 +576,6 @@ traces = tracer_a.recover_behavior_trace(
 | `core/provenance/hashing.py` | `calculate_genesis_hash()`、`calculate_hop_hash()` |
 | `core/provenance/chain.py` | `ChainManager`（append_hop / validate_hop / verify_back_propagation） |
 | `core/sessions/session.py` | `Session` 数据类（per-chat 元数据容器） |
-| `core/sessions/node_message.py` | `NodeMessage` + `BehaviorEntry`（a/b/c/d 行为溯源） |
+| `core/sessions/node_message.py` | `NodeMessage` + `BehaviorEntry`（A2T/A2U/U2A/A2A/T2A 行为溯源） |
 | `core/sessions/manager.py` | `SessionManager`（内存会话存储） |
 | `core/storage/sqlite_store.py` | `SqliteStore`（behavior_traces 表持久化） |
