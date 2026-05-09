@@ -105,7 +105,7 @@ class ATTPClient:
                     success_count += 1
                 else:
                     self.failed_urls.add(ad_path)
-        
+
         logger.info("Initialized {}/{} remote agents, {} failed", success_count, len(self.registry), len(self.failed_urls))
         if self.failed_urls:
             logger.info("Failed URLs (will retry on heartbeat): {}", ", ".join(self.failed_urls))
@@ -149,40 +149,6 @@ class ATTPClient:
             return None
 
     # ------------------------------------------------------------------
-    # Behavior recording
-    # ------------------------------------------------------------------
-
-    async def _record_behavior(
-        self,
-        session,
-        field_type: str,
-        content: str,
-        target: str = "",
-    ) -> None:
-        """Append a behavior entry to the session's NodeMessage and persist to DB."""
-        trace = session.get_trace_metadata()
-        origin_did = trace.get("Origin_DID", self.agent_did)
-        hop_count = session._current_hop_count()
-
-        nm = session.get_or_create_node_message(
-            node_did=self.agent_did,
-            origin_did=origin_did,
-            hop_count=hop_count,
-        )
-        nm.add_entry(field_type=field_type, content=content, target=target)
-
-        await self._tracer.save_behavior_entry(
-            session_id=session.key,
-            origin_did=origin_did,
-            node_did=self.agent_did,
-            hop_count=hop_count,
-            field_type=field_type,
-            content=content,
-            target=target,
-            timestamp=time.time(),
-        )
-
-    # ------------------------------------------------------------------
     # Unified message entry-point
     # ------------------------------------------------------------------
 
@@ -204,9 +170,6 @@ class ATTPClient:
             return "Error: target, content and chat_id are all required."
 
         session = self._session_manager.get_or_create(chat_id)
-
-        # Record field A2T: Agent→Tool (nanobot invoked send_message_tool)
-        await self._record_behavior(session=session, field_type="A2T", content=content, target=target)
 
         # ----- send to user -----
         if target.startswith("user:"):
@@ -235,7 +198,7 @@ class ATTPClient:
                 session.set_trace_metadata({
                     "Hop": metadata["Hop"],
                     "Session_ID": metadata.get("Session_ID"),
-                    "Origin_DID": metadata.get("Origin_DID")
+                    "Protocol_Node_Address": metadata.get("Protocol_Node_Address"),
                 })
                 self._session_manager.save(session)
 
@@ -292,18 +255,6 @@ class ATTPClient:
             return f"Error: Tracing hook failed - {str(e)}"
 
         # Record field A2A: Agent→Agent
-        hop_count = metadata["Hop"]["Hop_Count"]
-        session_id = metadata.get("Session_ID", "")
-        session = self._session_manager.get_or_create(session_id)
-        await self._record_behavior(
-            session=session, field_type="A2A",
-            content=content, target=target_did,
-        )
-        self._session_manager.save(session)
-
-        # Retrieve the complete NodeMessage for propagation
-        node_message = session.get_node_message(hop_count)
-
         try:
             # 发送原始消息
             result = await remote.receive_message(
@@ -313,38 +264,43 @@ class ATTPClient:
                 metadata=metadata,
             )
 
-            # 向消息最初发出者发送 record 副本
+            # 向协议节点发送 record 副本
             try:
-                origin_did = metadata.get("Origin_DID")
-                if origin_did:
+                protocol_node_url = metadata.get("Protocol_Node_Address")
+                if protocol_node_url:
                     record_log = metadata.get("Hop")
                     if record_log:
-
-                        # 构造 record 消息的 metadata
                         record_metadata = {
                             "Session_ID": metadata.get("Session_ID"),
                             "Record_Log": record_log,
                             "PrevHop": prev_hop,
-                            "Origin_DID": metadata.get("Origin_DID"),
-                            "NodeMessage": node_message.to_dict() if node_message else None,
+                            "Protocol_Node_Address": protocol_node_url,
+                            "BehaviorEntry": {
+                                "field_type": "A2A",
+                                "content": content,
+                                "target": target_did,
+                                "timestamp": time.time(),
+                                "node_did": sender_did,
+                                "hop_count": metadata["Hop"]["Hop_Count"],
+                            },
                         }
 
-                        # 发送 record 类型消息到最初发出者
-                        origin_remote = self.remote_agents.get(origin_did)
-                        if not origin_remote:
-                            reg = self.registered_agents.get(origin_did)
-                            if reg and reg.get("ad_url"):
-                                origin_remote = await self._get_remote_agent(reg["ad_url"])
-                        if origin_remote:
-                            await origin_remote.receive_message(
-                                sender_did=sender_did,
-                                content=content,
-                                message_type="record",
-                                metadata=record_metadata,
-                            )
-                            logger.debug("Sent record to origin {}", origin_did)
+                        async with aiohttp.ClientSession() as http_session:
+                            async with http_session.post(
+                                f"{protocol_node_url}/record",
+                                json={
+                                    "sender_did": sender_did,
+                                    "content": content,
+                                    "metadata": record_metadata,
+                                },
+                                timeout=aiohttp.ClientTimeout(total=10),
+                            ) as resp:
+                                if resp.status == 200:
+                                    logger.debug("Record sent to protocol node at {}", protocol_node_url)
+                                else:
+                                    logger.warning("Protocol node returned HTTP {}", resp.status)
             except Exception as e:
-                logger.warning("Failed to send record copy: {}", e)
+                logger.warning("Failed to send record to protocol node: {}", e)
 
             if self._web_callback:
                 await self._web_callback(content, {
@@ -353,7 +309,7 @@ class ATTPClient:
                     "other_did": target_did,
                     "Session_ID": metadata.get("Session_ID"),
                 })
-            
+
 
             return result if isinstance(result, str) else str(result)
         except Exception as e:
@@ -415,4 +371,3 @@ class ATTPClient:
                     logger.info("successfully reconnected agent from {}", failed_url)
 
         return None
-

@@ -1,0 +1,20 @@
+{
+    "agentDid": "did:wba:localhost:my-protocol-node",
+    "protocolNode": {
+        "dataPortHost": "0.0.0.0",
+        "dataPortPort": 9000,
+        "apiPortHost": "0.0.0.0",
+        "apiPortPort": 9001
+    },
+    "storage": {
+        "dataDir": "~/.nanobot/attp",
+        "dbPath": "attp.db"
+    },
+    "analysis": {
+        "enabled": false,
+        "apiKey": "",
+        "baseUrl": "https://api.openai.com/v1",
+        "model": "gpt-4o",
+        "reportBatchSize": 10
+    }
+}

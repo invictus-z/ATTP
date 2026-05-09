@@ -1,3 +1,8 @@
+"""协议相关 API 路由 — 行为溯源、分析报告、污点审计。
+
+迁移自 attp/app/web/api/trace.py，origin_did → protocol_node_address。
+"""
+
 import json
 from datetime import datetime
 from typing import Any
@@ -18,10 +23,10 @@ def get_behavior_router(
     router = APIRouter(prefix="/api")
 
     @router.get("/behavior/{session_id}")
-    async def get_behavior_trace(session_id: str, origin_did: str = None):
+    async def get_behavior_trace(session_id: str, protocol_node_address: str = None):
         """Return full behavior trace: entries grouped by hop_count and field_type."""
         try:
-            entries = await tracer.recover_behavior_trace(session_id, origin_did)
+            entries = await tracer.recover_behavior_trace(session_id, protocol_node_address)
 
             nodes: dict[int, dict] = {}
             for row in entries:
@@ -46,14 +51,14 @@ def get_behavior_router(
 
             return {
                 "session_id": session_id,
-                "origin_did": origin_did,
+                "protocol_node_address": protocol_node_address,
                 "nodes": sorted(nodes.values(), key=lambda n: n["hop_count"]),
             }
         except Exception as e:
             logger.error("Error recovering behavior trace for {}: {}", session_id, e)
             return {
                 "session_id": session_id,
-                "origin_did": origin_did,
+                "protocol_node_address": protocol_node_address,
                 "nodes": [],
             }
 
@@ -126,11 +131,11 @@ def get_behavior_router(
     # ------------------------------------------------------------------
 
     @router.get("/analysis/aggregate/{session_id}")
-    async def get_aggregate_analysis(session_id: str, origin_did: str = None):
+    async def get_aggregate_analysis(session_id: str, protocol_node_address: str = None):
         """Return behavior traces + analysis reports + alerts combined."""
         # 1. Fetch behavior traces
         try:
-            trace_entries = await tracer.recover_behavior_trace(session_id, origin_did)
+            trace_entries = await tracer.recover_behavior_trace(session_id, protocol_node_address)
         except Exception as e:
             logger.error("Error recovering traces for aggregate {}: {}", session_id, e)
             trace_entries = []
@@ -150,10 +155,11 @@ def get_behavior_router(
                 nodes[hc] = {
                     "hop_count": hc,
                     "node_did": row["node_did"],
-                    "a": [],
-                    "b": [],
-                    "c": [],
-                    "d": [],
+                    "A2T": [],
+                    "A2U": [],
+                    "U2A": [],
+                    "A2A": [],
+                    "T2A": [],
                 }
             ft = row["field_type"]
             if ft in nodes[hc]:
@@ -226,12 +232,16 @@ def get_behavior_router(
 
     @router.post("/analysis/trigger/{session_id}")
     async def trigger_analysis(session_id: str):
-        """Manually trigger taint analysis on unanalyzed traces."""
+        """Manually trigger taint analysis (async, returns immediately)."""
         if not orchestrator:
             return {"triggered": False, "reason": "analysis_disabled"}
+        return await orchestrator.trigger_analysis_async(session_id)
 
-        async with orchestrator._get_lock(session_id):
-            result = await orchestrator.run_analysis(session_id, is_final=False)
-        return result.to_dict()
+    @router.get("/analysis/status/{session_id}")
+    async def get_analysis_status(session_id: str):
+        """Query async analysis task status and phase."""
+        if not orchestrator:
+            return {"status": "not_found", "session_id": session_id}
+        return orchestrator.get_analysis_status(session_id)
 
     return router

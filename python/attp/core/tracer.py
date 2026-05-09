@@ -5,7 +5,6 @@ from __future__ import annotations
 from attp.core.authentication import KeyStore
 from attp.core.provenance import ChainManager
 from attp.core.storage import SqliteStore
-from attp.core.sessions.node_message import NodeMessage
 
 
 class MessageTracer:
@@ -49,30 +48,27 @@ class MessageTracer:
         stored_hop: dict,
         prev_hop: dict,
         session_id: str,
-        origin_did: str,
+        protocol_node_address: str,
     ) -> tuple[bool, str]:
         return self._chain.verify_back_propagation(
-            stored_hop, prev_hop, session_id, origin_did
+            stored_hop, prev_hop, session_id, protocol_node_address
         )
 
     # -- behavior traces (a/b/c/d) --
 
-    async def save_behavior_entry(self, session_id: str, origin_did: str,
+    async def save_behavior_entry(self, session_id: str, protocol_node_address: str,
                                   node_did: str, hop_count: int,
                                   field_type: str, content: str,
                                   target: str = "", timestamp: float = 0.0,
                                   extra: dict | None = None) -> None:
         await self._storage.save_behavior_entry(
-            session_id, origin_did, node_did, hop_count,
+            session_id, protocol_node_address, node_did, hop_count,
             field_type, content, target, timestamp, extra,
         )
 
-    async def save_node_message(self, node_message: NodeMessage) -> None:
-        await self._storage.save_node_message(node_message)
-
     async def recover_behavior_trace(self, session_id: str,
-                                     origin_did: str | None = None) -> list:
-        return await self._storage.recover_behavior_trace(session_id, origin_did)
+                                     protocol_node_address: str | None = None) -> list:
+        return await self._storage.recover_behavior_trace(session_id, protocol_node_address)
 
     async def recover_traces_since(self, session_id: str, since_id: int) -> tuple[list, int]:
         return await self._storage.recover_traces_since(session_id, since_id)
@@ -82,3 +78,11 @@ class MessageTracer:
 
     async def recover_analysis_reports(self, session_id: str) -> list:
         return await self._storage.recover_analysis_reports(session_id)
+
+    # -- analysis session state --
+
+    async def save_analysis_session(self, session_id: str, state: dict) -> None:
+        await self._storage.save_analysis_session(session_id, state)
+
+    async def load_analysis_session(self, session_id: str) -> dict | None:
+        return await self._storage.load_analysis_session(session_id)

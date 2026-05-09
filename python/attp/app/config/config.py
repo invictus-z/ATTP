@@ -79,6 +79,15 @@ class AnalysisConfig(ATTPBase):
     model: str = "gpt-5"
     report_batch_size: int = Field(default=10, alias="reportBatchSize")
 
+class ProtocolNodeConfig(ATTPBase):
+    """Protocol Node configuration (dual-port architecture)."""
+
+    enabled: bool = False
+    data_port_host: str = "127.0.0.1"
+    data_port_port: int = Field(default=9000, alias="dataPortPort")
+    api_port_host: str = "127.0.0.1"
+    api_port_port: int = Field(default=9001, alias="apiPortPort")
+
 class ATTPConfigFile(ATTPBase):
     """Root model for ~/.nanobot/attp/attp_config.json."""
 
@@ -90,6 +99,7 @@ class ATTPConfigFile(ATTPBase):
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
     analysis: AnalysisConfig = Field(default_factory=AnalysisConfig)
+    protocol_node: ProtocolNodeConfig = Field(default_factory=ProtocolNodeConfig)
 
 
 def _deep_merge(base: dict, override: dict, list_strategy: str = "extend") -> dict:

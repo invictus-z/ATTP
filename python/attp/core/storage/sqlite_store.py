@@ -8,7 +8,6 @@ from typing import Any
 
 import aiosqlite
 from attp.app.logging import get_logger
-from attp.core.sessions.node_message import NodeMessage
 
 logger = get_logger("Tracing")
 
@@ -33,7 +32,7 @@ class SqliteStore:
                 CREATE TABLE IF NOT EXISTS behavior_traces (
                     id          INTEGER PRIMARY KEY AUTOINCREMENT,
                     session_id  TEXT NOT NULL,
-                    origin_did  TEXT NOT NULL,
+                    protocol_node_address  TEXT NOT NULL,
                     node_did    TEXT NOT NULL,
                     hop_count   INTEGER NOT NULL,
                     field_type  TEXT NOT NULL,
@@ -45,11 +44,11 @@ class SqliteStore:
             ''')
             await db.execute('''
                 CREATE INDEX IF NOT EXISTS idx_bt_session
-                    ON behavior_traces(session_id, origin_did)
+                    ON behavior_traces(session_id, protocol_node_address)
             ''')
             await db.execute('''
                 CREATE INDEX IF NOT EXISTS idx_bt_hop
-                    ON behavior_traces(session_id, origin_did, hop_count)
+                    ON behavior_traces(session_id, protocol_node_address, hop_count)
             ''')
 
             # Analysis reports table
@@ -68,6 +67,19 @@ class SqliteStore:
                 CREATE INDEX IF NOT EXISTS idx_ar_session
                     ON analysis_reports(session_id)
             ''')
+
+            # Analysis session state (survives restart)
+            await db.execute('''
+                CREATE TABLE IF NOT EXISTS analysis_sessions (
+                    session_id      TEXT PRIMARY KEY,
+                    intent_json     TEXT,
+                    report_count    INTEGER DEFAULT 0,
+                    last_trace_id   INTEGER DEFAULT 0,
+                    batch_index     INTEGER DEFAULT 0,
+                    context         TEXT DEFAULT '',
+                    updated_at      REAL
+                )
+            ''')
             await db.commit()
         logger.info("Database initialized at {}", self.db_path)
 
@@ -76,7 +88,7 @@ class SqliteStore:
     async def save_behavior_entry(
         self,
         session_id: str,
-        origin_did: str,
+        protocol_node_address: str,
         node_did: str,
         hop_count: int,
         field_type: str,
@@ -90,10 +102,10 @@ class SqliteStore:
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute(
                 """INSERT INTO behavior_traces
-                   (session_id, origin_did, node_did, hop_count,
+                   (session_id, protocol_node_address, node_did, hop_count,
                     field_type, content, target, timestamp, extra)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (session_id, origin_did, node_did, hop_count,
+                (session_id, protocol_node_address, node_did, hop_count,
                  field_type, content, target, timestamp, extra_json),
             )
             await db.commit()
@@ -102,47 +114,20 @@ class SqliteStore:
             session_id, node_did, hop_count, field_type, target,
         )
 
-    async def save_node_message(self, node_message: NodeMessage) -> None:
-        """Bulk-save all entries from a NodeMessage (called at Genesis)."""
-        async with aiosqlite.connect(self.db_path) as db:
-            for entry in node_message.entries:
-                extra_json = json.dumps(entry.extra, ensure_ascii=False)
-                await db.execute(
-                    """INSERT INTO behavior_traces
-                       (session_id, origin_did, node_did, hop_count,
-                        field_type, content, target, timestamp, extra)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (node_message.session_id,
-                     node_message.origin_did,
-                     node_message.node_did,
-                     node_message.hop_count,
-                     entry.field_type,
-                     entry.content,
-                     entry.target,
-                     entry.timestamp,
-                     extra_json),
-                )
-            await db.commit()
-        logger.info(
-            "Saved NodeMessage: session={}, node={}, hop={}, entries={}",
-            node_message.session_id, node_message.node_did,
-            node_message.hop_count, len(node_message.entries),
-        )
-
     async def recover_behavior_trace(
         self,
         session_id: str,
-        origin_did: str | None = None,
+        protocol_node_address: str | None = None,
     ) -> list[dict]:
         """Recover all a/b/c/d entries for a session, ordered by hop_count."""
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
-            if origin_did:
+            if protocol_node_address:
                 cursor = await db.execute(
                     """SELECT * FROM behavior_traces
-                       WHERE session_id = ? AND origin_did = ?
+                       WHERE session_id = ? AND protocol_node_address = ?
                        ORDER BY hop_count, timestamp""",
-                    (session_id, origin_did),
+                    (session_id, protocol_node_address),
                 )
             else:
                 cursor = await db.execute(
@@ -154,8 +139,8 @@ class SqliteStore:
             rows = await cursor.fetchall()
             result = [dict(r) for r in rows]
         logger.debug(
-            "Recovered behavior trace: session={}, origin={}, count={}",
-            session_id, origin_did, len(result),
+            "Recovered behavior trace: session={}, pna={}, count={}",
+            session_id, protocol_node_address, len(result),
         )
         return result
 
@@ -220,3 +205,37 @@ class SqliteStore:
             )
             rows = await cursor.fetchall()
             return [dict(r) for r in rows]
+
+    # -- analysis session state (persists across restarts) --
+
+    async def save_analysis_session(self, session_id: str, state: dict) -> None:
+        """Persist analysis state for a session (INSERT OR REPLACE)."""
+        import time as _time
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                """INSERT OR REPLACE INTO analysis_sessions
+                   (session_id, intent_json, report_count, last_trace_id,
+                    batch_index, context, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    session_id,
+                    state.get("intent_json"),
+                    state.get("report_count", 0),
+                    state.get("last_trace_id", 0),
+                    state.get("batch_index", 0),
+                    state.get("context", ""),
+                    _time.time(),
+                ),
+            )
+            await db.commit()
+
+    async def load_analysis_session(self, session_id: str) -> dict | None:
+        """Load persisted analysis state for a session."""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                """SELECT * FROM analysis_sessions WHERE session_id = ?""",
+                (session_id,),
+            )
+            row = await cursor.fetchone()
+            return dict(row) if row else None

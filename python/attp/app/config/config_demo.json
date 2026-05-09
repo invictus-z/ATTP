@@ -39,5 +39,12 @@
         "baseUrl": "https://api.openai.com/v1",
         "model": "gpt-4o",
         "reportBatchSize": 10
+    },
+    "protocolNode": {
+        "enabled": false,
+        "dataPortHost": "127.0.0.1",
+        "dataPortPort": 9000,
+        "apiPortHost": "127.0.0.1",
+        "apiPortPort": 9001
     }
 }

@@ -55,7 +55,7 @@ class SemanticTaintAnalyzer:
                 risk_level=data.get("risk_level", "medium"),
             )
         except Exception as e:
-            logger.error("Intent extraction failed: {}", e)
+            logger.error("Intent extraction failed for '{}': {}", original_task[:100], e)
             return None
 
     async def analyze(
@@ -139,6 +139,7 @@ class SemanticTaintAnalyzer:
                 batch_index=batch_index,
                 from_trace_id=from_trace_id,
                 to_trace_id=to_trace_id,
+                overall_verdict="error",
                 summary=f"Analysis failed: {e}",
             )
 
@@ -164,11 +165,11 @@ class SemanticTaintAnalyzer:
                 "timestamp": row.get("timestamp"),
             }
             ft = row["field_type"]
-            if ft == "a":
+            if ft == "A2T":
                 profile.field_a.append(entry)
-            elif ft == "b":
+            elif ft == "A2U":
                 profile.field_b.append(entry)
-            elif ft == "d":
+            elif ft == "A2A":
                 profile.field_d.append(entry)
         return sorted(profiles_map.values(), key=lambda p: p.hop_count)
 

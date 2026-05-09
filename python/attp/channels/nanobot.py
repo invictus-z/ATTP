@@ -89,7 +89,6 @@ class ATTPChannel(BaseChannel):
             session_manager=self._session_manager,
             web_callback = self._web_app.record_message,
             attp_channel_callback = self._receive,
-            tracer=self._tracer,
         )
         self._heartbeat_manager = HeartbeatManager(
             heartbeat_config=self._attp_cfg.heartbeat,
@@ -97,16 +96,40 @@ class ATTPChannel(BaseChannel):
         )
         self._send_message_tool = SendMessageTool(
             tool_config=self._attp_cfg.tool,
-            callback = self._attp_client.send_message
+            callback=self._attp_client.send_message,
         )
 
-        # 构建语义污点分析编排器
-        self._analysis_orchestrator = self._build_analysis_orchestrator()
-        if self._analysis_orchestrator:
-            self._attp_server.set_record_callback(self._analysis_orchestrator.on_record_received)
-            self._web_app._on_field_c_recorded = self._analysis_orchestrator.on_field_c_recorded
-            self._web_app._on_session_end = self._analysis_orchestrator.on_session_end
-        self._web_app._analysis_orchestrator = self._analysis_orchestrator
+        # ------------------------------------------------------------------
+        # 混合模式：条件启动 ProtocolNode + AnalysisOrchestrator
+        # Orchestrator 依赖 DataPort 的 /record 端点触发 on_record_received，
+        # 因此仅在 ProtocolNode 启用时才构建。
+        # ------------------------------------------------------------------
+        self._protocol_node = None
+        self._analysis_orchestrator = None
+        pn_cfg = self._attp_cfg.protocol_node
+        if pn_cfg.enabled:
+            from attp.protocol_node import ProtocolNode
+
+            self._protocol_node = ProtocolNode(
+                data_port_host=pn_cfg.data_port_host,
+                data_port_port=pn_cfg.data_port_port,
+                api_port_host=pn_cfg.api_port_host,
+                api_port_port=pn_cfg.api_port_port,
+                tracer=self._tracer,
+                session_manager=self._session_manager,
+                agent_did=self._attp_cfg.did,
+            )
+
+            # 构建并注入 AnalysisOrchestrator
+            self._analysis_orchestrator = self._build_analysis_orchestrator()
+            if self._analysis_orchestrator:
+                self._protocol_node.set_orchestrator(self._analysis_orchestrator)
+
+            logger.info(
+                "ProtocolNode enabled: data_port={}:{}, api_port={}:{}",
+                pn_cfg.data_port_host, pn_cfg.data_port_port,
+                pn_cfg.api_port_host, pn_cfg.api_port_port,
+            )
 
         # 并发启动所有组件 启动阶段无依赖关系
         async with asyncio.TaskGroup() as tg:
@@ -120,6 +143,8 @@ class ATTPChannel(BaseChannel):
                 session_manager=self._session_manager,
                 agent_did=self._attp_cfg.did,
             ))
+            if self._protocol_node:
+                tg.create_task(self._protocol_node.start())
 
         # start() must block forever (or until stop() is called).
         while self._running:
@@ -132,6 +157,8 @@ class ATTPChannel(BaseChannel):
             tg.create_task(self._attp_client.stop())
             tg.create_task(self._attp_server.stop())
             tg.create_task(self._web_app.stop())
+            if self._protocol_node:
+                tg.create_task(self._protocol_node.stop())
 
     async def stop(self) -> None:
         self._running = False
@@ -175,20 +202,26 @@ class ATTPChannel(BaseChannel):
             logger.info("SendMessageTool config changed, reloading...")
             await self._send_message_tool.reload(new_cfg.tool)
 
-        # Analysis config changed — rebuild orchestrator
+        # Analysis config changed — rebuild orchestrator（仅在 ProtocolNode 启用时生效）
         if old_cfg.analysis.changed_fields(new_cfg.analysis):
-            logger.info("Analysis config changed, rebuilding orchestrator...")
-            self._analysis_orchestrator = self._build_analysis_orchestrator(new_cfg)
-            if self._analysis_orchestrator:
-                self._attp_server.set_record_callback(self._analysis_orchestrator.on_record_received)
-                self._web_app._on_field_c_recorded = self._analysis_orchestrator.on_field_c_recorded
-                self._web_app._on_session_end = self._analysis_orchestrator.on_session_end
+            if self._protocol_node:
+                logger.info("Analysis config changed, rebuilding orchestrator...")
+                self._analysis_orchestrator = self._build_analysis_orchestrator(new_cfg)
+                if self._analysis_orchestrator:
+                    self._protocol_node.set_orchestrator(self._analysis_orchestrator)
+                else:
+                    self._protocol_node.set_orchestrator(None)
+                logger.info("Analyzer reloaded: enabled={}", new_cfg.analysis.enabled)
             else:
-                self._attp_server.set_record_callback(None)
-                self._web_app._on_field_c_recorded = None
-                self._web_app._on_session_end = None
-            self._web_app._analysis_orchestrator = self._analysis_orchestrator
-            logger.info("Analyzer reloaded: enabled={}", new_cfg.analysis.enabled)
+                logger.warning("Analysis config changed but ProtocolNode is not enabled — ignored")
+
+        # ProtocolNode config changed
+        if old_cfg.protocol_node.changed_fields(new_cfg.protocol_node):
+            logger.warning(
+                "ProtocolNode config changed — requires manual restart (old={}, new={})",
+                old_cfg.protocol_node.model_dump(),
+                new_cfg.protocol_node.model_dump(),
+            )
 
         # WebApp config changed — cannot restart self, just update attributes
         if old_cfg.web_app.changed_fields(new_cfg.web_app):
@@ -227,6 +260,5 @@ class ATTPChannel(BaseChannel):
             analyzer=analyzer,
             session_manager=self._session_manager,
             tracer=self._tracer,
-            web_app=self._web_app,
             batch_size=analysis_cfg.report_batch_size,
         )

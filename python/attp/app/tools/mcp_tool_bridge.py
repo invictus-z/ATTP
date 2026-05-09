@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 import asyncio
-import time
 from typing import TYPE_CHECKING, Any, Callable, Awaitable
 
 import aiohttp
@@ -19,7 +18,6 @@ import uvicorn
 from mcp.server.fastmcp import FastMCP
 
 from attp.app.logging import get_logger, UVICORN_SILENT_LOG_CONFIG
-from attp.core.sessions.node_message import NodeMessage
 
 logger = get_logger("ToolBridge")
 
@@ -189,37 +187,6 @@ class MCPToolBridge:
         3. 发送 tool_request 到工具节点的 ATTP 端点
         4. 接收 tool_response（含 T2A 溯源）
         """
-        # 记录 A2T 行为
-        if self._session_manager and self._tracer:
-            session = self._session_manager.get_or_create(chat_id)
-            trace = session.get_trace_metadata()
-            origin_did = trace.get("Origin_DID", self._agent_did)
-            hop_count = session._current_hop_count()
-
-            nm = session.get_or_create_node_message(
-                node_did=self._agent_did,
-                origin_did=origin_did,
-                hop_count=hop_count,
-            )
-            nm.add_entry(
-                field_type="A2T",
-                content=f"call_tool_node({tool_did}, {tool_name}, {arguments})",
-                target=tool_did,
-                tool_name=tool_name,
-            )
-
-            self._tracer.save_behavior_entry(
-                session_id=chat_id,
-                origin_did=origin_did,
-                node_did=self._agent_did,
-                hop_count=hop_count,
-                field_type="A2T",
-                content=f"call_tool_node({tool_did}, {tool_name}, {arguments})",
-                target=tool_did,
-                timestamp=time.time(),
-            )
-            self._session_manager.save(session)
-
         # 构建 ATTP 消息元数据
         metadata: dict[str, Any] = {
             "Session_ID": chat_id,

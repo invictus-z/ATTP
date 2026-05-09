@@ -1,9 +1,12 @@
-"""Web UI channel implementation."""
+"""Web UI channel implementation — WebSocket + 通用 API（config/node_status）+ SPA。
+
+协议相关 API（trace/analysis）已迁移至 ProtocolNode ApiPort。
+"""
+
 from __future__ import annotations
 
 import asyncio
 import json
-import time
 from pathlib import Path
 import uvicorn
 from typing import TYPE_CHECKING
@@ -24,8 +27,9 @@ if TYPE_CHECKING:
 
 class WebApp():
     """
-    Web UI channel that exposes a WebSocket endpoint for the frontend.
-    Focuses on enabling communication with the 'Home (Local Agent)' view.
+    Web UI channel that exposes a WebSocket endpoint for the frontend,
+    plus general-purpose API routes (config, node_status).
+    Protocol-related API routes (trace, analysis) are served by ProtocolNode ApiPort.
     """
 
     def __init__(self, web_config: WebAppConfig, channel_callback=None, tracer=None):
@@ -38,11 +42,8 @@ class WebApp():
         self._channel_callback = channel_callback
         self._app = FastAPI()
         self._session_manager = None
-        self._analysis_orchestrator = None
         self._agent_did = ""
         self._active_session_id: str | None = None
-        self._on_field_c_recorded = None  # callback(session_id, content)
-        self._on_session_end = None       # callback(session_id)
 
         self._app.add_middleware(
             CORSMiddleware,
@@ -51,7 +52,7 @@ class WebApp():
             allow_headers=["*"],
         )
 
-        
+
         @self._app.get("/api/status")
         async def get_status():
             """Return the local agent's running status and WebSocket client count."""
@@ -75,27 +76,21 @@ class WebApp():
                         # 兼容前端可能使用的小写，但内部统一使用大写 Session_ID
                         session_id = message_data.get("Session_ID") or message_data.get("session_id", "home")
 
-                        # Handle explicit session end
-                        if msg_type == "end_session":
-                            if self._on_session_end and session_id:
-                                await self._on_session_end(session_id)
-                            self._active_session_id = None
-                            continue
+                        # 提取 Protocol_Node_Address 并写入 Session
+                        protocol_node_addr = message_data.get("Protocol_Node_Address")
 
-                        # Detect session transition → end old session
+                        # Detect session transition
                         if msg_type == "chat" and self._active_session_id and session_id != self._active_session_id:
-                            if self._on_session_end:
-                                await self._on_session_end(self._active_session_id)
+                            pass  # session lifecycle managed by protocol node
 
                         if msg_type == "chat" and content:
                             self._active_session_id = session_id
 
-                            # Record field U2A: User→Agent
-                            await self._record_field_c(session_id, content)
-
-                            # Notify analysis: field c recorded
-                            if self._on_field_c_recorded:
-                                await self._on_field_c_recorded(session_id, content)
+                            # 写入 Protocol_Node_Address 到 Session
+                            if protocol_node_addr and self._session_manager:
+                                session = self._session_manager.get_or_create(session_id)
+                                session.set_metadata("Protocol_Node_Address", protocol_node_addr)
+                                self._session_manager.save(session)
 
                             if self._channel_callback:
                                 await self._channel_callback(
@@ -108,20 +103,12 @@ class WebApp():
                         logger.warning("Received invalid JSON over WebSocket")
             except WebSocketDisconnect:
                 logger.info("Client disconnected: {}", ws.client)
-                # End active session on disconnect
-                if self._active_session_id and self._on_session_end:
-                    await self._on_session_end(self._active_session_id)
-                    self._active_session_id = None
+                self._active_session_id = None
                 if ws in self._clients:
                     self._clients.remove(ws)
             except Exception as e:
                 logger.error("WebSocket error: {}", e)
-                if self._active_session_id and self._on_session_end:
-                    try:
-                        await self._on_session_end(self._active_session_id)
-                    except Exception:
-                        pass
-                    self._active_session_id = None
+                self._active_session_id = None
                 if ws in self._clients:
                     self._clients.remove(ws)
 
@@ -161,13 +148,10 @@ class WebApp():
         self._clients.clear()
 
     async def mount_api(self, attp_client, attp_config_manager, reload_callback=None):
-        # Mount API routes from web_app/api
-        from attp.app.web.api import trace
+        # Mount general-purpose API routes (config, node_status)
         self._app.include_router(node_status.get_api_router(attp_client))
         self._app.include_router(config_setting.get_api_router(attp_config_manager, reload_callback))
-        self._app.include_router(trace.get_behavior_router(
-            self._tracer, self._session_manager, self._analysis_orchestrator,
-        ))
+        # Note: trace/analysis API routes are served by ProtocolNode ApiPort
 
         # Serve frontend static files from package-internal static/ directory
         static_dir = Path(__file__).resolve().parent / "static"
@@ -189,10 +173,6 @@ class WebApp():
     async def record_message(self, content: str, metadata: dict | None = None) -> None:
         """Directly send message to UI via WebSocket."""
         session_id = metadata.get("Session_ID") if metadata else None
-
-        # Record field A2U: Agent→User (exclude node message notifications)
-        if session_id and not (metadata and metadata.get("is_node_message")):
-            await self._record_field_b(session_id, content)
 
         logger.debug(
             "record_message: session={}, is_node_msg={}, clients={}",
@@ -220,63 +200,3 @@ class WebApp():
         for client in disconnected:
             if client in self._clients:
                 self._clients.remove(client)
-
-    # ------------------------------------------------------------------
-    # Behavior recording helpers (fields A2U and U2A)
-    # ------------------------------------------------------------------
-
-    async def _record_field_b(self, session_id: str, content: str) -> None:
-        """Record field A2U: Agent→User."""
-        if not self._session_manager:
-            return
-        session = self._session_manager.get_or_create(session_id)
-        trace = session.get_trace_metadata()
-        origin_did = trace.get("Origin_DID", self._agent_did)
-        hop_count = session._current_hop_count()
-
-        nm = session.get_or_create_node_message(
-            node_did=self._agent_did,
-            origin_did=origin_did,
-            hop_count=hop_count,
-        )
-        nm.add_entry(field_type="A2U", content=content)
-        self._session_manager.save(session)
-
-        await self._tracer.save_behavior_entry(
-            session_id=session_id,
-            origin_did=origin_did,
-            node_did=self._agent_did,
-            hop_count=hop_count,
-            field_type="A2U",
-            content=content,
-            timestamp=time.time(),
-        )
-        logger.debug("Recorded field A2U: session={}, hop={}", session_id, hop_count)
-
-    async def _record_field_c(self, session_id: str, content: str) -> None:
-        """Record field U2A: User→Agent."""
-        if not self._session_manager:
-            return
-        session = self._session_manager.get_or_create(session_id)
-        trace = session.get_trace_metadata()
-        origin_did = trace.get("Origin_DID", self._agent_did)
-        hop_count = session._current_hop_count()
-
-        nm = session.get_or_create_node_message(
-            node_did=self._agent_did,
-            origin_did=origin_did,
-            hop_count=hop_count,
-        )
-        nm.add_entry(field_type="U2A", content=content)
-        self._session_manager.save(session)
-
-        await self._tracer.save_behavior_entry(
-            session_id=session_id,
-            origin_did=origin_did,
-            node_did=self._agent_did,
-            hop_count=hop_count,
-            field_type="U2A",
-            content=content,
-            timestamp=time.time(),
-        )
-        logger.debug("Recorded field U2A: session={}, hop={}", session_id, hop_count)
