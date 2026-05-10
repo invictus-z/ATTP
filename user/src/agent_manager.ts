@@ -3,6 +3,7 @@
  * Each agent has its own baseUrl, WebSocket connection, and session context.
  */
 
+import { ref } from 'vue';
 import { apiFetch } from './transport';
 
 export interface AgentEntry {
@@ -14,23 +15,27 @@ export interface AgentEntry {
 
 const STORAGE_KEY = 'nanobot_agents';
 
-// ---- Registry ----
+// ---- Registry (reactive) ----
 
-let agents: AgentEntry[] = [];
-let activeAgentId: string | null = null;
+const agents = ref<AgentEntry[]>([]);
+const activeAgentId = ref<string | null>(null);
 let onAgentSwitchCallbacks: Array<() => void> = [];
 
 export function getAgents(): AgentEntry[] {
-  return agents;
+  return agents.value;
 }
 
 export function getActiveAgent(): AgentEntry | null {
-  if (!activeAgentId) return null;
-  return agents.find(a => a.id === activeAgentId) || null;
+  if (!activeAgentId.value) return null;
+  return agents.value.find(a => a.id === activeAgentId.value) || null;
 }
 
 export function getActiveAgentId(): string | null {
-  return activeAgentId;
+  return activeAgentId.value;
+}
+
+export function getAgentById(id: string): AgentEntry | null {
+  return agents.value.find(a => a.id === id) || null;
 }
 
 export function getActiveAgentUrl(): string {
@@ -49,16 +54,19 @@ export function apiUrl(path: string): string {
 /** Build a full WebSocket URL for the given active agent path, e.g. /ws */
 export function wsUrl(path: string): string {
   const agent = getActiveAgent();
-  if (!agent) return '';
+  return agent ? wsUrlForAgent(agent, path) : '';
+}
+
+/** Build a full WebSocket URL for a specific agent */
+export function wsUrlForAgent(agent: AgentEntry, path: string): string {
   const base = agent.baseUrl.replace(/\/+$/, '');
-  // replace http(s) with ws(s)
   const wsBase = base.replace(/^http/, 'ws');
   return `${wsBase}${path}`;
 }
 
 export function setActiveAgent(id: string): void {
-  if (agents.find(a => a.id === id)) {
-    activeAgentId = id;
+  if (agents.value.find(a => a.id === id)) {
+    activeAgentId.value = id;
     localStorage.setItem('nanobot_active_agent', id);
     // Notify all listeners
     onAgentSwitchCallbacks.forEach(cb => cb());
@@ -80,17 +88,30 @@ export function addAgent(name: string, baseUrl: string): AgentEntry {
     baseUrl,
     status: 'offline',
   };
-  agents.push(entry);
+  agents.value.push(entry);
   persist();
+
+  // Auto-activate if this is the first agent or no active agent
+  if (!activeAgentId.value) {
+    activeAgentId.value = id;
+    localStorage.setItem('nanobot_active_agent', id);
+    onAgentSwitchCallbacks.forEach(cb => cb());
+  }
+
+  // Test connectivity
+  testAgentConnection(entry.baseUrl).then(result => {
+    updateAgentStatus(entry.id, result.ok ? 'active' : 'offline');
+  });
+
   return entry;
 }
 
 export function removeAgent(id: string): void {
-  agents = agents.filter(a => a.id !== id);
-  if (activeAgentId === id) {
-    activeAgentId = agents.length > 0 ? agents[0].id : null;
-    localStorage.setItem('nanobot_active_agent', activeAgentId || '');
-    if (activeAgentId) {
+  agents.value = agents.value.filter(a => a.id !== id);
+  if (activeAgentId.value === id) {
+    activeAgentId.value = agents.value.length > 0 ? agents.value[0].id : null;
+    localStorage.setItem('nanobot_active_agent', activeAgentId.value || '');
+    if (activeAgentId.value) {
       onAgentSwitchCallbacks.forEach(cb => cb());
     }
   }
@@ -98,7 +119,7 @@ export function removeAgent(id: string): void {
 }
 
 export function updateAgentStatus(id: string, status: AgentEntry['status']): void {
-  const agent = agents.find(a => a.id === id);
+  const agent = agents.value.find(a => a.id === id);
   if (agent) {
     agent.status = status;
     persist();
@@ -106,7 +127,7 @@ export function updateAgentStatus(id: string, status: AgentEntry['status']): voi
 }
 
 export function renameAgent(id: string, newName: string): void {
-  const agent = agents.find(a => a.id === id);
+  const agent = agents.value.find(a => a.id === id);
   if (agent) {
     agent.name = newName;
     persist();
@@ -130,35 +151,31 @@ export async function testAgentConnection(baseUrl: string): Promise<{ ok: boolea
 // ---- Persistence ----
 
 function persist(): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(agents));
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(agents.value));
 }
 
 export function loadAgents(): void {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
-      agents = JSON.parse(raw);
+      agents.value = JSON.parse(raw);
     }
   } catch {
-    agents = [];
+    agents.value = [];
   }
 
   // Restore active agent
   const savedId = localStorage.getItem('nanobot_active_agent');
-  if (savedId && agents.find(a => a.id === savedId)) {
-    activeAgentId = savedId;
-  } else if (agents.length > 0) {
-    activeAgentId = agents[0].id;
+  if (savedId && agents.value.find(a => a.id === savedId)) {
+    activeAgentId.value = savedId;
+  } else if (agents.value.length > 0) {
+    activeAgentId.value = agents.value[0].id;
   }
 
   // Refresh all agent statuses on load
-  agents.forEach(agent => {
+  agents.value.forEach(agent => {
     testAgentConnection(agent.baseUrl).then(result => {
       updateAgentStatus(agent.id, result.ok ? 'active' : 'offline');
-      // Re-render sidebar if status changed
-      if (typeof (window as any).renderAgentSidebar === 'function') {
-        (window as any).renderAgentSidebar();
-      }
     });
   });
 }

@@ -1,11 +1,15 @@
 /**
- * Electron Main Process Entry
+ * Electron Main Process Entry (ESM)
  * Handles app lifecycle, window creation, and IPC registration.
  */
 
-const { app, BrowserWindow } = require('electron');
-const path = require('path');
-const { registerIpcHandlers, closeAllConnections } = require('./ipc');
+import { app, BrowserWindow } from 'electron';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { registerIpcHandlers, closeAllConnections } from './ipc/index.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 let mainWindow;
 
