@@ -1,5 +1,6 @@
 ﻿import { renderMarkdown } from './markdown';
 import { getActiveAgent, getActiveAgentId, wsUrl, apiUrl, onAgentSwitch, updateAgentStatus } from './agent_manager';
+import { createWs, onWsMessage, onWsOpen, onWsClose, onWsError, apiFetch, type WsConnection } from './transport';
 
 export function setupChatLogic() {
   const chatInput = document.getElementById('home-chat-input') as HTMLTextAreaElement;
@@ -62,7 +63,7 @@ export function setupChatLogic() {
   let currentSessionId: string | null = null;
   let batchMode = false;
   let selectedSessionIds = new Set<string>();
-  let ws: WebSocket | null = null;
+  let ws: WsConnection | null = null;
   let wsConnected = false;
 
   const loadSessions = () => {
@@ -263,45 +264,53 @@ export function setupChatLogic() {
     updateSessionsBadge();
   };
 
-  // --- WebSocket ---
-  const connectWebSocket = () => {
+  // --- WebSocket (via IPC) ---
+  const connectWebSocket = async () => {
+    // Close existing connection
     if (ws) {
-      ws.onopen = null; ws.onclose = null; ws.onerror = null; ws.onmessage = null;
-      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) ws.close();
+      try { await ws.close(); } catch {}
       ws = null;
     }
     wsConnected = false;
+
     const agent = getActiveAgent();
     if (!agent) { updateAgentStatusBadge('offline'); return; }
     const targetUrl = wsUrl('/ws');
     if (!targetUrl) { updateAgentStatusBadge('offline'); return; }
     updateAgentStatusBadge('connecting');
     updateAgentStatus(agent.id, 'connecting');
-    try { ws = new WebSocket(targetUrl); } catch (e) {
+
+    try {
+      ws = await createWs(targetUrl);
+    } catch (e) {
       console.error('Failed to create WebSocket:', e);
       updateAgentStatusBadge('offline');
       updateAgentStatus(agent.id, 'offline');
       return;
     }
-    ws.onopen = () => {
+
+    onWsOpen(ws, () => {
       wsConnected = true;
-      console.log(`Connected to ${agent.name} over WebSocket`);
+      console.log(`Connected to ${agent.name} over WebSocket (IPC)`);
       updateAgentStatusBadge('active');
       updateAgentStatus(agent.id, 'active');
-    };
-    ws.onclose = () => {
+    });
+
+    onWsClose(ws, () => {
       wsConnected = false;
       updateAgentStatusBadge('offline');
       updateAgentStatus(agent.id, 'offline');
-    };
-    ws.onerror = () => {
+    });
+
+    onWsError(ws, (error) => {
       wsConnected = false;
       updateAgentStatusBadge('offline');
       updateAgentStatus(agent.id, 'offline');
-    };
-    ws.onmessage = (event) => {
+      console.error('WebSocket error:', error);
+    });
+
+    onWsMessage(ws, (data) => {
       try {
-        const data = JSON.parse(event.data);
         if (data.type === 'chat' && data.content) {
           const isNodeMsg = data.metadata && data.metadata.is_node_message;
           const rtLat = document.getElementById('rt-latency');
@@ -363,16 +372,17 @@ export function setupChatLogic() {
             if (targetSessionId) addMessageToSession(targetSessionId, 'agent', data.content, senderName);
           }
         }
-      } catch (e) { console.error('WS Error:', e); }
-    };
+      } catch (e) { console.error('WS Message Error:', e); }
+    });
   };
 
   const checkAgentStatus = () => {
     const statusUrl = apiUrl('/api/status');
     if (!statusUrl || !getActiveAgent()) { updateAgentStatusBadge('offline'); return; }
-    fetch(statusUrl).then(res => res.json()).then(data => {
+    // Use IPC fetch for status check
+    apiFetch(statusUrl).then(result => {
       if (wsConnected) return;
-      updateAgentStatusBadge(data.status === 'active' ? 'connecting' : 'offline');
+      updateAgentStatusBadge(result.ok && result.data?.status === 'active' ? 'connecting' : 'offline');
     }).catch(() => { if (!wsConnected) updateAgentStatusBadge('offline'); });
   };
 
@@ -592,7 +602,7 @@ export function setupChatLogic() {
     const text = chatInput.value.trim();
     if (!text || !currentSessionId) return;
     addMessageToSession(currentSessionId, 'user', text);
-    if (ws && ws.readyState === WebSocket.OPEN) {
+    if (ws && wsConnected) {
       ws.send(JSON.stringify({ type: 'chat', content: text, session_id: currentSessionId }));
     } else {
       console.warn('WebSocket not open');
@@ -670,7 +680,7 @@ export function setupChatLogic() {
     if (!text || !nodeDid || !currentSessionId) return;
     const instructionText = `请使用 send_message_tool 将以下内容发送给节点 ${nodeDid}:\n\n${text}`;
     addMessageToSession(currentSessionId, 'user', instructionText);
-    if (ws && ws.readyState === WebSocket.OPEN) {
+    if (ws && wsConnected) {
       ws.send(JSON.stringify({ type: 'chat', content: instructionText, session_id: currentSessionId }));
     }
     nodeChatInput.value = '';

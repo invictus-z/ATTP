@@ -1,4 +1,5 @@
 import { apiUrl, getActiveAgent } from './agent_manager';
+import { apiFetch } from './transport';
 
 let currentTraceData: any[] = [];
 let currentTracePage = 0;
@@ -182,8 +183,7 @@ window.toggleNodes = function () {
   
   // Fetch real data
   try {
-      const res = await fetch(apiUrl(`/api/traces/${sessionId}`));
-      const data = await res.json();
+      const { data } = await apiFetch(apiUrl(`/api/traces/${sessionId}`));
       if (container) {
           if (!data.Path || data.Path.length === 0) {
               container.innerHTML = '<div class="text-center text-sm py-4 text-gray-400">No traces available for this session.</div>';
@@ -472,8 +472,7 @@ window.filterSessions = function (event: any) {
     // Only fetch nodes when an agent is active
     if (!getActiveAgent()) return;
     try {
-        const res = await fetch(apiUrl('/api/nodes'));
-        const data = await res.json();
+        const { data } = await apiFetch(apiUrl('/api/nodes'));
         const nodesList = document.getElementById('nodes-list');
         if (!nodesList) return;
         nodesList.innerHTML = '';
@@ -703,10 +702,10 @@ function _collectNodeAds(): string[] {
     formContainer.classList.add('hidden');
 
     try {
-        const res = await fetch(apiUrl('/api/config'));
-        const data = await res.json();
+        const result = await apiFetch(apiUrl('/api/config'));
+        const data = result.data;
 
-        if (data.error || !data.config) {
+        if (result.error || data?.error || !data?.config) {
             loading.classList.add('hidden');
             disabled.classList.remove('hidden');
             badge.className = 'px-2 py-0.5 rounded-md text-[10px] font-medium text-amber-600 bg-amber-50 border border-amber-100';
@@ -763,10 +762,10 @@ function _collectNodeAds(): string[] {
 (window as any).refreshSettingsConfig = async function() {
     // Re-read config from disk (no hot-reload)
     try {
-        const res = await fetch(apiUrl('/api/config?refresh=true'));
-        const data = await res.json();
+        const result = await apiFetch(apiUrl('/api/config?refresh=true'));
+        const data = result.data;
 
-        if (data.error) {
+        if (result.error || data?.error) {
             _showSettingsToast('Failed to refresh configuration', false);
             return;
         }
@@ -847,14 +846,14 @@ function _collectNodeAds(): string[] {
     if (window.lucide) window.lucide.createIcons();
 
     try {
-        const res = await fetch(apiUrl('/api/config'), {
+        const result = await apiFetch(apiUrl('/api/config'), {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
         });
-        const data = await res.json();
+        const data = result.data;
 
-        if (data.success) {
+        if (data?.success) {
             // Update _originalWebAppConfig to track what's now on disk
             _originalWebAppConfig = { host: payload.webApp.host, port: payload.webApp.port };
             _showSettingsToast('Configuration saved (not yet applied)', true);
@@ -886,10 +885,10 @@ function _collectNodeAds(): string[] {
     if (window.lucide) window.lucide.createIcons();
 
     try {
-        const res = await fetch(apiUrl('/api/config/reload'), { method: 'POST' });
-        const data = await res.json();
+        const result = await apiFetch(apiUrl('/api/config/reload'), { method: 'POST' });
+        const data = result.data;
 
-        if (data.success) {
+        if (data?.success) {
             // Update form with the reloaded values
             const cfg = data.config;
             const el = (id: string) => document.getElementById(id) as HTMLInputElement | null;

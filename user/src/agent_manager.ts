@@ -3,6 +3,8 @@
  * Each agent has its own baseUrl, WebSocket connection, and session context.
  */
 
+import { apiFetch } from './transport';
+
 export interface AgentEntry {
   id: string;
   name: string;
@@ -111,16 +113,15 @@ export function renameAgent(id: string, newName: string): void {
   }
 }
 
-/** Test connectivity to an agent by hitting /api/status */
+/** Test connectivity to an agent by hitting /api/status via IPC */
 export async function testAgentConnection(baseUrl: string): Promise<{ ok: boolean; data?: any; error?: string }> {
   try {
     const url = baseUrl.replace(/\/+$/, '') + '/api/status';
-    const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
-    if (!res.ok) {
-      return { ok: false, error: `HTTP ${res.status}` };
+    const result = await apiFetch(url);
+    if (!result.ok) {
+      return { ok: false, error: `HTTP ${result.status}` };
     }
-    const data = await res.json();
-    return { ok: true, data };
+    return { ok: true, data: result.data };
   } catch (e: any) {
     return { ok: false, error: e.message || 'Connection failed' };
   }
