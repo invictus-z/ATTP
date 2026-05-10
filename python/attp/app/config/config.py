@@ -142,19 +142,21 @@ class ConfigManager:
 
     def __init__(self, attp_config_path: str | Path):
         self._attp_path = Path(attp_config_path).expanduser()
-        self.attp_config: ATTPConfigFile = ATTPConfigFile()
+        self.attp_config: ATTPConfigFile | None = None
+        self.load()
 
     # ---- Read ----
 
     def load(self) -> None:
         """Load ATTP config from disk."""
-        if self._attp_path.exists():
-            try:
-                with open(self._attp_path, encoding="utf-8") as f:
-                    data = json.load(f)
-                self.attp_config = ATTPConfigFile.model_validate(data)
-            except (json.JSONDecodeError, ValueError) as e:
-                logger.warning("Failed to load ATTP config from {}: {}", self._attp_path, e)
+        if not self._attp_path.exists():
+            raise FileNotFoundError(f"ATTP config not found: {self._attp_path}")
+        try:
+            with open(self._attp_path, encoding="utf-8") as f:
+                data = json.load(f)
+            self.attp_config = ATTPConfigFile.model_validate(data)
+        except (json.JSONDecodeError, ValueError) as e:
+            raise ValueError(f"Invalid ATTP config at {self._attp_path}: {e}") from e
 
     # ---- Write ----
 

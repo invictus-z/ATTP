@@ -57,7 +57,6 @@ class ATTPChannel(BaseChannel):
 
         # 构建ConfigManager
         self._config_manager = ConfigManager(config_path)
-        self._config_manager.load()
         self._attp_cfg = self._config_manager.attp_config
 
         # 构建Tracer
