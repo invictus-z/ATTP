@@ -27,6 +27,8 @@ class ProtocolNode:
         tracer: MessageTracer,
         session_manager: SessionManager,
         agent_did: str = "",
+        did_resolver=None,
+        behavior_controller=None,
     ):
         from attp.protocol_node.data_port import DataPort
         from attp.protocol_node.api_port import ApiPort
@@ -41,6 +43,8 @@ class ProtocolNode:
             agent_did=agent_did,
             host=data_port_host,
             port=data_port_port,
+            did_resolver=did_resolver,
+            behavior_controller=behavior_controller,
         )
         self._api_port = ApiPort(
             tracer=tracer,

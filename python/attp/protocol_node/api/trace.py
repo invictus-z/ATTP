@@ -42,12 +42,19 @@ def get_behavior_router(
                         "T2A": [],
                     }
                 ft = row["field_type"]
-                if ft in nodes[hc]:
-                    nodes[hc][ft].append({
+                base_ft = ft.split(":")[0]
+                parts = ft.split(":")
+                if base_ft in nodes[hc]:
+                    entry = {
                         "content": row.get("content", ""),
                         "target": row.get("target", ""),
                         "timestamp": row.get("timestamp"),
-                    })
+                    }
+                    if len(parts) >= 2:
+                        entry["verification_status"] = parts[1]
+                    if len(parts) >= 3:
+                        entry["node_type"] = parts[2]
+                    nodes[hc][base_ft].append(entry)
 
             return {
                 "session_id": session_id,
@@ -162,13 +169,20 @@ def get_behavior_router(
                     "T2A": [],
                 }
             ft = row["field_type"]
-            if ft in nodes[hc]:
-                nodes[hc][ft].append({
+            base_ft = ft.split(":")[0]
+            parts = ft.split(":")
+            if base_ft in nodes[hc]:
+                entry = {
                     "id": row.get("id"),
                     "content": row.get("content", ""),
                     "target": row.get("target", ""),
                     "timestamp": row.get("timestamp"),
-                })
+                }
+                if len(parts) >= 2:
+                    entry["verification_status"] = parts[1]
+                if len(parts) >= 3:
+                    entry["node_type"] = parts[2]
+                nodes[hc][base_ft].append(entry)
         grouped_traces = sorted(nodes.values(), key=lambda n: n["hop_count"])
 
         # 4. Parse reports and extract alerts

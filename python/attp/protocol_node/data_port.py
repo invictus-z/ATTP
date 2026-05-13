@@ -1,9 +1,8 @@
-"""端口一：数据处理端 — 接收 record 消息、储存、验证、触发分析。"""
+"""端口一：数据处理端 — 接收 record 消息、验证、储存、触发分析。"""
 
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import uvicorn
@@ -29,12 +28,16 @@ class DataPort:
         agent_did: str,
         host: str,
         port: int,
+        did_resolver=None,
+        behavior_controller=None,
     ):
         self._tracer = tracer
         self._session_manager = session_manager
         self._agent_did = agent_did
         self.host = host
         self.port = port
+        self._did_resolver = did_resolver
+        self._behavior_controller = behavior_controller
         self._app = FastAPI(title="ATTP Protocol Node — Data Port")
         self._orchestrator = None
         self._uvicorn_server = None
@@ -44,73 +47,9 @@ class DataPort:
         tracer_ref = self._tracer
         session_mgr = self._session_manager
         agent_did = self._agent_did
+        did_resolver_ref = self._did_resolver
+        behavior_controller_ref = self._behavior_controller
         _orch_holder = [None]  # mutable list for late-binding
-
-        async def _resolve_public_key(node_did: str):
-            """解析 DID 公钥（复用 server 的解析逻辑）。"""
-            from anp.authentication.did_wba import (
-                resolve_did_wba_document,
-                _extract_public_key,
-                _find_verification_method,
-            )
-            logger.debug("[DID Resolve] 解析公钥: {}", node_did)
-
-            if node_did == agent_did:
-                # 本地 agent 公钥由外部注入（通过 cache_public_key）
-                return tracer_ref._key_store.get(node_did)
-
-            parts = node_did.split(":")
-            if len(parts) < 4 or parts[1] != "wba":
-                return None
-
-            did_doc = None
-            host_name = parts[2]
-            if not host_name.endswith(".local"):
-                try:
-                    did_doc = await resolve_did_wba_document(node_did)
-                except Exception:
-                    pass
-
-            if did_doc:
-                key_id = f"{node_did}#key-1"
-                method = _find_verification_method(did_doc, key_id)
-                if method:
-                    return _extract_public_key(method)
-            return None
-
-        async def _verify_back_record(
-            prev_hop: dict, session_id: str, protocol_node_address: str,
-        ) -> tuple[bool, str]:
-            """回传验证：检查 PrevHop 与已存储 record 的一致性。"""
-            if not session_id or not session_mgr:
-                return True, ""
-            session = session_mgr.get_or_create(session_id)
-            stored = session.get_metadata("LastRecord")
-            if not stored:
-                return True, ""
-
-            prev_node_did = prev_hop.get("node_did")
-            if prev_node_did and prev_node_did not in tracer_ref._pub_key_cache:
-                pub_key = await _resolve_public_key(prev_node_did)
-                if pub_key:
-                    tracer_ref.cache_public_key(prev_node_did, pub_key)
-
-            ok, error = tracer_ref.verify_back_propagation(
-                stored_hop=stored,
-                prev_hop=prev_hop,
-                session_id=session_id,
-                protocol_node_address=protocol_node_address,
-            )
-            if not ok:
-                logger.error(
-                    "Back-propagation verification failed: session={}, error={}",
-                    session_id, error,
-                )
-                session.set_metadata("VerifyStatus", f"FAILED: {error}")
-            else:
-                session.set_metadata("VerifyStatus", "OK")
-            session_mgr.save(session)
-            return ok, error
 
         @self._app.post("/record")
         async def receive_record(request: Request) -> JSONResponse:
@@ -122,65 +61,84 @@ class DataPort:
 
             metadata = body.get("metadata") or {}
             session_id = metadata.get("Session_ID")
-            protocol_node_address = metadata.get("Protocol_Node_Address")
+            pna = metadata.get("Protocol_Node_Address")
 
-            # 1. 保存 BehaviorEntry
-            entry_data = metadata.get("BehaviorEntry")
-            if entry_data:
-                try:
+            # === Nonce 验证管道 ===
+            if did_resolver_ref:
+                from attp.protocol_node.middleware import intercept_record
+
+                result = await intercept_record(
+                    body, did_resolver_ref, tracer_ref,
+                    chain_manager=tracer_ref._chain,
+                    session_manager=session_mgr,
+                    agent_did=agent_did,
+                )
+
+                if result.status == "error":
+                    ERROR_MAP = {
+                        "missing_record_log": (400, "Missing Record_Log"),
+                        "hop_validation": (400, "Hop validation failed"),
+                        "did_resolution_failed": (404, "DID resolution failed"),
+                        "missing_type_field": (400, "Missing ATTPNodeType"),
+                        "invalid_type": (400, "Invalid ATTP node type"),
+                        "missing_nonce": (400, "Missing nonce"),
+                        "missing_identity_signature": (400, "Missing Identity_Signature"),
+                        "identity_signature_invalid": (403, "Identity signature invalid"),
+                        "sender_mismatch_not_self": (403, "Sender mismatch"),
+                        "receiver_mismatch": (403, "Receiver mismatch"),
+                        "back_propagation": (403, "Back-propagation verification failed"),
+                        "invalid_type_combination": (400, "Invalid type combination"),
+                        "hop_count_violation_a2a": (400, "Hop count violation (A2A must +1)"),
+                        "hop_count_violation_non_a2a": (400, "Hop count violation (non-A2A must stay)"),
+                        "hop_zero_must_be_u2a": (400, "hop_count=0 must be U2A (user intent)"),
+                    }
+                    error_key = result.error.split(":")[0] if result.error else ""
+                    code, msg = ERROR_MAP.get(
+                        error_key, (500, result.error or "Unknown error")
+                    )
+                    return JSONResponse({"error": msg}, status_code=code)
+
+                if result.status == "stored":
+                    # Branch A: 仅暂存，不触发存储和分析
+                    return JSONResponse({"status": "Pending record stored"})
+
+                if result.status == "verified":
+                    # Branch B: 全部验证通过，存储行为记录
+                    behavior_type = result.behavior_type
+                    stored = result.stored_msg
+
                     await tracer_ref.save_behavior_entry(
                         session_id=session_id,
-                        protocol_node_address=protocol_node_address,
-                        node_did=entry_data["node_did"],
-                        hop_count=entry_data.get("hop_count", 0),
-                        field_type=entry_data["field_type"],
-                        content=entry_data["content"],
-                        target=entry_data.get("target", ""),
-                        timestamp=entry_data.get("timestamp", 0),
-                        extra=entry_data.get("extra"),
+                        protocol_node_address=pna,
+                        node_did=stored.sender_did,
+                        hop_count=stored.hop.get("Hop_Count", 0),
+                        field_type=behavior_type,
+                        content=stored.hop.get("Content", ""),
+                        target=stored.hop.get("target_did", ""),
+                        timestamp=stored.hop.get("Timestamp", 0),
                     )
                     logger.info(
-                        "BehaviorEntry saved from node={}, field={}",
-                        entry_data.get("node_did"), entry_data.get("field_type"),
+                        "BehaviorEntry saved: sender={}, receiver={}, type={}",
+                        stored.sender_did, result.sender_did, behavior_type,
                     )
-                except Exception as e:
-                    logger.warning("Failed to save BehaviorEntry: {}", e)
 
-                # 意图提取：首条 U2A (User→Agent) 消息作为用户意图来源
-                if entry_data.get("field_type") == "U2A":
-                    _orch_intent = _orch_holder[0]
-                    if _orch_intent and session_id:
-                        try:
-                            await _orch_intent.on_field_U2A_recorded(
-                                session_id, entry_data["content"],
-                            )
-                        except Exception as e:
-                            logger.warning("Intent extraction failed: {}", e)
+                    if behavior_controller_ref:
+                        await behavior_controller_ref.handle(
+                            behavior_type, body, result,
+                        )
 
-            # 2. 回传验证
-            record_log = metadata.get("Record_Log")
-            prev_hop = metadata.get("PrevHop")
+                    # U2A (hop_count=0) 作为用户意图入口，通知 orchestrator 提取 intent
+                    _orch = _orch_holder[0]
+                    if behavior_type == "U2A" and _orch and session_id:
+                        content = stored.hop.get("Content", "")
+                        await _orch.on_field_U2A_recorded(session_id, content)
 
-            if record_log:
-                record_log["session_id"] = session_id
-                record_log["protocol_node_address"] = protocol_node_address
+                    # 触发分析
+                    if _orch and session_id:
+                        await _orch.on_record_received(session_id)
 
-                if session_id and session_mgr:
-                    if prev_hop and protocol_node_address:
-                        await _verify_back_record(prev_hop, session_id, protocol_node_address)
-
-                    session = session_mgr.get_or_create(session_id)
-                    session.set_metadata("LastRecord", record_log)
-                    session_mgr.save(session)
-
-                logger.info("Record log saved")
-
-                # 3. 触发分析
-                _orch = _orch_holder[0]
-                if _orch and session_id:
-                    await _orch.on_record_received(session_id)
-
-                return JSONResponse({"status": "Record saved"})
+                    return JSONResponse({"status": "Record verified and saved"})
+            # === 结束 ===
 
             return JSONResponse({"status": "No log in record metadata"})
 

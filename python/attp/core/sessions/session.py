@@ -6,6 +6,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from .pending_message import PendingMessage
+
 
 @dataclass
 class Session:
@@ -14,6 +16,30 @@ class Session:
     key: str
     metadata: dict[str, Any] = field(default_factory=dict)
     updated_at: float = field(default_factory=time.time)
+
+    # -- nonce-based pending message storage --
+
+    def store_pending_message(self, nonce: str, msg: PendingMessage) -> None:
+        """暂存 PendingMessage，以 nonce 为 key。"""
+        self.metadata[f"_pending:{nonce}"] = msg.to_dict()
+        self.updated_at = time.time()
+
+    def get_pending_message(self, nonce: str) -> PendingMessage | None:
+        """检索 PendingMessage，过期则自动清理。"""
+        data = self.metadata.get(f"_pending:{nonce}")
+        if not data:
+            return None
+        msg = PendingMessage.from_dict(data)
+        if msg.is_expired():
+            self.remove_pending_message(nonce)
+            return None
+        return msg
+
+    def remove_pending_message(self, nonce: str) -> None:
+        """移除指定 nonce 的 PendingMessage。"""
+        self.metadata.pop(f"_pending:{nonce}", None)
+
+    # -- trace metadata --
 
     def get_trace_metadata(self) -> dict[str, Any]:
         """Extract trace-related keys from metadata."""

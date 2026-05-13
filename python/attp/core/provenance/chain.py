@@ -64,14 +64,14 @@ class ChainManager:
     def validate_hop(
         self,
         hop: dict,
-        prev_hop_count: int | None = None,
         timeout: float = 300.0,
     ) -> tuple[bool, str]:
-        """校验单条 hop 的字段完整性、类型、值约束、hop_count 递增及超时。
+        """校验单条 hop 的字段完整性、类型、值约束及超时。
+
+        注意：hop_count 递增校验已移至 middleware 的 Branch B 中基于行为类型执行。
 
         Args:
             hop: 待校验的 hop 字典。
-            prev_hop_count: 上一跳的 Hop_Count，None 则跳过递增校验。
             timeout: 超时阈值（秒），0 则跳过超时校验。
         """
         # Step 1: 字段完整性 & 类型
@@ -98,14 +98,7 @@ class ChainManager:
         if hop["Timestamp"] > now:
             return False, f"[FIELD_VALUE] 'Timestamp' is in the future ({hop['Timestamp']} > now {now})"
 
-        # Step 2: hop_count 递增
-        if prev_hop_count is not None:
-            expected = prev_hop_count + 1
-            if hop["Hop_Count"] != expected:
-                return False, (f"[HOP_COUNT_MISMATCH] Expected Hop_Count={expected} "
-                               f"(prev+1), got {hop['Hop_Count']}")
-
-        # Step 3: timestamp 超时
+        # Step 2: timestamp 超时
         if timeout > 0:
             elapsed = now - hop["Timestamp"]
             if elapsed > timeout:
@@ -142,15 +135,7 @@ class ChainManager:
             logger.warning("Back-prop: PrevHop present but no stored record")
             return False, "No stored record to verify against"
 
-        #step1: 验证新传入的metadata基本合法性（字段、类型、hop_count递增、超时）
-        is_valid, error_msg = self.validate_hop(
-            hop=prev_hop,
-            prev_hop_count=stored_hop.get("Hop_Count"),
-        )
-        if not is_valid:
-            return False, error_msg
-
-        #step2: 核算stored_hop和新传入的pre_hop哈希值，验证上一跳信息与已存储 record 的一致性
+        #step1: 核算stored_hop和新传入的pre_hop哈希值，验证上一跳信息与已存储 record 的一致性
         prev_sign = prev_hop.get("Signature", "")
         prev_node_did = prev_hop.get("node_did", "")
 

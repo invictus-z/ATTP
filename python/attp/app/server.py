@@ -6,18 +6,21 @@ import asyncio
 import socket
 from pathlib import Path
 
+import aiohttp
 import uvicorn
 from fastapi import FastAPI
 from anp.openanp import anp_agent, interface, AgentConfig
 from typing import TYPE_CHECKING
 
 from attp.app.logging import get_logger, UVICORN_SILENT_LOG_CONFIG
+from attp.core.authentication.signatures import sign_hash
 
 logger = get_logger("Server")
 
 from attp.core.sessions import SessionManager
 if TYPE_CHECKING:
     from attp.app.config.config import ATTPServerConfig
+    from attp.core.tracer import MessageTracer
 
 
 class ATTPServer:
@@ -30,10 +33,12 @@ class ATTPServer:
         session_manager: SessionManager,
         web_callback = None,
         attp_channel_callback = None,
+        tracer: MessageTracer | None = None,
     ):
         self.session_manager = session_manager
         self._web_callback = web_callback
         self._attp_channel_callback = attp_channel_callback
+        self._tracer = tracer
         self._running = False
         self._uvicorn_server = None
         self._serve_task = None
@@ -67,6 +72,63 @@ class ATTPServer:
         session_manager = self.session_manager
         web_callback = self._web_callback
         attp_channel_callback = self._attp_channel_callback
+        tracer_ref = self._tracer
+        private_key_path_ref = self.private_key_path
+        agent_did_ref = self.agent_did
+
+        async def _send_phase1_callback(
+            content: str,
+            metadata: dict,
+            agent_did: str,
+            tracer_ref,
+            private_key_path: str | None,
+        ):
+            """Phase 1 回传：向发送方的协议节点发送接收确认。"""
+            incoming_nonce = metadata.get("nonce")
+            incoming_pna = metadata.get("Protocol_Node_Address")
+            incoming_hop = metadata.get("Hop")
+
+            if not (incoming_nonce and incoming_pna and incoming_hop):
+                return
+
+            if not (tracer_ref and private_key_path):
+                return
+
+            try:
+                # 生成 identity signature（证明 B 收到了这条消息）
+                private_key = tracer_ref._key_store.load_private_key(private_key_path)
+                identity_sig = sign_hash(
+                    f"{incoming_nonce}:{agent_did}", private_key
+                )
+
+                record_metadata = {
+                    "Session_ID": metadata.get("Session_ID"),
+                    "Record_Log": incoming_hop,
+                    "Protocol_Node_Address": incoming_pna,
+                    "nonce": incoming_nonce,
+                    "Identity_Signature": identity_sig,
+                }
+                async with aiohttp.ClientSession() as http:
+                    async with http.post(
+                        f"{incoming_pna}/record",
+                        json={
+                            "sender_did": agent_did,
+                            "content": content,
+                            "metadata": record_metadata,
+                        },
+                        timeout=aiohttp.ClientTimeout(total=10),
+                    ) as resp:
+                        if resp.status == 200:
+                            logger.debug(
+                                "Phase 1 callback sent to {}", incoming_pna,
+                            )
+                        else:
+                            logger.warning(
+                                "Phase 1 callback: protocol node returned HTTP {}",
+                                resp.status,
+                            )
+            except Exception as e:
+                logger.warning("Failed to send Phase 1 callback: {}", e)
 
         @anp_agent(AgentConfig(
             name=self.name,
@@ -122,7 +184,7 @@ class ATTPServer:
                                 content=content,
                                 media=[],
                             )
-                        
+
                         # Notify UI of incoming node message
                         if web_callback:
                             await web_callback(content, {
@@ -131,6 +193,17 @@ class ATTPServer:
                                 "other_did": sender_did,
                                 "Session_ID": metadata.get("Session_ID"),
                             })
+
+                        # Phase 1 回传：向发送方的协议节点发送接收确认
+                        # 不创建新 hop，直接回传发送方的 hop + 自身 identity signature
+                        await _send_phase1_callback(
+                            content=content,
+                            metadata=metadata or {},
+                            agent_did=agent_did_ref,
+                            tracer_ref=tracer_ref,
+                            private_key_path=str(private_key_path_ref) if private_key_path_ref else None,
+                        )
+
                         return "Message received"
                     except Exception as e:
                         logger.error("Error processing ATTP message: {}", e)

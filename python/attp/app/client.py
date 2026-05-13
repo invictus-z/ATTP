@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-import time
-import aiohttp
+import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import aiohttp
 from anp.openanp import RemoteAgent
 from anp.authentication import DIDWbaAuthHeader
 from attp.app.logging import get_logger
+from attp.core.authentication.signatures import sign_hash
 
 logger = get_logger("Client")
 
@@ -240,6 +241,8 @@ class ATTPClient:
 
         metadata = metadata or {}
         prev_hop = metadata.get("Hop")  # append_hop 会覆盖 Hop
+        nonce = uuid.uuid4().hex  # 本轮交互的唯一 nonce
+        metadata["nonce"] = nonce  # 携带给接收方，用于 Phase 1 回传
         try:
             private_key_path = str(self.auth.private_key_path) if getattr(self.auth, "private_key_path", None) else None
             if private_key_path:
@@ -264,25 +267,26 @@ class ATTPClient:
                 metadata=metadata,
             )
 
-            # 向协议节点发送 record 副本
+            # 向协议节点发送 record 副本（Phase 2: Client sends）
             try:
                 protocol_node_url = metadata.get("Protocol_Node_Address")
                 if protocol_node_url:
                     record_log = metadata.get("Hop")
                     if record_log:
+                        # 生成 Identity Signature
+                        identity_sig = ""
+                        if private_key_path:
+                            private_key = self._tracer._key_store.load_private_key(private_key_path)
+                            identity_payload = f"{nonce}:{sender_did}"
+                            identity_sig = sign_hash(identity_payload, private_key)
+
                         record_metadata = {
                             "Session_ID": metadata.get("Session_ID"),
                             "Record_Log": record_log,
                             "PrevHop": prev_hop,
                             "Protocol_Node_Address": protocol_node_url,
-                            "BehaviorEntry": {
-                                "field_type": "A2A",
-                                "content": content,
-                                "target": target_did,
-                                "timestamp": time.time(),
-                                "node_did": sender_did,
-                                "hop_count": metadata["Hop"]["Hop_Count"],
-                            },
+                            "nonce": nonce,
+                            "Identity_Signature": identity_sig,
                         }
 
                         async with aiohttp.ClientSession() as http_session:

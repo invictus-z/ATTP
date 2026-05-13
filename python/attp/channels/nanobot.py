@@ -88,6 +88,7 @@ class ATTPChannel(BaseChannel):
             session_manager=self._session_manager,
             web_callback = self._web_app.record_message,
             attp_channel_callback = self._receive,
+            tracer=self._tracer,
         )
         self._heartbeat_manager = HeartbeatManager(
             heartbeat_config=self._attp_cfg.heartbeat,
@@ -108,6 +109,14 @@ class ATTPChannel(BaseChannel):
         pn_cfg = self._attp_cfg.protocol_node
         if pn_cfg.enabled:
             from attp.protocol_node import ProtocolNode
+            from attp.core.authentication import DIDResolver
+            from attp.protocol_node.behavior_controller import BehaviorController
+
+            did_resolver = DIDResolver(
+                agent_did=self._attp_cfg.did,
+                key_store=self._tracer._key_store,
+            )
+            behavior_controller = BehaviorController()
 
             self._protocol_node = ProtocolNode(
                 data_port_host=pn_cfg.data_port_host,
@@ -117,6 +126,8 @@ class ATTPChannel(BaseChannel):
                 tracer=self._tracer,
                 session_manager=self._session_manager,
                 agent_did=self._attp_cfg.did,
+                did_resolver=did_resolver,
+                behavior_controller=behavior_controller,
             )
 
             # 构建并注入 AnalysisOrchestrator

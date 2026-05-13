@@ -16,11 +16,17 @@ from pathlib import Path
 from anp.authentication import create_did_wba_document
 
 
-def generate_did(hostname: str, name: str, output_dir: Path) -> None:
+def generate_did(hostname: str, name: str, node_type: str, output_dir: Path) -> None:
     """为单个 Agent 生成 DID 文档和密钥文件。"""
+    attp_service = {
+        "id": "#node-type",
+        "type": "ATTPNodeType",
+        "serviceEndpoint": f"attp:type:{node_type}",
+    }
     did_document, keys = create_did_wba_document(
         hostname=hostname,
         path_segments=[name],
+        services=[attp_service],
     )
 
     agent_dir = output_dir / name
@@ -35,7 +41,7 @@ def generate_did(hostname: str, name: str, output_dir: Path) -> None:
         with open(agent_dir / f"{fragment}_public.pem", "wb") as f:
             f.write(public_bytes)
 
-    print(f"  ✓ {name} -> {agent_dir}")
+    print(f"  ✓ {name} -> {agent_dir} (type={node_type})")
 
 
 def main() -> None:
@@ -49,7 +55,7 @@ def main() -> None:
   key-3  X25519     用于 E2EE 密钥协商
 
 示例：
-  python scripts/did_creator.py --hostname did-server.test --names userA userB userC
+  python scripts/did_creator.py --hostname did-server.test --names userA userB --type agent
   python scripts/did_creator.py --hostname did-server.test --names my-agent --output-dir ~/.nanobot/did
 """,
     )
@@ -70,6 +76,13 @@ def main() -> None:
         default="./did_output",
         help="输出根目录（默认: ./did_output）",
     )
+    parser.add_argument(
+        "--type",
+        dest="node_type",
+        choices=["agent", "tool", "user"],
+        default="agent",
+        help="节点身份角色（默认: agent）",
+    )
 
     args = parser.parse_args()
 
@@ -77,7 +90,7 @@ def main() -> None:
     print(f"生成 DID 文档至: {output_dir}\n")
 
     for name in args.names:
-        generate_did(args.hostname, name, output_dir)
+        generate_did(args.hostname, name, args.node_type, output_dir)
 
     print(f"\n共生成 {len(args.names)} 个 Agent 的 DID 文档与密钥。")
 

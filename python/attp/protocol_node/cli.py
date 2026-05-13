@@ -116,6 +116,19 @@ async def _run_standalone(args):
     tracer = await MessageTracer.create(db_path=db_path)
     session_manager = SessionManager()
 
+    # 构建 DIDResolver（迁移自 ANP 的 DID 解析逻辑）
+    did_resolver = None
+    behavior_controller = None
+    if cfg.agent_did:
+        from attp.core.authentication import DIDResolver
+        from attp.protocol_node.behavior_controller import BehaviorController
+
+        did_resolver = DIDResolver(
+            agent_did=cfg.agent_did,
+            key_store=tracer._key_store,
+        )
+        behavior_controller = BehaviorController()
+
     node = ProtocolNode(
         data_port_host=pn.data_port_host,
         data_port_port=pn.data_port_port,
@@ -124,6 +137,8 @@ async def _run_standalone(args):
         tracer=tracer,
         session_manager=session_manager,
         agent_did=cfg.agent_did,
+        did_resolver=did_resolver,
+        behavior_controller=behavior_controller,
     )
 
     # 6. 可选：构建 AnalysisOrchestrator
