@@ -17,7 +17,7 @@ from attp.app.logging import get_logger
 from attp.core.authentication.did_resolver import DIDResolver, VALID_NODE_TYPES
 from attp.core.authentication.signatures import verify_signature
 from attp.core.provenance.hashing import calculate_hop_hash
-from attp.core.sessions.pending_message import PendingMessage
+from attp.core.sessions.protocol_node import PendingMessage
 
 logger = get_logger("Middleware")
 
@@ -209,7 +209,7 @@ async def intercept_record(
             )
 
         # 3e. Hop Count 校验（当前对 vs 前一对已完成消息）
-        prev_completed_hc = session.get_metadata("LastCompletedHopCount")
+        prev_completed_hc = session.get_last_completed_hop_count()
         if prev_completed_hc is not None:
             if behavior_type == "A2A":
                 if current_hc != prev_completed_hc + 1:
@@ -230,7 +230,7 @@ async def intercept_record(
 
         # 3e. 清理暂存 + 记录本对 hop_count 供下一对比较
         session.remove_pending_message(nonce)
-        session.set_metadata("LastCompletedHopCount", current_hc)
+        session.set_last_completed_hop_count(current_hc)
         session_manager.save(session)
 
         return InterceptResult(

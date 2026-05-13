@@ -6,7 +6,7 @@ import asyncio
 from typing import TYPE_CHECKING
 
 from attp.app.logging import get_logger
-from attp.core.sessions import SessionManager
+from attp.core.sessions.protocol_node import ProtocolSessionManager
 from attp.core.tracer import MessageTracer
 
 if TYPE_CHECKING:
@@ -25,7 +25,7 @@ class ProtocolNode:
         api_port_host: str,
         api_port_port: int,
         tracer: MessageTracer,
-        session_manager: SessionManager,
+        session_manager: ProtocolSessionManager,
         agent_did: str = "",
         did_resolver=None,
         behavior_controller=None,

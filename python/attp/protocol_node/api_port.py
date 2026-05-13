@@ -14,7 +14,7 @@ logger = get_logger("ApiPort")
 
 if TYPE_CHECKING:
     from attp.core.tracer import MessageTracer
-    from attp.core.sessions import SessionManager
+    from attp.core.sessions.protocol_node import ProtocolSessionManager
 
 
 class ApiPort:
@@ -23,7 +23,7 @@ class ApiPort:
     def __init__(
         self,
         tracer: MessageTracer,
-        session_manager: SessionManager,
+        session_manager: ProtocolSessionManager,
         host: str,
         port: int,
     ):

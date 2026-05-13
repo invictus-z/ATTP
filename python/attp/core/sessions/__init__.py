@@ -1,8 +1,18 @@
-"""ATTP session management — independent of nanobot."""
+"""ATTP session management — App 层与协议节点层分离。"""
 
-from .manager import SessionManager
-from .node_message import BehaviorEntry
-from .pending_message import PendingMessage
-from .session import Session
+from attp.core.sessions.app import AppSession, AppSessionManager
+from attp.core.sessions.node_message import BehaviorEntry
+from attp.core.sessions.protocol_node import (
+    PendingMessage,
+    ProtocolSession,
+    ProtocolSessionManager,
+)
 
-__all__ = ["SessionManager", "Session", "BehaviorEntry", "PendingMessage"]
+__all__ = [
+    "AppSessionManager",
+    "AppSession",
+    "ProtocolSessionManager",
+    "ProtocolSession",
+    "PendingMessage",
+    "BehaviorEntry",
+]

@@ -1,4 +1,4 @@
-"""PendingMessage — 暂存消息数据结构，用于 nonce 匹配的 Branch A 暂存。"""
+"""PendingMessage — nonce 匹配的暂存消息数据结构，用于 Branch A 暂存。"""
 
 from __future__ import annotations
 

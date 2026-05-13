@@ -13,7 +13,7 @@ from attp.core.analysis.models import IntentDescriptor, TaintReport
 if TYPE_CHECKING:
     from attp.core.analysis.analyzer import SemanticTaintAnalyzer
     from attp.core.tracer import MessageTracer
-    from attp.core.sessions import SessionManager
+    from attp.core.sessions.protocol_node import ProtocolSessionManager
 
 logger = get_logger("Analysis")
 
@@ -43,7 +43,7 @@ class AnalysisOrchestrator:
     def __init__(
         self,
         analyzer: SemanticTaintAnalyzer,
-        session_manager: SessionManager,
+        session_manager: ProtocolSessionManager,
         tracer: MessageTracer,
         batch_size: int = 10,
     ):

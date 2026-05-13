@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from attp.app.config.config import ToolConfig
     from attp.app.client import ATTPClient
     from attp.core.tracer import MessageTracer
-    from attp.core.sessions import SessionManager
+    from attp.core.sessions.app import AppSessionManager
 
 
 class ToolNodeInfo:
@@ -66,7 +66,7 @@ class MCPToolBridge:
         tool_config: ToolConfig,
         attp_client: ATTPClient | None = None,
         tracer: MessageTracer | None = None,
-        session_manager: SessionManager | None = None,
+        session_manager: AppSessionManager | None = None,
         agent_did: str = "",
         send_callback: Callable[[str, str, str], Awaitable[str]] | None = None,
     ) -> None:

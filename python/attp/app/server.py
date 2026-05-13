@@ -17,7 +17,7 @@ from attp.core.authentication.signatures import sign_hash
 
 logger = get_logger("Server")
 
-from attp.core.sessions import SessionManager
+from attp.core.sessions.app import AppSessionManager
 if TYPE_CHECKING:
     from attp.app.config.config import ATTPServerConfig
     from attp.core.tracer import MessageTracer
@@ -30,7 +30,7 @@ class ATTPServer:
         self,
         agent_did: str,
         server_config: ATTPServerConfig,
-        session_manager: SessionManager,
+        session_manager: AppSessionManager,
         web_callback = None,
         attp_channel_callback = None,
         tracer: MessageTracer | None = None,

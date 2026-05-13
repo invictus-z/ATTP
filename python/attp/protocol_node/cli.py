@@ -86,7 +86,7 @@ async def _run_standalone(args):
 
     from attp.protocol_node import ProtocolNode
     from attp.protocol_node.config.config import ProtocolNodeConfigFile
-    from attp.core.sessions import SessionManager
+    from attp.core.sessions.protocol_node import ProtocolSessionManager
     from attp.core.tracer import MessageTracer
 
     # 1. 加载配置文件
@@ -114,7 +114,7 @@ async def _run_standalone(args):
 
     # 5. 构建组件
     tracer = await MessageTracer.create(db_path=db_path)
-    session_manager = SessionManager()
+    session_manager = ProtocolSessionManager()
 
     # 构建 DIDResolver（迁移自 ANP 的 DID 解析逻辑）
     did_resolver = None

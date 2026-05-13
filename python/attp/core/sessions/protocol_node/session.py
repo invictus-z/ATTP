@@ -1,4 +1,4 @@
-"""Session – per-chat_id metadata container."""
+"""ProtocolSession — 协议节点层 per-session 验证状态 + 分析状态容器。"""
 
 from __future__ import annotations
 
@@ -10,8 +10,8 @@ from .pending_message import PendingMessage
 
 
 @dataclass
-class Session:
-    """Holds metadata for a single chat session."""
+class ProtocolSession:
+    """协议节点层 session：管理 nonce 暂存、hop 序列校验、分析状态。"""
 
     key: str
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -39,19 +39,16 @@ class Session:
         """移除指定 nonce 的 PendingMessage。"""
         self.metadata.pop(f"_pending:{nonce}", None)
 
-    # -- trace metadata --
+    # -- hop count validation state --
 
-    def get_trace_metadata(self) -> dict[str, Any]:
-        """Extract trace-related keys from metadata."""
-        keys = ("Hop", "Session_ID", "Protocol_Node_Address")
-        return {k: self.metadata[k] for k in keys if k in self.metadata}
+    def get_last_completed_hop_count(self) -> int | None:
+        return self.metadata.get("LastCompletedHopCount")
 
-    def set_trace_metadata(self, trace_data: dict[str, Any]) -> None:
-        """Merge trace keys into metadata."""
-        for k in ("Hop", "Session_ID", "Protocol_Node_Address"):
-            if k in trace_data:
-                self.metadata[k] = trace_data[k]
+    def set_last_completed_hop_count(self, hc: int) -> None:
+        self.metadata["LastCompletedHopCount"] = hc
         self.updated_at = time.time()
+
+    # -- generic metadata (for _pending_intent_content, _intent_retry_count, etc.) --
 
     def set_metadata(self, key: str, value: Any) -> None:
         self.metadata[key] = value
@@ -59,11 +56,6 @@ class Session:
 
     def get_metadata(self, key: str, default: Any = None) -> Any:
         return self.metadata.get(key, default)
-
-    def update_metadata(self, data: dict[str, Any]) -> None:
-        """Bulk-merge *data* into metadata."""
-        self.metadata.update(data)
-        self.updated_at = time.time()
 
     # -- Analysis state tracking --
 

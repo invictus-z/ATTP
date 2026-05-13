@@ -20,7 +20,8 @@ from attp.app.server import ATTPServer
 from attp.app.config import ConfigManager
 from attp.app.heartbeat import HeartbeatManager
 from attp.app.web import WebApp
-from attp.core.sessions import SessionManager
+from attp.core.sessions.app import AppSessionManager
+from attp.core.sessions.protocol_node import ProtocolSessionManager
 from attp.app.tools import SendMessageTool
 from attp.core.tracer import MessageTracer
 
@@ -72,20 +73,21 @@ class ATTPChannel(BaseChannel):
         )
 
         # 构建SessionManager
-        self._session_manager = SessionManager()
+        self._app_session_manager = AppSessionManager()
+        self._protocol_session_manager = ProtocolSessionManager()
 
         # 构建所有组件
         self._attp_client = ATTPClient(
             agent_did=self._attp_cfg.did,
             client_config=self._attp_cfg.attp_client,
-            session_manager=self._session_manager,
+            session_manager=self._app_session_manager,
             web_callback = self._web_app.record_message,
             tracer=self._tracer,
         )
         self._attp_server = ATTPServer(
             agent_did=self._attp_cfg.did,
             server_config=self._attp_cfg.attp_server,
-            session_manager=self._session_manager,
+            session_manager=self._app_session_manager,
             web_callback = self._web_app.record_message,
             attp_channel_callback = self._receive,
             tracer=self._tracer,
@@ -124,7 +126,7 @@ class ATTPChannel(BaseChannel):
                 api_port_host=pn_cfg.api_port_host,
                 api_port_port=pn_cfg.api_port_port,
                 tracer=self._tracer,
-                session_manager=self._session_manager,
+                session_manager=self._protocol_session_manager,
                 agent_did=self._attp_cfg.did,
                 did_resolver=did_resolver,
                 behavior_controller=behavior_controller,
@@ -150,7 +152,7 @@ class ATTPChannel(BaseChannel):
             tg.create_task(self._web_app.start(
                 self._attp_client, self._config_manager,
                 reload_callback=self.reload,
-                session_manager=self._session_manager,
+                session_manager=self._app_session_manager,
                 agent_did=self._attp_cfg.did,
             ))
             if self._protocol_node:
@@ -268,7 +270,7 @@ class ATTPChannel(BaseChannel):
         )
         return AnalysisOrchestrator(
             analyzer=analyzer,
-            session_manager=self._session_manager,
+            session_manager=self._protocol_session_manager,
             tracer=self._tracer,
             batch_size=analysis_cfg.report_batch_size,
         )

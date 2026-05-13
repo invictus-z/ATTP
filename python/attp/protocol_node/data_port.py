@@ -15,7 +15,7 @@ logger = get_logger("DataPort")
 
 if TYPE_CHECKING:
     from attp.core.tracer import MessageTracer
-    from attp.core.sessions import SessionManager
+    from attp.core.sessions.protocol_node import ProtocolSessionManager
 
 
 class DataPort:
@@ -24,7 +24,7 @@ class DataPort:
     def __init__(
         self,
         tracer: MessageTracer,
-        session_manager: SessionManager,
+        session_manager: ProtocolSessionManager,
         agent_did: str,
         host: str,
         port: int,
