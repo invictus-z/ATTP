@@ -33,6 +33,8 @@ const agentCurrentSessionMap = new Map<string, string | null>()
 const agentWsMap = new Map<string, WsConnection>()
 /** WS connected status keyed by agentId */
 const agentWsConnectedMap = new Map<string, boolean>()
+/** Agents currently in the process of connecting (prevents duplicate concurrent connections) */
+const connectingAgents = new Set<string>()
 
 // ---- Shared Reactive State (for active agent) ----
 
@@ -426,11 +428,15 @@ export function useChat() {
 
   /** Connect WebSocket for a specific agent */
   const connectAgentWs = async (agentId: string) => {
-    // Skip if already connected
+    // Skip if already connected or currently connecting
+    if (connectingAgents.has(agentId)) return
     if (agentWsMap.has(agentId) && agentWsConnectedMap.get(agentId)) return
 
     const agent = getAgentById(agentId)
     if (!agent) return
+
+    // Mark as connecting to prevent duplicate concurrent connections
+    connectingAgents.add(agentId)
 
     // Close existing connection if any
     const existing = agentWsMap.get(agentId)
@@ -481,6 +487,8 @@ export function useChat() {
       console.error(`[WS] Failed to connect to ${agent.name}:`, e)
       updateAgentStatus(agent.id, 'offline')
       if (agentId === getActiveAgentId()) updateAgentStatusBadge('offline')
+    } finally {
+      connectingAgents.delete(agentId)
     }
   }
 
