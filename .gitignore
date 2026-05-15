@@ -1,5 +1,6 @@
 .vscode/
 .venv/
+todo/
 
 python/attp.egg-info/
 __pycache__/

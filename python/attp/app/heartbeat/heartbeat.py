@@ -1,54 +1,98 @@
-""" 心跳管理 （目前只维护 ATTP 客户端的连接）"""
+"""HeartbeatManager — 通用心跳调度器。
+
+通过 HealthChecker 协议实现插件化：
+- HeartbeatManager 只负责定时调度
+- 具体检查逻辑由各个 Checker 实现（_agent.py, _tool.py 等）
+"""
 
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
-from anp.openanp import RemoteAgent
 from attp.app.logging import get_logger
 
 logger = get_logger("Heartbeat")
 
 if TYPE_CHECKING:
-    from attp.app.client import ATTPClient
     from attp.app.config.config import HeartbeatConfig
 
 
-class HeartbeatManager:
-    """Manages heartbeat checks for all remote agents of an ATTPClient.
+# ------------------------------------------------------------------
+# HealthChecker 协议
+# ------------------------------------------------------------------
 
-    Responsibilities:
-    - Periodically retry failed URLs to reconnect dropped agents.
-    - Periodically health-check currently connected agents.
-    - Evict agents that fail consecutively beyond a threshold.
+@runtime_checkable
+class HealthChecker(Protocol):
+    """所有健康检查器必须实现此协议。"""
+
+    async def check(self) -> None:
+        """执行一轮健康检查。"""
+        ...
+
+
+# ------------------------------------------------------------------
+# HeartbeatManager
+# ------------------------------------------------------------------
+
+class HeartbeatManager:
+    """通用心跳调度器 — 定时调用所有已注册的 HealthChecker。
+
+    使用方式：
+        mgr = HeartbeatManager(heartbeat_config)
+        mgr.add_checker(agent_checker)
+        mgr.add_checker(tool_checker)
+        await mgr.start()
+
+    职责：
+    - 定时触发所有 checker 的 check() 方法
+    - 管理 checker 的注册/移除
+    - 生命周期管理（start/stop/reload）
     """
 
-    def __init__(
-        self,
-        heartbeat_config: HeartbeatConfig,
-        attp_client: ATTPClient
-    ):
-        self._attp_client = attp_client
+    def __init__(self, heartbeat_config: HeartbeatConfig) -> None:
         self._interval = heartbeat_config.interval      # 心跳间隔（秒）
         self._timeout = heartbeat_config.timeout        # 单次心跳超时（秒）
         self._max_fail = heartbeat_config.max_fail      # 连续失败多少次后踢出
         self._task: asyncio.Task | None = None
-        self._fail_counts: dict[str, int] = {}  # 连续心跳失败计数 {did: count}
+        self._checkers: list[HealthChecker] = []
+
+    # ------------------------------------------------------------------
+    # Checker 管理
+    # ------------------------------------------------------------------
+
+    def add_checker(self, checker: HealthChecker) -> None:
+        """注册一个健康检查器。"""
+        self._checkers.append(checker)
+        logger.info("Registered health checker: {}", type(checker).__name__)
+
+    def remove_checker(self, checker: HealthChecker) -> None:
+        """移除一个健康检查器。"""
+        self._checkers.remove(checker)
+        logger.info("Removed health checker: {}", type(checker).__name__)
+
+    @property
+    def checkers(self) -> list[HealthChecker]:
+        """返回当前已注册的 checker 列表（只读视图）。"""
+        return list(self._checkers)
 
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
 
-    async def start(self):
+    async def start(self) -> None:
         """启动后台心跳检测任务。"""
         if self._task is not None and not self._task.done():
             logger.warning("already running")
             return
         self._task = asyncio.create_task(self._loop())
-        logger.info("started (every {}s)", self._interval)
+        logger.info(
+            "started (every {}s, {} checkers)",
+            self._interval,
+            len(self._checkers),
+        )
 
-    async def stop(self):
+    async def stop(self) -> None:
         """停止心跳检测任务。"""
         if self._task:
             self._task.cancel()
@@ -60,100 +104,34 @@ class HeartbeatManager:
             logger.info("stopped")
 
     async def reload(self, heartbeat_config: HeartbeatConfig) -> None:
-        """Stop → update parameters → restart."""
+        """Stop → update parameters → restart。Checkers 保持不变。"""
         await self.stop()
         self._interval = heartbeat_config.interval
         self._timeout = heartbeat_config.timeout
         self._max_fail = heartbeat_config.max_fail
-        self._fail_counts.clear()
         await self.start()
-        logger.info("reloaded (interval={}s, timeout={}s, max_fail={})", self._interval, self._timeout, self._max_fail)
-
-    # ------------------------------------------------------------------
-    # Public helpers
-    # ------------------------------------------------------------------
-
-    def reset_fail_count(self, did: str):
-        """重置指定 agent 的连续失败计数（重连成功时由 client 调用）。"""
-        self._fail_counts.pop(did, None)
+        logger.info(
+            "reloaded (interval={}s, timeout={}s, max_fail={})",
+            self._interval, self._timeout, self._max_fail,
+        )
 
     # ------------------------------------------------------------------
     # Internal loop
     # ------------------------------------------------------------------
 
-    async def _loop(self):
-        """心跳主循环：重连失败 URL + 检测已连接 agent。"""
+    async def _loop(self) -> None:
+        """心跳主循环：定时调用所有 checker。"""
         while True:
             try:
                 await asyncio.sleep(self._interval)
             except asyncio.CancelledError:
                 break
 
-            # 1. 重连失败的 URL
-            await self._attp_client.retry_failed_urls(target_did=None)
-
-            # 2. 对已连接的远程 agent 执行心跳检测
-            remote_agents = self._attp_client.remote_agents
-            if not remote_agents:
-                continue
-
-            logger.debug("checking {} remote agents...", len(remote_agents))
-            for did, remote in list(remote_agents.items()):
-                await self._check(did, remote)
-
-    # ------------------------------------------------------------------
-    # Per-agent health check
-    # ------------------------------------------------------------------
-
-    async def _check(self, did: str, remote: RemoteAgent):
-        """对单个 agent 执行心跳检测，连续失败超过阈值则移回 _failed_urls。"""
-        try:
-            result = await asyncio.wait_for(
-                remote.health(),
-                timeout=self._timeout,
-            )
-            if result == "ok":
-                self._fail_counts.pop(did, None)
-                logger.debug("agent {} is healthy", did)
-            else:
-                self._fail_counts[did] = self._fail_counts.get(did, 0) + 1
-                logger.warning(
-                    "agent {} returned unexpected response: {} (fail_count={})",
-                    did, result, self._fail_counts[did],
-                )
-                if self._fail_counts[did] >= self._max_fail:
-                    self._evict(did)
-        except asyncio.TimeoutError:
-            self._fail_counts[did] = self._fail_counts.get(did, 0) + 1
-            logger.warning(
-                "agent {} timed out ({}s) (fail_count={})",
-                did, self._timeout, self._fail_counts[did],
-            )
-            if self._fail_counts[did] >= self._max_fail:
-                self._evict(did)
-        except Exception as e:
-            self._fail_counts[did] = self._fail_counts.get(did, 0) + 1
-            logger.warning(
-                "agent {} error: {} (fail_count={})",
-                did, e, self._fail_counts[did],
-            )
-            if self._fail_counts[did] >= self._max_fail:
-                self._evict(did)
-
-    def _evict(self, did: str):
-        """将 agent 从 _remote_agents 中移除，其 ad_url 加回 _failed_urls。"""
-        self._attp_client.remote_agents.pop(did, None)
-        self._fail_counts.pop(did, None)
-
-        ad_url = self._attp_client.registered_agents.get(did, {}).get("ad_url")
-        if ad_url:
-            self._attp_client.failed_urls.add(ad_url)
-            logger.warning(
-                "agent {} evicted, ad_url={} added back to failed_urls",
-                did, ad_url,
-            )
-        else:
-            logger.warning(
-                "agent {} evicted, but no ad_url found in registered_agents",
-                did,
-            )
+            for checker in self._checkers:
+                try:
+                    await checker.check()
+                except Exception as e:
+                    logger.error(
+                        "Checker {} failed: {}",
+                        type(checker).__name__, e,
+                    )
