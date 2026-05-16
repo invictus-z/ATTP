@@ -39,7 +39,7 @@ from attp.core.authentication.keys import KeyStore
 from attp.core.provenance.chain import ChainManager
 from attp.core.sessions.node_message import NodeMessage
 from attp.core.storage.sqlite_store import SqliteStore
-from attp.core.tracer import MessageTracer
+from attp.core.pn_tracer import ProtocolTracer
 from attp.sdk.tools.tool_ad import ToolAd
 
 import logging
@@ -75,7 +75,7 @@ class MCPToATTPAdapter:
         self._key_store = KeyStore()
         self._chain = ChainManager(self._key_store)
         self._storage = SqliteStore(db_path)
-        self._tracer = MessageTracer(db_path)
+        self._tracer = ProtocolTracer(db_path)
 
         self._app = FastAPI(title=f"ATTP Tool Node (MCP Adapter): {name}")
         self._setup_routes()

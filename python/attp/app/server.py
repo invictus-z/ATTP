@@ -20,7 +20,7 @@ logger = get_logger("Server")
 from attp.core.sessions.app import AppSessionManager
 if TYPE_CHECKING:
     from attp.app.config.config import ATTPServerConfig
-    from attp.core.tracer import MessageTracer
+    from attp.core.agent_tracer import AgentTracer
 
 
 class ATTPServer:
@@ -33,7 +33,7 @@ class ATTPServer:
         session_manager: AppSessionManager,
         web_callback = None,
         attp_channel_callback = None,
-        tracer: MessageTracer | None = None,
+        tracer: AgentTracer | None = None,
     ):
         self.session_manager = session_manager
         self._web_callback = web_callback
@@ -96,7 +96,7 @@ class ATTPServer:
 
             try:
                 # 生成 identity signature（证明 B 收到了这条消息）
-                private_key = tracer_ref._key_store.load_private_key(private_key_path)
+                private_key = tracer_ref.load_private_key(private_key_path)
                 identity_sig = sign_hash(
                     f"{incoming_nonce}:{agent_did}", private_key
                 )

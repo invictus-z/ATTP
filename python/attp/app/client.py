@@ -18,7 +18,7 @@ from attp.core.sessions.app import AppSessionManager
 
 if TYPE_CHECKING:
     from attp.app.config.config import ATTPClientConfig
-    from attp.core.tracer import MessageTracer
+    from attp.core.agent_tracer import AgentTracer
 
 class ATTPClient:
     """ATTP 客户端实现"""
@@ -29,7 +29,7 @@ class ATTPClient:
         client_config: ATTPClientConfig,
         session_manager: AppSessionManager | None = None,
         web_callback = None,
-        tracer: MessageTracer = None,
+        tracer: AgentTracer = None,
     ):
         self._tracer = tracer
         self.agent_did = agent_did
@@ -276,7 +276,7 @@ class ATTPClient:
                         # 生成 Identity Signature
                         identity_sig = ""
                         if private_key_path:
-                            private_key = self._tracer._key_store.load_private_key(private_key_path)
+                            private_key = self._tracer.load_private_key(private_key_path)
                             identity_payload = f"{nonce}:{sender_did}"
                             identity_sig = sign_hash(identity_payload, private_key)
 

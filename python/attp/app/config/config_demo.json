@@ -1,8 +1,8 @@
 {
     "did": "did:wba:home.local:your-agent-name",
     "attpClient": {
-        "didDocPath": "~/.nanobot/did/did.json",
-        "didKeyPath": "~/.nanobot/did/key-1_private.pem",
+        "didDocPath": "~/.attp/did/did.json",
+        "didKeyPath": "~/.attp/did/key-1_private.pem",
         "nodeAds": [
             "http://other-agent:8000/agent/ad.json"
         ]
@@ -13,8 +13,8 @@
         "description": "My local ATTP agent",
         "serverHost": "0.0.0.0",
         "serverPort": 8000,
-        "privateKeyPath": "~/.nanobot/did/key-1_private.pem",
-        "publicKeyPath": "~/.nanobot/did/key-1_public.pem"
+        "privateKeyPath": "~/.attp/did/key-1_private.pem",
+        "publicKeyPath": "~/.attp/did/key-1_public.pem"
     },
     "webApp": {
         "host": "127.0.0.1",
@@ -29,22 +29,8 @@
         "timeout": 90,
         "maxFail": 3
     },
-    "storage": {
-        "dataDir": "~/.nanobot",
-        "dbPath": "attp_traces.db"
-    },
-    "analysis": {
-        "enabled": false,
-        "apiKey": "",
-        "baseUrl": "https://api.openai.com/v1",
-        "model": "gpt-4o",
-        "reportBatchSize": 10
-    },
     "protocolNode": {
         "enabled": false,
-        "dataPortHost": "127.0.0.1",
-        "dataPortPort": 9000,
-        "apiPortHost": "127.0.0.1",
-        "apiPortPort": 9001
+        "configPath": "~/.attp/protocol_node/config.json"
     }
 }

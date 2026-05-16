@@ -24,7 +24,7 @@ logger = get_logger("ToolBridge")
 if TYPE_CHECKING:
     from attp.app.config.config import ToolConfig
     from attp.app.client import ATTPClient
-    from attp.core.tracer import MessageTracer
+    from attp.core.agent_tracer import AgentTracer
     from attp.core.sessions.app import AppSessionManager
 
 
@@ -65,7 +65,7 @@ class MCPToolBridge:
         self,
         tool_config: ToolConfig,
         attp_client: ATTPClient | None = None,
-        tracer: MessageTracer | None = None,
+        tracer: AgentTracer | None = None,
         session_manager: AppSessionManager | None = None,
         agent_did: str = "",
         send_callback: Callable[[str, str, str], Awaitable[str]] | None = None,
@@ -75,7 +75,7 @@ class MCPToolBridge:
         Args:
             tool_config: 工具服务配置（host/port）。
             attp_client: ATTP 客户端实例，用于发送 ATTP 消息到工具节点。
-            tracer: MessageTracer 实例，用于行为溯源。
+            tracer: AgentTracer 实例，用于行为溯源。
             session_manager: SessionManager 实例，用于会话管理。
             agent_did: 本 Agent 的 DID。
             send_callback: 消息发送回调（target, content, chat_id）-> str，

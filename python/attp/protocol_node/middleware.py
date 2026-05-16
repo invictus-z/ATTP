@@ -57,7 +57,7 @@ async def intercept_record(
     Args:
         body: 请求 JSON body。
         did_resolver: DID 解析器实例。
-        tracer: MessageTracer 实例。
+        tracer: ProtocolTracer 实例。
         chain_manager: ChainManager 实例（用于 validate_hop）。
         session_manager: SessionManager 实例（用于 nonce 暂存）。
         agent_did: 协议节点所属 agent 的 DID。

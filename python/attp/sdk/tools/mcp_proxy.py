@@ -48,7 +48,7 @@ from attp.core.authentication.keys import KeyStore
 from attp.core.provenance.chain import ChainManager
 from attp.core.sessions.node_message import NodeMessage
 from attp.core.storage.sqlite_store import SqliteStore
-from attp.core.tracer import MessageTracer
+from attp.core.pn_tracer import ProtocolTracer
 from attp.sdk.tools.tool_ad import ToolAd
 
 import logging
@@ -106,7 +106,7 @@ class MCPProxyToolNode:
         self._key_store = KeyStore()
         self._chain = ChainManager(self._key_store)
         self._storage = SqliteStore(db_path)
-        self._tracer = MessageTracer(db_path)
+        self._tracer = ProtocolTracer(db_path)
 
         # 远程工具缓存: server_name -> list of tool dicts
         self._remote_tools: dict[str, list[dict[str, Any]]] = {}

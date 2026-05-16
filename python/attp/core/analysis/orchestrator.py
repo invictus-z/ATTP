@@ -12,7 +12,7 @@ from attp.core.analysis.models import IntentDescriptor, TaintReport
 
 if TYPE_CHECKING:
     from attp.core.analysis.analyzer import SemanticTaintAnalyzer
-    from attp.core.tracer import MessageTracer
+    from attp.core.pn_tracer import ProtocolTracer
     from attp.core.sessions.protocol_node import ProtocolSessionManager
 
 logger = get_logger("Analysis")
@@ -37,14 +37,14 @@ class AnalysisOrchestrator:
     """Coordinates intent extraction, report counting, and analysis scheduling.
 
     Entirely driven by DataPort record reception — no dependency on web layer.
-    Analysis state is persisted to SQLite via MessageTracer for crash recovery.
+    Analysis state is persisted to SQLite via ProtocolTracer for crash recovery.
     """
 
     def __init__(
         self,
         analyzer: SemanticTaintAnalyzer,
         session_manager: ProtocolSessionManager,
-        tracer: MessageTracer,
+        tracer: ProtocolTracer,
         batch_size: int = 10,
     ):
         self._analyzer = analyzer

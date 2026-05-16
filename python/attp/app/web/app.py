@@ -32,8 +32,7 @@ class WebApp():
     Protocol-related API routes (trace, analysis) are served by ProtocolNode ApiPort.
     """
 
-    def __init__(self, web_config: WebAppConfig, channel_callback=None, tracer=None):
-        self._tracer = tracer
+    def __init__(self, web_config: WebAppConfig, channel_callback=None):
         self.host = web_config.host
         self.port = web_config.port
         self._server = None

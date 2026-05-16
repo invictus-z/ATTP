@@ -22,8 +22,9 @@ from attp.app.heartbeat import HeartbeatManager
 from attp.app.web import WebApp
 from attp.core.sessions.app import AppSessionManager
 from attp.core.sessions.protocol_node import ProtocolSessionManager
-from attp.app.tools import SendMessageTool
-from attp.core.tracer import MessageTracer
+from attp.app.tools import MCPToolBridge
+from attp.core.agent_tracer import AgentTracer
+from attp.core.pn_tracer import ProtocolTracer
 
 if TYPE_CHECKING:
     from attp.app.config.config import ATTPConfigFile
@@ -60,16 +61,18 @@ class ATTPChannel(BaseChannel):
         self._config_manager = ConfigManager(config_path)
         self._attp_cfg = self._config_manager.attp_config
 
-        # 构建Tracer
+        # 构建 AgentTracer（Agent 侧：轻量，无数据库）
+        self._agent_tracer = AgentTracer()
+
+        # 构建 ProtocolTracer（ProtocolNode 侧：含 SQLite 存储）
         storage_cfg = self._attp_cfg.storage
         tracer_db_path = str(Path(storage_cfg.data_dir).expanduser() / storage_cfg.db_path)
-        self._tracer = await MessageTracer.create(db_path=tracer_db_path)
+        self._protocol_tracer = await ProtocolTracer.create(db_path=tracer_db_path)
 
         # 构建后端服务器 web_app/
         self._web_app = WebApp(
             web_config=self._attp_cfg.web_app,
             channel_callback=self._receive,
-            tracer=self._tracer,
         )
 
         # 构建SessionManager
@@ -82,7 +85,7 @@ class ATTPChannel(BaseChannel):
             client_config=self._attp_cfg.attp_client,
             session_manager=self._app_session_manager,
             web_callback = self._web_app.record_message,
-            tracer=self._tracer,
+            tracer=self._agent_tracer,
         )
         self._attp_server = ATTPServer(
             agent_did=self._attp_cfg.did,
@@ -90,7 +93,7 @@ class ATTPChannel(BaseChannel):
             session_manager=self._app_session_manager,
             web_callback = self._web_app.record_message,
             attp_channel_callback = self._receive,
-            tracer=self._tracer,
+            tracer=self._agent_tracer,
         )
         self._heartbeat_manager = HeartbeatManager(
             heartbeat_config=self._attp_cfg.heartbeat,
@@ -98,7 +101,11 @@ class ATTPChannel(BaseChannel):
         )
         self._send_message_tool = SendMessageTool(
             tool_config=self._attp_cfg.tool,
-            callback=self._attp_client.send_message,
+            attp_client=self._attp_client,
+            tracer=self._agent_tracer,
+            session_manager=self._app_session_manager,
+            agent_did=self._attp_cfg.did,
+            send_callback=self._attp_client.send_message,
         )
 
         # ------------------------------------------------------------------
@@ -116,7 +123,7 @@ class ATTPChannel(BaseChannel):
 
             did_resolver = DIDResolver(
                 agent_did=self._attp_cfg.did,
-                key_store=self._tracer._key_store,
+                key_store=self._protocol_tracer.key_store,
             )
             behavior_controller = BehaviorController()
 
@@ -125,7 +132,7 @@ class ATTPChannel(BaseChannel):
                 data_port_port=pn_cfg.data_port_port,
                 api_port_host=pn_cfg.api_port_host,
                 api_port_port=pn_cfg.api_port_port,
-                tracer=self._tracer,
+                tracer=self._protocol_tracer,
                 session_manager=self._protocol_session_manager,
                 agent_did=self._attp_cfg.did,
                 did_resolver=did_resolver,
@@ -271,6 +278,6 @@ class ATTPChannel(BaseChannel):
         return AnalysisOrchestrator(
             analyzer=analyzer,
             session_manager=self._protocol_session_manager,
-            tracer=self._tracer,
+            tracer=self._protocol_tracer,
             batch_size=analysis_cfg.report_batch_size,
         )

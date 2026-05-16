@@ -14,7 +14,7 @@ from attp.app.logging import get_logger, UVICORN_SILENT_LOG_CONFIG
 logger = get_logger("DataPort")
 
 if TYPE_CHECKING:
-    from attp.core.tracer import MessageTracer
+    from attp.core.pn_tracer import ProtocolTracer
     from attp.core.sessions.protocol_node import ProtocolSessionManager
 
 
@@ -23,7 +23,7 @@ class DataPort:
 
     def __init__(
         self,
-        tracer: MessageTracer,
+        tracer: ProtocolTracer,
         session_manager: ProtocolSessionManager,
         agent_did: str,
         host: str,
@@ -69,7 +69,7 @@ class DataPort:
 
                 result = await intercept_record(
                     body, did_resolver_ref, tracer_ref,
-                    chain_manager=tracer_ref._chain,
+                    chain_manager=tracer_ref.chain,
                     session_manager=session_mgr,
                     agent_did=agent_did,
                 )

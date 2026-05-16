@@ -1,13 +1,12 @@
 {
-    "agentDid": "did:wba:localhost:my-protocol-node",
-    "protocolNode": {
+    "web": {
         "dataPortHost": "0.0.0.0",
         "dataPortPort": 9000,
         "apiPortHost": "0.0.0.0",
         "apiPortPort": 9001
     },
     "storage": {
-        "dataDir": "~/.nanobot/attp",
+        "dataDir": "~/.attp/protocol_node",
         "dbPath": "attp.db"
     },
     "analysis": {

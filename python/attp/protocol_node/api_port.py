@@ -13,7 +13,7 @@ from attp.app.logging import get_logger, UVICORN_SILENT_LOG_CONFIG
 logger = get_logger("ApiPort")
 
 if TYPE_CHECKING:
-    from attp.core.tracer import MessageTracer
+    from attp.core.pn_tracer import ProtocolTracer
     from attp.core.sessions.protocol_node import ProtocolSessionManager
 
 
@@ -22,7 +22,7 @@ class ApiPort:
 
     def __init__(
         self,
-        tracer: MessageTracer,
+        tracer: ProtocolTracer,
         session_manager: ProtocolSessionManager,
         host: str,
         port: int,

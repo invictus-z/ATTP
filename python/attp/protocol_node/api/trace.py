@@ -10,13 +10,13 @@ from typing import Any
 from fastapi import APIRouter
 
 from attp.app.logging import get_logger
-from attp.core.tracer import MessageTracer
+from attp.core.pn_tracer import ProtocolTracer
 
 logger = get_logger("Tracing")
 
 
 def get_behavior_router(
-    tracer: MessageTracer,
+    tracer: ProtocolTracer,
     session_manager: Any = None,
     orchestrator: Any = None,
 ) -> APIRouter:

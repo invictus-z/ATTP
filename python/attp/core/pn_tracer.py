@@ -1,4 +1,8 @@
-"""Facade 门面模式：组合 authentication / provenance / storage 子模块。"""
+"""Protocol Node facade — combines authentication / provenance / storage.
+
+Used exclusively by ProtocolNode components (DataPort, ApiPort,
+AnalysisOrchestrator).  Agent-side tracing is handled by AgentTracer.
+"""
 
 from __future__ import annotations
 
@@ -7,8 +11,8 @@ from attp.core.provenance import ChainManager
 from attp.core.storage import SqliteStore
 
 
-class MessageTracer:
-    """Facade that composes sub-modules and exposes a unified public API."""
+class ProtocolTracer:
+    """Facade for Protocol Node: verification, storage, and analysis queries."""
 
     def __init__(self, db_path: str):
         self._key_store = KeyStore()
@@ -17,7 +21,7 @@ class MessageTracer:
         self._db_path = db_path
 
     @classmethod
-    async def create(cls, db_path: str) -> MessageTracer:
+    async def create(cls, db_path: str) -> ProtocolTracer:
         """Async factory: construct instance and initialise storage."""
         tracer = cls(db_path)
         tracer._storage = await SqliteStore.create(db_path)
@@ -26,22 +30,20 @@ class MessageTracer:
     # -- key management (delegated to KeyStore) --
 
     def cache_public_key(self, node_did: str, public_key) -> None:
-        """注入公钥到缓存（由异步调用方在 validate 前调用）。"""
+        """Inject public key into cache (called before verification)."""
         self._key_store.cache_public_key(node_did, public_key)
 
     @property
-    def _pub_key_cache(self) -> dict:
-        """Backward-compatible access to the internal cache dict."""
-        return self._key_store.cache_dict
+    def key_store(self) -> KeyStore:
+        """Public read-only access to the internal KeyStore."""
+        return self._key_store
 
-    # -- chain operations (delegated to ChainManager) --
+    @property
+    def chain(self) -> ChainManager:
+        """Public read-only access to the internal ChainManager."""
+        return self._chain
 
-    def append_hop(self, metadata: dict, content: str, node_did: str,
-                   target_did: str, private_key_path: str) -> dict:
-        return self._chain.append_hop(
-            metadata, content, node_did, target_did,
-            private_key_path,
-        )
+    # -- chain verification (delegated to ChainManager) --
 
     def verify_back_propagation(
         self,
@@ -54,7 +56,7 @@ class MessageTracer:
             stored_hop, prev_hop, session_id, protocol_node_address
         )
 
-    # -- behavior traces (a/b/c/d) --
+    # -- behavior traces --
 
     async def save_behavior_entry(self, session_id: str, protocol_node_address: str,
                                   node_did: str, hop_count: int,
@@ -86,3 +88,7 @@ class MessageTracer:
 
     async def load_analysis_session(self, session_id: str) -> dict | None:
         return await self._storage.load_analysis_session(session_id)
+
+
+# Backward-compatible alias
+MessageTracer = ProtocolTracer
