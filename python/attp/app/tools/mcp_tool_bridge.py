@@ -14,7 +14,6 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-import time
 import uuid
 from typing import TYPE_CHECKING, Any, Callable, Awaitable
 
@@ -24,8 +23,8 @@ import uvicorn
 from mcp.server.fastmcp import FastMCP
 
 from attp.app.logging import get_logger, UVICORN_SILENT_LOG_CONFIG
-from attp.core.authentication.signatures import sign_hash
-from attp.core.message.event import BackMessage, NodeMessage, RecordedHop
+from attp.core.message.event import NodeMessage, RecordedHop
+from attp.core.message.back_sender import send_back_message
 
 logger = get_logger("ToolBridge")
 
@@ -313,12 +312,12 @@ class MCPToolBridge:
 
         完整流程（4 次回传）：
         === 第一跳 A2T (Agent → Tool) ===
-        1. 构建 RecordedHop_A2T（Agent 签名）
+        1. 通过 AgentTracer.append_hop 构建 RecordedHop_A2T（正确递增 hop_count）
         2. 发送 NodeMessage(A2T) → Tool Node
         3. 发送 BackMessage #1 (Phase 2, Agent 报告) → Protocol Node
 
         === 第二跳 T2A (Tool → Agent) ===
-        4. 等待 tool_response（含 NodeMessage(T2A)）
+        4. 等待 tool_response（含 NodeMessage(T2A)），hop_count 保持不变
         5. 发送 BackMessage #4 (Phase 1, Agent 确认) → Protocol Node
         """
         tool_info = self._tool_nodes.get(tool_did)
@@ -340,32 +339,47 @@ class MCPToolBridge:
                 except Exception as e:
                     logger.error("Failed to load private key: {}", e)
 
-        # 从 session 获取 Protocol_Node_Address
-        protocol_node_address = ""
+        # 从 session 获取 trace metadata（和 send_to_agent 一样）
+        metadata: dict[str, Any] = {"Session_ID": chat_id}
         if self._session_manager and chat_id:
             session = self._session_manager.get(chat_id)
             if session:
-                protocol_node_address = session.get_metadata("Protocol_Node_Address", "")
+                trace = session.get_trace_metadata()
+                if trace:
+                    metadata.update(trace)
 
-        # -- 构建 RecordedHop_A2T --
+        # -- 通过 AgentTracer.append_hop 正确递增 hop_count --
         nonce = uuid.uuid4().hex
-        recorded_hop_a2t = RecordedHop(
-            session_id=chat_id,
-            sender_did=self._agent_did,
-            target_did=tool_did,
-            content=f"tool_call:{tool_name} args={arguments}",
-            timestamp=time.time(),
-            hop_count=0,
-        )
+        metadata["nonce"] = nonce
 
-        # Agent 私钥签名
-        if private_key:
+        if private_key_path and self._tracer:
             try:
-                recorded_hop_a2t.sig_content = sign_hash(
-                    recorded_hop_a2t.content_hash(), private_key,
+                metadata = self._tracer.append_hop(
+                    metadata=metadata,
+                    content=f"tool_call:{tool_name} args={arguments}",
+                    node_did=self._agent_did,
+                    target_did=tool_did,
+                    private_key_path=private_key_path,
                 )
             except Exception as e:
-                logger.error("Failed to sign RecordedHop_A2T: {}", e)
+                logger.error("Failed to append tracing hop: {}", e)
+                return f"Error: Tracing hook failed - {e}"
+
+        hop = metadata.get("Hop")
+        if not hop:
+            return "Error: Hop metadata not generated"
+
+        protocol_node_address = metadata.get("Protocol_Node_Address", "")
+
+        recorded_hop_a2t = RecordedHop(
+            session_id=metadata["Session_ID"],
+            sender_did=hop["node_did"],
+            target_did=hop["target_did"],
+            content=hop["Content"],
+            timestamp=hop["Timestamp"],
+            hop_count=hop["Hop_Count"],
+            sig_content=hop["Signature"],
+        )
 
         # -- 构建 NodeMessage(A2T) --
         node_message_a2t = NodeMessage(
@@ -400,30 +414,16 @@ class MCPToolBridge:
 
         # === 第一跳 A2T: BackMessage #1 (Phase 2, Agent 报告) → Protocol Node ===
         if protocol_node_address and private_key:
-            try:
-                back_msg_a2t = BackMessage(
-                    protocol_url=protocol_node_address,
-                    node_did=self._agent_did,
-                    nonce=nonce,
-                    sig_identity="",
-                    recorded_hop=recorded_hop_a2t,
-                )
-                back_msg_a2t.sign_identity(private_key)
-
-                async with aiohttp.ClientSession() as http_session:
-                    async with http_session.post(
-                        f"{protocol_node_address}/record",
-                        json=back_msg_a2t.to_dict(),
-                        timeout=aiohttp.ClientTimeout(total=10),
-                    ) as resp:
-                        if resp.status == 200:
-                            logger.debug("A2T BackMessage #1 (Phase 2) sent to protocol node")
-                        else:
-                            logger.warning("A2T BackMessage #1 rejected: HTTP {}", resp.status)
-            except Exception as e:
-                logger.warning("Failed to send A2T BackMessage #1 to protocol node: {}", e)
+            await send_back_message(
+                protocol_url=protocol_node_address,
+                node_did=self._agent_did,
+                nonce=nonce,
+                recorded_hop=recorded_hop_a2t,
+                private_key=private_key,
+            )
 
         # === 第二跳 T2A: 解析 tool_response 中的 NodeMessage(T2A) ===
+        # T2A 的 hop_count 保持工具节点返回的值不变（不递增）
         node_message_t2a_data = result_body.get("node_message")
         if node_message_t2a_data and protocol_node_address and private_key:
             try:
@@ -431,27 +431,25 @@ class MCPToolBridge:
                 recorded_hop_t2a = node_message_t2a.recorded_hop
 
                 # BackMessage #4 (Phase 1, Agent 确认 T2A)
-                back_msg_t2a = BackMessage(
+                await send_back_message(
                     protocol_url=protocol_node_address,
                     node_did=self._agent_did,
                     nonce=node_message_t2a.nonce,
-                    sig_identity="",
                     recorded_hop=recorded_hop_t2a,
+                    private_key=private_key,
                 )
-                back_msg_t2a.sign_identity(private_key)
-
-                async with aiohttp.ClientSession() as http_session:
-                    async with http_session.post(
-                        f"{protocol_node_address}/record",
-                        json=back_msg_t2a.to_dict(),
-                        timeout=aiohttp.ClientTimeout(total=10),
-                    ) as resp:
-                        if resp.status == 200:
-                            logger.debug("T2A BackMessage #4 (Phase 1) sent to protocol node")
-                        else:
-                            logger.warning("T2A BackMessage #4 rejected: HTTP {}", resp.status)
             except Exception as e:
                 logger.warning("Failed to send T2A BackMessage #4 to protocol node: {}", e)
+
+        # 更新 session 的 trace metadata
+        if self._session_manager and chat_id and "Hop" in metadata:
+            session = self._session_manager.get_or_create(chat_id)
+            session.set_trace_metadata({
+                "Hop": metadata["Hop"],
+                "Session_ID": metadata["Session_ID"],
+                "Protocol_Node_Address": metadata.get("Protocol_Node_Address"),
+            })
+            self._session_manager.save(session)
 
         return result_body.get("result", str(result_body))
 

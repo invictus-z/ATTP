@@ -6,14 +6,14 @@ import asyncio
 import socket
 from pathlib import Path
 
-import aiohttp
 import uvicorn
 from fastapi import FastAPI
 from anp.openanp import anp_agent, interface, AgentConfig
 from typing import TYPE_CHECKING
 
 from attp.app.logging import get_logger, UVICORN_SILENT_LOG_CONFIG
-from attp.core.message.event import NodeMessage, BackMessage
+from attp.core.message.event import NodeMessage
+from attp.core.message.back_sender import send_back_message
 
 logger = get_logger("Server")
 
@@ -88,31 +88,13 @@ class ATTPServer:
 
             try:
                 private_key = tracer_ref.load_private_key(private_key_path)
-
-                back_msg = BackMessage(
+                await send_back_message(
                     protocol_url=node_msg.protocol_url,
                     node_did=agent_did,
                     nonce=node_msg.nonce,
-                    sig_identity="",
                     recorded_hop=node_msg.recorded_hop,
+                    private_key=private_key,
                 )
-                back_msg.sign_identity(private_key)
-
-                async with aiohttp.ClientSession() as http:
-                    async with http.post(
-                        f"{node_msg.protocol_url}/record",
-                        json=back_msg.to_dict(),
-                        timeout=aiohttp.ClientTimeout(total=10),
-                    ) as resp:
-                        if resp.status == 200:
-                            logger.debug(
-                                "Phase 1 callback sent to {}", node_msg.protocol_url,
-                            )
-                        else:
-                            logger.warning(
-                                "Phase 1 callback: protocol node returned HTTP {}",
-                                resp.status,
-                            )
             except Exception as e:
                 logger.warning("Failed to send Phase 1 callback: {}", e)
 

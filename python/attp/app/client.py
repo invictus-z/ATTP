@@ -10,7 +10,8 @@ import aiohttp
 from anp.openanp import RemoteAgent
 from anp.authentication import DIDWbaAuthHeader
 from attp.app.logging import get_logger
-from attp.core.message.event import NodeMessage, BackMessage, RecordedHop
+from attp.core.message.event import NodeMessage, RecordedHop
+from attp.core.message.back_sender import send_back_message
 
 logger = get_logger("Client")
 
@@ -287,32 +288,16 @@ class ATTPClient:
                 metadata={"NodeMessage": node_msg.to_dict()},
             )
 
-            # Phase 2: 构造 BackMessage 发给协议节点
-            try:
-                if protocol_url and private_key_path:
-                    private_key = self._tracer.load_private_key(private_key_path)
-
-                    back_msg = BackMessage(
-                        protocol_url=protocol_url,
-                        node_did=sender_did,
-                        nonce=nonce,
-                        sig_identity="",
-                        recorded_hop=recorded,
-                    )
-                    back_msg.sign_identity(private_key)
-
-                    async with aiohttp.ClientSession() as http_session:
-                        async with http_session.post(
-                            f"{protocol_url}/record",
-                            json=back_msg.to_dict(),
-                            timeout=aiohttp.ClientTimeout(total=10),
-                        ) as resp:
-                            if resp.status == 200:
-                                logger.debug("Record sent to protocol node at {}", protocol_url)
-                            else:
-                                logger.warning("Protocol node returned HTTP {}", resp.status)
-            except Exception as e:
-                logger.warning("Failed to send record to protocol node: {}", e)
+            # Phase 2: 发送 BackMessage 给协议节点
+            if protocol_url and private_key_path:
+                private_key = self._tracer.load_private_key(private_key_path)
+                await send_back_message(
+                    protocol_url=protocol_url,
+                    node_did=sender_did,
+                    nonce=nonce,
+                    recorded_hop=recorded,
+                    private_key=private_key,
+                )
 
             if self._web_callback:
                 await self._web_callback(content, {
