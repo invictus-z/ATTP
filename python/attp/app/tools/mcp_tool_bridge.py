@@ -14,6 +14,8 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import time
+import uuid
 from typing import TYPE_CHECKING, Any, Callable, Awaitable
 
 import aiohttp
@@ -22,6 +24,8 @@ import uvicorn
 from mcp.server.fastmcp import FastMCP
 
 from attp.app.logging import get_logger, UVICORN_SILENT_LOG_CONFIG
+from attp.core.authentication.signatures import sign_hash
+from attp.core.message.event import BackMessage, NodeMessage, RecordedHop
 
 logger = get_logger("ToolBridge")
 
@@ -41,10 +45,7 @@ def _make_passthrough_arg_model_class():
 
     避免在模块顶层依赖 mcp 内部路径，仅在动态注册远程工具时才导入。
     """
-    try:
-        from mcp.server.mcpserver.utilities.func_metadata import ArgModelBase, FuncMetadata
-    except ImportError:
-        from mcp.server.fastmcp.utilities.func_metadata import ArgModelBase, FuncMetadata
+    from mcp.server.fastmcp.utilities.func_metadata import ArgModelBase, FuncMetadata
 
     from pydantic import ConfigDict
 
@@ -220,10 +221,7 @@ class MCPToolBridge:
         绕过 add_tool() 的函数签名内省，直接构造 Tool 对象，
         使用远程工具的真实 inputSchema 作为参数 schema。
         """
-        try:
-            from mcp.server.mcpserver.tools.base import Tool as MCPTool
-        except ImportError:
-            from mcp.server.fastmcp.tools.base import Tool as MCPTool
+        from mcp.server.fastmcp.tools.base import Tool as MCPTool
 
         PassthroughArgModel, FuncMetadata = _make_passthrough_arg_model_class()
 
@@ -313,65 +311,149 @@ class MCPToolBridge:
     ) -> str:
         """通过 ATTP 协议调用远程工具节点。
 
-        流程：
-        1. 记录 field_type="A2T" (Agent→Tool)
-        2. 构建 ATTP 元数据（含溯源链）
-        3. 发送 tool_request 到工具节点的 ATTP 端点
-        4. 接收 tool_response（含 T2A 溯源）
+        完整流程（4 次回传）：
+        === 第一跳 A2T (Agent → Tool) ===
+        1. 构建 RecordedHop_A2T（Agent 签名）
+        2. 发送 NodeMessage(A2T) → Tool Node
+        3. 发送 BackMessage #1 (Phase 2, Agent 报告) → Protocol Node
+
+        === 第二跳 T2A (Tool → Agent) ===
+        4. 等待 tool_response（含 NodeMessage(T2A)）
+        5. 发送 BackMessage #4 (Phase 1, Agent 确认) → Protocol Node
         """
-        # 构建 ATTP 消息元数据
-        metadata: dict[str, Any] = {
-            "Session_ID": chat_id,
-            "Tool_Name": tool_name,
-            "Arguments": arguments,
-        }
-
-        # 追加溯源跳
-        if self._tracer and self._attp_client:
-            private_key_path = str(
-                self._attp_client.auth.private_key_path
-            ) if getattr(self._attp_client.auth, "private_key_path", None) else None
-
-            if private_key_path:
-                try:
-                    metadata = self._tracer.append_hop(
-                        metadata=metadata,
-                        content=f"tool_call:{tool_name}",
-                        node_did=self._agent_did,
-                        target_did=tool_did,
-                        private_key_path=private_key_path,
-                    )
-                except Exception as e:
-                    logger.error("Failed to append tracing hop for tool call: {}", e)
-
-        # 发送到工具节点的 ATTP 端点
         tool_info = self._tool_nodes.get(tool_did)
         if not tool_info:
             return f"Error: Tool node {tool_did} not found."
 
+        # 获取私钥和协议节点地址
+        private_key_path = None
+        private_key = None
+        if self._attp_client:
+            private_key_path = (
+                str(self._attp_client.auth.private_key_path)
+                if getattr(self._attp_client.auth, "private_key_path", None)
+                else None
+            )
+            if private_key_path and self._tracer:
+                try:
+                    private_key = self._tracer.load_private_key(private_key_path)
+                except Exception as e:
+                    logger.error("Failed to load private key: {}", e)
+
+        # 从 session 获取 Protocol_Node_Address
+        protocol_node_address = ""
+        if self._session_manager and chat_id:
+            session = self._session_manager.get(chat_id)
+            if session:
+                protocol_node_address = session.get_metadata("Protocol_Node_Address", "")
+
+        # -- 构建 RecordedHop_A2T --
+        nonce = uuid.uuid4().hex
+        recorded_hop_a2t = RecordedHop(
+            session_id=chat_id,
+            sender_did=self._agent_did,
+            target_did=tool_did,
+            content=f"tool_call:{tool_name} args={arguments}",
+            timestamp=time.time(),
+            hop_count=0,
+        )
+
+        # Agent 私钥签名
+        if private_key:
+            try:
+                recorded_hop_a2t.sig_content = sign_hash(
+                    recorded_hop_a2t.content_hash(), private_key,
+                )
+            except Exception as e:
+                logger.error("Failed to sign RecordedHop_A2T: {}", e)
+
+        # -- 构建 NodeMessage(A2T) --
+        node_message_a2t = NodeMessage(
+            protocol_url=protocol_node_address,
+            nonce=nonce,
+            recorded_hop=recorded_hop_a2t,
+        )
+
         endpoint = tool_info.attp_endpoint
+
+        # === 第一跳 A2T: 发送 tool_request 到 Tool Node ===
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
+            async with aiohttp.ClientSession() as http_session:
+                async with http_session.post(
                     endpoint,
                     json={
                         "sender_did": self._agent_did,
                         "tool_name": tool_name,
                         "arguments": arguments,
                         "message_type": "tool_request",
-                        "metadata": metadata,
+                        "node_message": node_message_a2t.to_dict(),
                     },
                     timeout=aiohttp.ClientTimeout(total=60),
                 ) as resp:
-                    if resp.status == 200:
-                        result = await resp.json()
-                        return result.get("result", str(result))
-                    else:
+                    if resp.status != 200:
                         error_text = await resp.text()
                         return f"Error: Tool node returned HTTP {resp.status}: {error_text}"
+                    result_body = await resp.json()
         except aiohttp.ClientError as e:
             logger.error("Failed to call tool node {}: {}", tool_did, e)
             return f"Error: Failed to reach tool node {tool_did}: {e}"
+
+        # === 第一跳 A2T: BackMessage #1 (Phase 2, Agent 报告) → Protocol Node ===
+        if protocol_node_address and private_key:
+            try:
+                back_msg_a2t = BackMessage(
+                    protocol_url=protocol_node_address,
+                    node_did=self._agent_did,
+                    nonce=nonce,
+                    sig_identity="",
+                    recorded_hop=recorded_hop_a2t,
+                )
+                back_msg_a2t.sign_identity(private_key)
+
+                async with aiohttp.ClientSession() as http_session:
+                    async with http_session.post(
+                        f"{protocol_node_address}/record",
+                        json=back_msg_a2t.to_dict(),
+                        timeout=aiohttp.ClientTimeout(total=10),
+                    ) as resp:
+                        if resp.status == 200:
+                            logger.debug("A2T BackMessage #1 (Phase 2) sent to protocol node")
+                        else:
+                            logger.warning("A2T BackMessage #1 rejected: HTTP {}", resp.status)
+            except Exception as e:
+                logger.warning("Failed to send A2T BackMessage #1 to protocol node: {}", e)
+
+        # === 第二跳 T2A: 解析 tool_response 中的 NodeMessage(T2A) ===
+        node_message_t2a_data = result_body.get("node_message")
+        if node_message_t2a_data and protocol_node_address and private_key:
+            try:
+                node_message_t2a = NodeMessage.from_dict(node_message_t2a_data)
+                recorded_hop_t2a = node_message_t2a.recorded_hop
+
+                # BackMessage #4 (Phase 1, Agent 确认 T2A)
+                back_msg_t2a = BackMessage(
+                    protocol_url=protocol_node_address,
+                    node_did=self._agent_did,
+                    nonce=node_message_t2a.nonce,
+                    sig_identity="",
+                    recorded_hop=recorded_hop_t2a,
+                )
+                back_msg_t2a.sign_identity(private_key)
+
+                async with aiohttp.ClientSession() as http_session:
+                    async with http_session.post(
+                        f"{protocol_node_address}/record",
+                        json=back_msg_t2a.to_dict(),
+                        timeout=aiohttp.ClientTimeout(total=10),
+                    ) as resp:
+                        if resp.status == 200:
+                            logger.debug("T2A BackMessage #4 (Phase 1) sent to protocol node")
+                        else:
+                            logger.warning("T2A BackMessage #4 rejected: HTTP {}", resp.status)
+            except Exception as e:
+                logger.warning("Failed to send T2A BackMessage #4 to protocol node: {}", e)
+
+        return result_body.get("result", str(result_body))
 
     # ------------------------------------------------------------------
     # 工具节点发现

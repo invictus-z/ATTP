@@ -95,7 +95,7 @@ class ATTPChannel(BaseChannel):
         self._tool_bridge = MCPToolBridge(
             tool_config=self._attp_cfg.tool,
             attp_client=self._attp_client,
-            tracer=self._tracer,
+            tracer=self._agent_tracer,
             session_manager=self._app_session_manager,
             agent_did=self._attp_cfg.did,
             send_callback=self._attp_client.send_message,
