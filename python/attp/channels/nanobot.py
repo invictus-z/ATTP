@@ -17,7 +17,7 @@ from nanobot.config.schema import Base
 from attp.app.client import ATTPClient
 from attp.app.server import ATTPServer
 from attp.app.config import ConfigManager
-from attp.app.heartbeat import HeartbeatManager
+from attp.app.heartbeat import HeartbeatManager, AgentHealthChecker, ToolNodeHealthChecker
 from attp.app.web import WebApp
 from attp.core.sessions.app import AppSessionManager
 from attp.app.tools import MCPToolBridge
@@ -86,11 +86,13 @@ class ATTPChannel(BaseChannel):
             attp_channel_callback=self._receive,
             tracer=self._agent_tracer,
         )
-        self._heartbeat_manager = HeartbeatManager(
-            heartbeat_config=self._attp_cfg.heartbeat,
+        self._heartbeat_manager = HeartbeatManager(self._attp_cfg.heartbeat)
+        self._heartbeat_manager.add_checker(AgentHealthChecker(
             attp_client=self._attp_client,
-        )
-        self._send_message_tool = SendMessageTool(
+            timeout=self._attp_cfg.heartbeat.timeout,
+            max_fail=self._attp_cfg.heartbeat.max_fail,
+        ))
+        self._tool_bridge = MCPToolBridge(
             tool_config=self._attp_cfg.tool,
             attp_client=self._attp_client,
             tracer=self._agent_tracer,
@@ -98,6 +100,11 @@ class ATTPChannel(BaseChannel):
             agent_did=self._attp_cfg.did,
             send_callback=self._attp_client.send_message,
         )
+        self._heartbeat_manager.add_checker(ToolNodeHealthChecker(
+            tool_bridge=self._tool_bridge,
+            timeout=self._attp_cfg.heartbeat.timeout,
+            max_fail=self._attp_cfg.heartbeat.max_fail,
+        ))
 
         # ------------------------------------------------------------------
         # 条件启动 ProtocolNode（自包含：传入 config_path 即可）
@@ -112,12 +119,17 @@ class ATTPChannel(BaseChannel):
             )
             logger.info("ProtocolNode enabled, config_path={}", pn_cfg.config_path)
 
+        # 启动前自动发现工具节点
+        tool_node_ads = self._attp_cfg.tool.tool_node_ads
+        if tool_node_ads:
+            await self._tool_bridge.discover_all_tool_nodes(tool_node_ads)
+
         # 并发启动所有组件 启动阶段无依赖关系
         async with asyncio.TaskGroup() as tg:
             tg.create_task(self._attp_client.start())
             tg.create_task(self._attp_server.start())
             tg.create_task(self._heartbeat_manager.start())
-            tg.create_task(self._send_message_tool.start())
+            tg.create_task(self._tool_bridge.start())
             tg.create_task(self._web_app.start(
                 self._attp_client, self._config_manager,
                 reload_callback=self.reload,
@@ -134,7 +146,7 @@ class ATTPChannel(BaseChannel):
         # 并发停止所有组件
         async with asyncio.TaskGroup() as tg:
             tg.create_task(self._heartbeat_manager.stop())
-            tg.create_task(self._send_message_tool.stop())
+            tg.create_task(self._tool_bridge.stop())
             tg.create_task(self._attp_client.stop())
             tg.create_task(self._attp_server.stop())
             tg.create_task(self._web_app.stop())
@@ -180,8 +192,14 @@ class ATTPChannel(BaseChannel):
 
         # Tool config changed
         if old_cfg.tool.changed_fields(new_cfg.tool):
-            logger.info("SendMessageTool config changed, reloading...")
-            await self._send_message_tool.reload(new_cfg.tool)
+            logger.info("ToolBridge config changed, reloading...")
+            await self._tool_bridge.reload(new_cfg.tool)
+            # 如果 tool_node_ads 变化，重新发现
+            if old_cfg.tool.tool_node_ads != new_cfg.tool.tool_node_ads:
+                for did in list(self._tool_bridge.get_tool_nodes()):
+                    await self._tool_bridge.unregister_tool_node(did)
+                if new_cfg.tool.tool_node_ads:
+                    await self._tool_bridge.discover_all_tool_nodes(new_cfg.tool.tool_node_ads)
 
         # ProtocolNode config changed — 重新加载外部配置文件
         if old_cfg.protocol_node.changed_fields(new_cfg.protocol_node):

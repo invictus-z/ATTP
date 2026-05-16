@@ -1,4 +1,4 @@
-"""ATTP session management — App 层与协议节点层分离。"""
+"""ATTP session management — App 层、协议节点层、工具节点层分离。"""
 
 from attp.core.sessions.app import AppSession, AppSessionManager
 from attp.core.sessions.node_message import BehaviorEntry
@@ -7,6 +7,7 @@ from attp.core.sessions.protocol_node import (
     ProtocolSession,
     ProtocolSessionManager,
 )
+from attp.core.sessions.tools import ToolSession, ToolSessionManager
 
 __all__ = [
     "AppSessionManager",
@@ -15,4 +16,6 @@ __all__ = [
     "ProtocolSession",
     "PendingMessage",
     "BehaviorEntry",
+    "ToolSessionManager",
+    "ToolSession",
 ]

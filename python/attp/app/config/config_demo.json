@@ -22,7 +22,10 @@
     },
     "tool": {
         "host": "127.0.0.1",
-        "port": 8002
+        "port": 8002,
+        "toolNodeAds": [
+            "http://tool-node:8080/ad.json"
+        ]
     },
     "heartbeat": {
         "interval": 30,
