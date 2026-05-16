@@ -2,9 +2,11 @@
 
 ## 概述
 
-**Agents Traceability and Trust Protocol（ATTP）** 是一套面向 AI Agent 的可溯源通信与信任协议，旨在为多 Agent 协作场景提供消息身份认证、完整性校验与链式溯源能力。
+**Agents Traceability and Trust Protocol（ATTP）** 是一套面向 AI Agent 的可溯源通信与信任协议。通过结合密码学技术与大模型污点分析，实现通信链路的不可否认复原，并精准追踪与发现试图进行诱导或传播恶意Prompt的源头节点，为智能体通信构筑互连互信的数字基座。
 
 本项目以 [nanobot](https://github.com/HKUDS/nanobot) 和 [openclaw](https://github.com/openclaw/openclaw) 渠道插件的形式落地实现，基于 [anp](https://github.com/agent-network-protocol/anp)（Agent Network Protocol）完成分布式身份认证。
+
+目前协议的代码在多代理协同场景下成功复原了通信链路，验证了整体架构的可靠性：首先实现了基于Ed25519与SHA-256的身份标识（DID）生成与消息哈希链接，构建了不可篡改的数据层溯源网络；其次开发了具备四步验证管线（身份验证、行为推断等）的高度解耦通信枢纽节点；我们还初步构建了审计大模型引擎，采用“十字锁定策略”对上下文及历史行为进行纵横双向评估；最后协议中封装了适配主流Agent框架的通道插件与SDK，并开发了跨平台的可视化拓扑客户端。
 
 ## 快速启动
 
