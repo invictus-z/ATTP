@@ -227,7 +227,7 @@ class MCPToolBridge:
         _call = self._call_tool_node
 
         async def handler(**kwargs: Any) -> str:
-            chat_id = kwargs.pop("chat_id", "")
+            chat_id = kwargs.pop("chat_id", "") # 要求填入 chat_id 以便 ATTP 消息追踪
             arguments = json.dumps(kwargs, ensure_ascii=False)
             return await _call(tool_did, tool_name, arguments, chat_id)
 
