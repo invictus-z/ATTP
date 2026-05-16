@@ -1,29 +1,63 @@
-"""Protocol Node 独立启动配置模型与加载器。"""
+"""Protocol Node 独立配置模型与加载器。"""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import BaseModel, ConfigDict, Field
+from pydantic.alias_generators import to_camel
 
-from attp.app.config.config import (
-    ATTPBase,
-    AnalysisConfig,
-    ProtocolNodeConfig,
-    StorageConfig,
-)
 from attp.app.logging import get_logger
 
 logger = get_logger("ProtocolNodeConfig")
 
 
-class ProtocolNodeConfigFile(ATTPBase):
-    """独立启动时使用的配置文件模型（~/.nanobot/attp/protocol_node_config.json）。"""
+class PNBase(BaseModel):
+    """Protocol Node 配置基类，支持 camelCase 和 snake_case。"""
 
-    agent_did: str = ""
-    protocol_node: ProtocolNodeConfig = Field(default_factory=ProtocolNodeConfig)
-    storage: StorageConfig = Field(default_factory=lambda: StorageConfig(data_dir="~/.nanobot/attp"))
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+
+class PNWebConfig(PNBase):
+    """双端口网络配置。"""
+
+    data_port_host: str = "0.0.0.0"
+    data_port_port: int = 9000
+    api_port_host: str = "0.0.0.0"
+    api_port_port: int = 9001
+
+
+class StorageConfig(PNBase):
+    """存储配置。"""
+
+    data_dir: str = "~/.attp/protocol_node"
+    db_path: str = "attp.db"
+
+
+class AnalysisConfig(PNBase):
+    """语义污点分析（LLM）配置。"""
+
+    enabled: bool = False
+    api_key: str = ""
+    base_url: str = "https://api.openai.com/v1"
+    model: str = "gpt-4o"
+    report_batch_size: int = 10
+
+
+class ProtocolNodeConfigFile(PNBase):
+    """Protocol Node 配置文件模型。
+
+    对应 JSON 结构：
+    {
+        "web": { "dataPortHost": ..., "dataPortPort": ..., ... },
+        "storage": { "dataDir": ..., "dbPath": ... },
+        "analysis": { "enabled": ..., ... }
+    }
+    """
+
+    web: PNWebConfig = Field(default_factory=PNWebConfig)
+    storage: StorageConfig = Field(default_factory=StorageConfig)
     analysis: AnalysisConfig = Field(default_factory=AnalysisConfig)
 
     @classmethod
@@ -49,3 +83,7 @@ class ProtocolNodeConfigFile(ATTPBase):
         p.parent.mkdir(parents=True, exist_ok=True)
         with open(p, "w", encoding="utf-8") as f:
             json.dump(self.model_dump(by_alias=True), f, indent=4, ensure_ascii=False)
+
+    def get_db_path(self) -> str:
+        """返回拼接后的数据库完整路径。"""
+        return str(Path(self.storage.data_dir).expanduser() / self.storage.db_path)

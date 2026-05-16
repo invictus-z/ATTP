@@ -64,29 +64,11 @@ class HeartbeatConfig(ATTPBase):
     timeout: int = 90
     max_fail: int = 3
 
-class StorageConfig(ATTPBase):
-    """Storage configuration for tracer database."""
-
-    data_dir: str = Field(alias="dataDir")
-    db_path: str = Field(default="attp_traces.db", alias="dbPath")
-
-class AnalysisConfig(ATTPBase):
-    """Configuration for semantic taint analysis (LLM-based)."""
-
-    enabled: bool = False
-    api_key: str = ""
-    base_url: str = "https://api.openai.com/v1"
-    model: str = "gpt-5"
-    report_batch_size: int = Field(default=10, alias="reportBatchSize")
-
 class ProtocolNodeConfig(ATTPBase):
-    """Protocol Node configuration (dual-port architecture)."""
+    """Protocol Node 启用开关与外部配置路径。"""
 
     enabled: bool = False
-    data_port_host: str = "127.0.0.1"
-    data_port_port: int = Field(default=9000, alias="dataPortPort")
-    api_port_host: str = "127.0.0.1"
-    api_port_port: int = Field(default=9001, alias="apiPortPort")
+    config_path: str = Field(default="", alias="configPath")
 
 class ATTPConfigFile(ATTPBase):
     """Root model for ~/.nanobot/attp/attp_config.json."""
@@ -97,8 +79,6 @@ class ATTPConfigFile(ATTPBase):
     web_app: WebAppConfig = Field(default_factory=WebAppConfig)
     tool: ToolConfig = Field(default_factory=ToolConfig)
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
-    storage: StorageConfig = Field(default_factory=StorageConfig)
-    analysis: AnalysisConfig = Field(default_factory=AnalysisConfig)
     protocol_node: ProtocolNodeConfig = Field(default_factory=ProtocolNodeConfig)
 
 
