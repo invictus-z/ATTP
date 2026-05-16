@@ -13,7 +13,7 @@ from anp.openanp import anp_agent, interface, AgentConfig
 from typing import TYPE_CHECKING
 
 from attp.app.logging import get_logger, UVICORN_SILENT_LOG_CONFIG
-from attp.core.authentication.signatures import sign_hash
+from attp.core.message.event import NodeMessage, BackMessage
 
 logger = get_logger("Server")
 
@@ -76,51 +76,37 @@ class ATTPServer:
         private_key_path_ref = self.private_key_path
         agent_did_ref = self.agent_did
 
-        async def _send_phase1_callback(
-            content: str,
-            metadata: dict,
+        async def _send_proof_callback(
+            node_msg: NodeMessage,
             agent_did: str,
             tracer_ref,
             private_key_path: str | None,
         ):
             """Phase 1 回传：向发送方的协议节点发送接收确认。"""
-            incoming_nonce = metadata.get("nonce")
-            incoming_pna = metadata.get("Protocol_Node_Address")
-            incoming_hop = metadata.get("Hop")
-
-            if not (incoming_nonce and incoming_pna and incoming_hop):
-                return
-
             if not (tracer_ref and private_key_path):
                 return
 
             try:
-                # 生成 identity signature（证明 B 收到了这条消息）
                 private_key = tracer_ref.load_private_key(private_key_path)
-                identity_sig = sign_hash(
-                    f"{incoming_nonce}:{agent_did}", private_key
-                )
 
-                record_metadata = {
-                    "Session_ID": metadata.get("Session_ID"),
-                    "Record_Log": incoming_hop,
-                    "Protocol_Node_Address": incoming_pna,
-                    "nonce": incoming_nonce,
-                    "Identity_Signature": identity_sig,
-                }
+                back_msg = BackMessage(
+                    protocol_url=node_msg.protocol_url,
+                    node_did=agent_did,
+                    nonce=node_msg.nonce,
+                    sig_identity="",
+                    recorded_hop=node_msg.recorded_hop,
+                )
+                back_msg.sign_identity(private_key)
+
                 async with aiohttp.ClientSession() as http:
                     async with http.post(
-                        f"{incoming_pna}/record",
-                        json={
-                            "sender_did": agent_did,
-                            "content": content,
-                            "metadata": record_metadata,
-                        },
+                        f"{node_msg.protocol_url}/record",
+                        json=back_msg.to_dict(),
                         timeout=aiohttp.ClientTimeout(total=10),
                     ) as resp:
                         if resp.status == 200:
                             logger.debug(
-                                "Phase 1 callback sent to {}", incoming_pna,
+                                "Phase 1 callback sent to {}", node_msg.protocol_url,
                             )
                         else:
                             logger.warning(
@@ -166,39 +152,55 @@ class ATTPServer:
                 """
                 if message_type == "agent_request":
                     try:
-                        session_id = metadata.get("Session_ID")
+                        # 解析 NodeMessage
+                        node_msg_data = (metadata or {}).get("NodeMessage")
+                        if not node_msg_data:
+                            return "Error: Missing NodeMessage in metadata"
+                        node_msg = NodeMessage.from_dict(node_msg_data)
 
-                        # Store trace metadata (Hop, Session_ID, Protocol_Node_Address)
+                        session_id = node_msg.recorded_hop.session_id
+
+                        # Store trace metadata
                         if session_id and session_manager:
                             session = session_manager.get_or_create(session_id)
-                            session.set_trace_metadata(metadata)
+                            session.set_trace_metadata({
+                                "Hop": {
+                                    "node_did": node_msg.recorded_hop.sender_did,
+                                    "target_did": node_msg.recorded_hop.target_did,
+                                    "Content": node_msg.recorded_hop.content,
+                                    "Timestamp": node_msg.recorded_hop.timestamp,
+                                    "Hop_Count": node_msg.recorded_hop.hop_count,
+                                    "Signature": node_msg.recorded_hop.sig_content,
+                                },
+                                "Session_ID": session_id,
+                                "Protocol_Node_Address": node_msg.protocol_url,
+                                "nonce": node_msg.nonce,
+                            })
                             session_manager.save(session)
                             logger.debug(
-                                "Session stored/updated: id={}, sender={}, metadata keys={}",
-                                session_id, sender_did, list(session.metadata.keys()),
+                                "Session stored/updated: id={}, sender={}",
+                                session_id, node_msg.recorded_hop.sender_did,
                             )
                         if attp_channel_callback:
                             await attp_channel_callback(
-                                sender=sender_did,
+                                sender=node_msg.recorded_hop.sender_did,
                                 chat_id=session_id,
-                                content=content,
+                                content=node_msg.recorded_hop.content,
                                 media=[],
                             )
 
                         # Notify UI of incoming node message
                         if web_callback:
-                            await web_callback(content, {
+                            await web_callback(node_msg.recorded_hop.content, {
                                 "is_node_message": True,
                                 "direction": "in",
-                                "other_did": sender_did,
-                                "Session_ID": metadata.get("Session_ID"),
+                                "other_did": node_msg.recorded_hop.sender_did,
+                                "Session_ID": session_id,
                             })
 
                         # Phase 1 回传：向发送方的协议节点发送接收确认
-                        # 不创建新 hop，直接回传发送方的 hop + 自身 identity signature
-                        await _send_phase1_callback(
-                            content=content,
-                            metadata=metadata or {},
+                        await _send_proof_callback(
+                            node_msg=node_msg,
                             agent_did=agent_did_ref,
                             tracer_ref=tracer_ref,
                             private_key_path=str(private_key_path_ref) if private_key_path_ref else None,

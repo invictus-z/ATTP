@@ -10,6 +10,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from attp.app.logging import get_logger, UVICORN_SILENT_LOG_CONFIG
+from attp.core.message.event import BackMessage
 
 logger = get_logger("DataPort")
 
@@ -25,7 +26,6 @@ class DataPort:
         self,
         tracer: ProtocolTracer,
         session_manager: ProtocolSessionManager,
-        agent_did: str,
         host: str,
         port: int,
         did_resolver=None,
@@ -33,7 +33,6 @@ class DataPort:
     ):
         self._tracer = tracer
         self._session_manager = session_manager
-        self._agent_did = agent_did
         self.host = host
         self.port = port
         self._did_resolver = did_resolver
@@ -46,7 +45,6 @@ class DataPort:
         # Closure captures for endpoint handlers
         tracer_ref = self._tracer
         session_mgr = self._session_manager
-        agent_did = self._agent_did
         did_resolver_ref = self._did_resolver
         behavior_controller_ref = self._behavior_controller
         _orch_holder = [None]  # mutable list for late-binding
@@ -59,19 +57,22 @@ class DataPort:
             except Exception:
                 return JSONResponse({"error": "Invalid JSON body"}, status_code=400)
 
-            metadata = body.get("metadata") or {}
-            session_id = metadata.get("Session_ID")
-            pna = metadata.get("Protocol_Node_Address")
+            # 解析 BackMessage
+            try:
+                back_msg = BackMessage.from_dict(body)
+            except Exception as e:
+                return JSONResponse({"error": f"Invalid BackMessage: {e}"}, status_code=400)
+
+            session_id = back_msg.recorded_hop.session_id
+            pna = back_msg.protocol_url
 
             # === Nonce 验证管道 ===
             if did_resolver_ref:
                 from attp.protocol_node.middleware import intercept_record
 
                 result = await intercept_record(
-                    body, did_resolver_ref, tracer_ref,
-                    chain_manager=tracer_ref.chain,
+                    back_msg, did_resolver_ref, tracer_ref,
                     session_manager=session_mgr,
-                    agent_did=agent_did,
                 )
 
                 if result.status == "error":
@@ -91,6 +92,7 @@ class DataPort:
                         "hop_count_violation_a2a": (400, "Hop count violation (A2A must +1)"),
                         "hop_count_violation_non_a2a": (400, "Hop count violation (non-A2A must stay)"),
                         "hop_zero_must_be_u2a": (400, "hop_count=0 must be U2A (user intent)"),
+                        "content_signature_invalid": (403, "Content signature invalid"),
                     }
                     error_key = result.error.split(":")[0] if result.error else ""
                     code, msg = ERROR_MAP.get(
@@ -99,11 +101,9 @@ class DataPort:
                     return JSONResponse({"error": msg}, status_code=code)
 
                 if result.status == "stored":
-                    # Branch A: 仅暂存，不触发存储和分析
                     return JSONResponse({"status": "Pending record stored"})
 
                 if result.status == "verified":
-                    # Branch B: 全部验证通过，存储行为记录
                     behavior_type = result.behavior_type
                     stored = result.stored_msg
 
@@ -127,13 +127,11 @@ class DataPort:
                             behavior_type, body, result,
                         )
 
-                    # U2A (hop_count=0) 作为用户意图入口，通知 orchestrator 提取 intent
                     _orch = _orch_holder[0]
                     if behavior_type == "U2A" and _orch and session_id:
                         content = stored.hop.get("Content", "")
                         await _orch.on_field_U2A_recorded(session_id, content)
 
-                    # 触发分析
                     if _orch and session_id:
                         await _orch.on_record_received(session_id)
 

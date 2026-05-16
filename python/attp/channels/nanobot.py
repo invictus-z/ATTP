@@ -109,7 +109,6 @@ class ATTPChannel(BaseChannel):
 
             self._protocol_node = ProtocolNode(
                 config_path=pn_cfg.config_path,
-                agent_did=self._attp_cfg.did,
             )
             logger.info("ProtocolNode enabled, config_path={}", pn_cfg.config_path)
 

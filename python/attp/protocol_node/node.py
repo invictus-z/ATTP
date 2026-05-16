@@ -31,9 +31,8 @@ class ProtocolNode:
         await node.stop()
     """
 
-    def __init__(self, config_path: str | Path, agent_did: str = ""):
+    def __init__(self, config_path: str | Path):
         self._config_path = Path(config_path).expanduser()
-        self._agent_did = agent_did
 
         # 加载配置（同步）
         self._config = ProtocolNodeConfigFile.load(self._config_path)
@@ -78,7 +77,7 @@ class ProtocolNode:
             from attp.protocol_node.behavior_controller import BehaviorController
 
             did_resolver = DIDResolver(
-                agent_did=self._agent_did,
+                agent_did="", # 协议节点无DUD
                 key_store=self._tracer.key_store,
             )
             behavior_controller = BehaviorController()

@@ -116,13 +116,11 @@ class ChainManager:
     ) -> tuple[bool, str]:
         """验证回传 record 与已存储 record 的一致性。
 
-        在源节点 A 调用。对比 A 已存储的上一条回传记录（如来自 B）与
-        当前回传节点（如 C）声称的前一跳信息，检测篡改或栽赃行为。
+        对比 Branch A 暂存的 hop 与 Branch B 到达的 hop，检测篡改。
 
         Args:
-            stored_hop: A 已存储的上一条回传 record（如 B 的 hop）。
-            prev_hop: 当前回传节点声称收到的上一跳完整信息
-                     （对应 record 元数据中的 PrevHop）。
+            stored_hop: Branch A 暂存的 hop dict。
+            prev_hop: Branch B 到达的 hop dict（从 BackMessage.recorded_hop 构造）。
             session_id: 会话标识。
             protocol_node_address: 协议节点地址。
         Returns:
@@ -132,10 +130,9 @@ class ChainManager:
             return True, ""
 
         if not stored_hop:
-            logger.warning("Back-prop: PrevHop present but no stored record")
+            logger.warning("Back-prop: prev_hop present but no stored record")
             return False, "No stored record to verify against"
 
-        #step1: 核算stored_hop和新传入的pre_hop哈希值，验证上一跳信息与已存储 record 的一致性
         prev_sign = prev_hop.get("Signature", "")
         prev_node_did = prev_hop.get("node_did", "")
 
@@ -165,14 +162,9 @@ class ChainManager:
             return False, f"No public key for previous node {prev_node_did}"
 
         step1_ok = verify_signature(prev_hop_hash, prev_sign, prev_public_key)
-
-        # Step 3: 已存储 record 的 Signature == 当前节点声称的上一跳 Signature
         step2_ok = stored_hop.get("Signature") == prev_sign
-
-        # Step 4: 已存储 record 的 Content == 当前节点声称的上一跳 Content
         step3_ok = store_hop_hash == prev_hop_hash
 
-        # 错误分类
         if step1_ok and step2_ok and step3_ok:
             return True, ""
 
