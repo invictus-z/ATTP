@@ -13,7 +13,7 @@ export interface AgentEntry {
   status: 'active' | 'offline' | 'connecting';
 }
 
-const STORAGE_KEY = 'nanobot_agents';
+const STORAGE_KEY = 'attp_agents';
 
 // ---- Registry (reactive) ----
 
@@ -67,7 +67,7 @@ export function wsUrlForAgent(agent: AgentEntry, path: string): string {
 export function setActiveAgent(id: string): void {
   if (agents.value.find(a => a.id === id)) {
     activeAgentId.value = id;
-    localStorage.setItem('nanobot_active_agent', id);
+    localStorage.setItem('attp_active_agent', id);
     // Notify all listeners
     onAgentSwitchCallbacks.forEach(cb => cb());
   }
@@ -94,7 +94,7 @@ export function addAgent(name: string, baseUrl: string): AgentEntry {
   // Auto-activate if this is the first agent or no active agent
   if (!activeAgentId.value) {
     activeAgentId.value = id;
-    localStorage.setItem('nanobot_active_agent', id);
+    localStorage.setItem('attp_active_agent', id);
     onAgentSwitchCallbacks.forEach(cb => cb());
   }
 
@@ -110,7 +110,7 @@ export function removeAgent(id: string): void {
   agents.value = agents.value.filter(a => a.id !== id);
   if (activeAgentId.value === id) {
     activeAgentId.value = agents.value.length > 0 ? agents.value[0].id : null;
-    localStorage.setItem('nanobot_active_agent', activeAgentId.value || '');
+    localStorage.setItem('attp_active_agent', activeAgentId.value || '');
     if (activeAgentId.value) {
       onAgentSwitchCallbacks.forEach(cb => cb());
     }
@@ -165,7 +165,7 @@ export function loadAgents(): void {
   }
 
   // Restore active agent
-  const savedId = localStorage.getItem('nanobot_active_agent');
+  const savedId = localStorage.getItem('attp_active_agent');
   if (savedId && agents.value.find(a => a.id === savedId)) {
     activeAgentId.value = savedId;
   } else if (agents.value.length > 0) {

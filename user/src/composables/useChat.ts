@@ -43,7 +43,7 @@ let agentSwitchRegistered = false
 
 // ---- Per-Agent Session Helpers ----
 
-const getSessionKey = (agentId: string) => `nanobot_sessions_${agentId}`
+const getSessionKey = (agentId: string) => `attp_sessions_${agentId}`
 
 /** Save current active agent's sessions to its map slot + localStorage */
 const saveSessions = () => {

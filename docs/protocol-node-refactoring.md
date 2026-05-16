@@ -136,7 +136,7 @@ ATTP 原有架构中，行为储存、验证、溯源、污点审计等底层协
 ### 5.1 独立部署（Standalone）
 
 ```bash
-attp protocol-node start --config ~/.nanobot/attp_config.json [--data-port 9000] [--api-port 9001]
+attp protocol-node start --config ~/.attp/agent/nanobot/config.json [--data-port 9000] [--api-port 9001]
 ```
 
 CLI 入口定义在 `attp.protocol_node.cli:main`，通过 `pyproject.toml` 的 `[project.scripts]` 注册。独立创建 `MessageTracer`、`SessionManager`、`AnalysisOrchestrator`（如果配置启用）。

@@ -114,11 +114,11 @@ const toastIcon = computed(() => {
             <div class="bg-white p-5 rounded-xl border border-gray-100 space-y-4">
               <div>
                 <label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">DID Doc Path</label>
-                <input type="text" v-model="config.attpClient.didDocPath" placeholder="~/.nanobot/attp/did.json" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono">
+                <input type="text" v-model="config.attpClient.didDocPath" placeholder="~/.attp/agent/nanobot/did/did.json" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono">
               </div>
               <div>
                 <label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">DID Key Path</label>
-                <input type="text" v-model="config.attpClient.didKeyPath" placeholder="~/.nanobot/attp/key-1_private.pem" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono">
+                <input type="text" v-model="config.attpClient.didKeyPath" placeholder="~/.attp/agent/nanobot/did/key-1_private.pem" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono">
               </div>
               <div>
                 <label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">Node ADs</label>
@@ -171,11 +171,11 @@ const toastIcon = computed(() => {
               </div>
               <div>
                 <label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">Private Key Path</label>
-                <input type="text" v-model="config.attpServer.privateKeyPath" placeholder="~/.nanobot/attp/server_private.pem" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono">
+                <input type="text" v-model="config.attpServer.privateKeyPath" placeholder="~/.attp/agent/nanobot/did/server_private.pem" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono">
               </div>
               <div>
                 <label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">Public Key Path</label>
-                <input type="text" v-model="config.attpServer.publicKeyPath" placeholder="~/.nanobot/attp/server_public.pem" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono">
+                <input type="text" v-model="config.attpServer.publicKeyPath" placeholder="~/.attp/agent/nanobot/did/server_public.pem" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono">
               </div>
             </div>
           </div>
@@ -247,7 +247,7 @@ const toastIcon = computed(() => {
           <!-- Action Buttons -->
           <div class="flex items-center justify-between pt-2">
             <div class="space-y-0.5">
-              <p class="text-[11px] text-gray-400">配置将保存至 ~/.nanobot/attp/attp_config.json</p>
+              <p class="text-[11px] text-gray-400">配置将保存至 ~/.attp/agent/nanobot/config.json</p>
               <p class="text-[10px] text-gray-300"><strong>Refresh</strong> 从磁盘重读 · <strong>Save</strong> 仅保存 · <strong>Reload</strong> 保存并应用</p>
             </div>
             <div class="flex items-center gap-3">

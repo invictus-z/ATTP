@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 class ATTPConfig(Base):
     """ATTP channel configuration."""
     enabled: bool = False
-    config_path: str = "~/.nanobot/attp_config.json"
+    config_path: str = "~/.attp/agent/nanobot/config.json"
     allow_from: list[str] = Field(default_factory=lambda: ["*"])
 
 

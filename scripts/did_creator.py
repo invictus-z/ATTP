@@ -56,7 +56,7 @@ def main() -> None:
 
 示例：
   python scripts/did_creator.py --hostname did-server.test --names userA userB --type agent
-  python scripts/did_creator.py --hostname did-server.test --names my-agent --output-dir ~/.nanobot/did
+  python scripts/did_creator.py --hostname did-server.test --names my-agent --output-dir ~/.attp/agent/nanobot/did
 """,
     )
     parser.add_argument(

@@ -1,4 +1,4 @@
-""" ATTP统一配置管理界面 — read/write ~/.nanobot/attp/attp_config.json."""
+""" ATTP统一配置管理界面 — read/write ~/.attp/agent/nanobot/config.json."""
 
 from __future__ import annotations
 
@@ -72,7 +72,7 @@ class ProtocolNodeConfig(ATTPBase):
     config_path: str = Field(default="", alias="configPath")
 
 class ATTPConfigFile(ATTPBase):
-    """Root model for ~/.nanobot/attp/attp_config.json."""
+    """Root model for ~/.attp/agent/nanobot/config.json."""
 
     did: str = ""
     attp_client: ATTPClientConfig = Field(default_factory=ATTPClientConfig)

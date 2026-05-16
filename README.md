@@ -35,7 +35,7 @@ uv venv
 python scripts/did_creator.py --hostname did-server.test --names userA userB userC
 
 # 指定输出目录（如与 nanobot 配置对齐）
-python scripts/did_creator.py --hostname did-server.test --names my-agent --output-dir ~/.nanobot/did
+python scripts/did_creator.py --hostname did-server.test --names my-agent --output-dir ~/.attp/agent/nanobot/did
 ```
 
 每个 Agent 会生成独立目录，包含：
@@ -70,7 +70,7 @@ cd ui && npm install && npm run build  # 构建前端静态资源
 nanobot onboard
 ```
 
-该命令会自动生成 nanobot 默认配置文件，并在其中指向 ATTP 配置文件路径（默认为 `~/.nanobot/attp_config.json`）。
+该命令会自动生成 nanobot 默认配置文件，并在其中指向 ATTP 配置文件路径（默认为 `~/.attp/agent/nanobot/config.json`）。
 
 ### 2. 编写 ATTP 配置文件
 
