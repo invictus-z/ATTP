@@ -1,5 +1,4 @@
 {
-    "agentDid": "did:wba:localhost:my-protocol-node",
     "protocolNode": {
         "dataPortHost": "0.0.0.0",
         "dataPortPort": 9000,

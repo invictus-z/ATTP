@@ -136,7 +136,6 @@ async def _run_standalone(args):
         api_port_port=pn.api_port_port,
         tracer=tracer,
         session_manager=session_manager,
-        agent_did=cfg.agent_did,
         did_resolver=did_resolver,
         behavior_controller=behavior_controller,
     )

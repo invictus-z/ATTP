@@ -26,7 +26,6 @@ class ProtocolNode:
         api_port_port: int,
         tracer: MessageTracer,
         session_manager: ProtocolSessionManager,
-        agent_did: str = "",
         did_resolver=None,
         behavior_controller=None,
     ):
@@ -35,12 +34,9 @@ class ProtocolNode:
 
         self._tracer = tracer
         self._session_manager = session_manager
-        self._agent_did = agent_did
-
         self._data_port = DataPort(
             tracer=tracer,
             session_manager=session_manager,
-            agent_did=agent_did,
             host=data_port_host,
             port=data_port_port,
             did_resolver=did_resolver,

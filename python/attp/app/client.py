@@ -10,7 +10,7 @@ import aiohttp
 from anp.openanp import RemoteAgent
 from anp.authentication import DIDWbaAuthHeader
 from attp.app.logging import get_logger
-from attp.core.authentication.signatures import sign_hash
+from attp.core.message.event import NodeMessage, BackMessage, RecordedHop
 
 logger = get_logger("Client")
 
@@ -198,7 +198,7 @@ class ATTPClient:
             if "Hop" in metadata:
                 session.set_trace_metadata({
                     "Hop": metadata["Hop"],
-                    "Session_ID": metadata.get("Session_ID"),
+                    "Session_ID": metadata["Session_ID"],
                     "Protocol_Node_Address": metadata.get("Protocol_Node_Address"),
                 })
                 self._session_manager.save(session)
@@ -240,9 +240,8 @@ class ATTPClient:
                 return f"Error: Agent {target_did} not found or unreachable"
 
         metadata = metadata or {}
-        prev_hop = metadata.get("Hop")  # append_hop 会覆盖 Hop
-        nonce = uuid.uuid4().hex  # 本轮交互的唯一 nonce
-        metadata["nonce"] = nonce  # 携带给接收方，用于 Phase 1 回传
+        nonce = uuid.uuid4().hex
+        metadata["nonce"] = nonce
         try:
             private_key_path = str(self.auth.private_key_path) if getattr(self.auth, "private_key_path", None) else None
             if private_key_path:
@@ -257,52 +256,61 @@ class ATTPClient:
             logger.error("Failed to append tracing hop: {}", e)
             return f"Error: Tracing hook failed - {str(e)}"
 
-        # Record field A2A: Agent→Agent
+        # 从 append_hop 返回的 hop dict 构造 RecordedHop
+        hop = metadata.get("Hop")
+        if not hop:
+            return "Error: Hop metadata not generated"
+
+        recorded = RecordedHop(
+            session_id=metadata["Session_ID"],
+            sender_did=hop["node_did"],
+            target_did=hop["target_did"],
+            content=hop["Content"],
+            timestamp=hop["Timestamp"],
+            hop_count=hop["Hop_Count"],
+            sig_content=hop["Signature"],
+        )
+
+        # 构造 NodeMessage 发给 B
+        protocol_url = metadata.get("Protocol_Node_Address", "")
+        node_msg = NodeMessage(
+            protocol_url=protocol_url,
+            nonce=nonce,
+            recorded_hop=recorded,
+        )
+
         try:
-            # 发送原始消息
             result = await remote.receive_message(
                 sender_did=sender_did,
                 content=content,
                 message_type=message_type,
-                metadata=metadata,
+                metadata={"NodeMessage": node_msg.to_dict()},
             )
 
-            # 向协议节点发送 record 副本（Phase 2: Client sends）
+            # Phase 2: 构造 BackMessage 发给协议节点
             try:
-                protocol_node_url = metadata.get("Protocol_Node_Address")
-                if protocol_node_url:
-                    record_log = metadata.get("Hop")
-                    if record_log:
-                        # 生成 Identity Signature
-                        identity_sig = ""
-                        if private_key_path:
-                            private_key = self._tracer._key_store.load_private_key(private_key_path)
-                            identity_payload = f"{nonce}:{sender_did}"
-                            identity_sig = sign_hash(identity_payload, private_key)
+                if protocol_url and private_key_path:
+                    private_key = self._tracer._key_store.load_private_key(private_key_path)
 
-                        record_metadata = {
-                            "Session_ID": metadata.get("Session_ID"),
-                            "Record_Log": record_log,
-                            "PrevHop": prev_hop,
-                            "Protocol_Node_Address": protocol_node_url,
-                            "nonce": nonce,
-                            "Identity_Signature": identity_sig,
-                        }
+                    back_msg = BackMessage(
+                        protocol_url=protocol_url,
+                        node_did=sender_did,
+                        nonce=nonce,
+                        sig_identity="",
+                        recorded_hop=recorded,
+                    )
+                    back_msg.sign_identity(private_key)
 
-                        async with aiohttp.ClientSession() as http_session:
-                            async with http_session.post(
-                                f"{protocol_node_url}/record",
-                                json={
-                                    "sender_did": sender_did,
-                                    "content": content,
-                                    "metadata": record_metadata,
-                                },
-                                timeout=aiohttp.ClientTimeout(total=10),
-                            ) as resp:
-                                if resp.status == 200:
-                                    logger.debug("Record sent to protocol node at {}", protocol_node_url)
-                                else:
-                                    logger.warning("Protocol node returned HTTP {}", resp.status)
+                    async with aiohttp.ClientSession() as http_session:
+                        async with http_session.post(
+                            f"{protocol_url}/record",
+                            json=back_msg.to_dict(),
+                            timeout=aiohttp.ClientTimeout(total=10),
+                        ) as resp:
+                            if resp.status == 200:
+                                logger.debug("Record sent to protocol node at {}", protocol_url)
+                            else:
+                                logger.warning("Protocol node returned HTTP {}", resp.status)
             except Exception as e:
                 logger.warning("Failed to send record to protocol node: {}", e)
 
@@ -313,7 +321,6 @@ class ATTPClient:
                     "other_did": target_did,
                     "Session_ID": metadata.get("Session_ID"),
                 })
-
 
             return result if isinstance(result, str) else str(result)
         except Exception as e:

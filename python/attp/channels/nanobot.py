@@ -127,7 +127,6 @@ class ATTPChannel(BaseChannel):
                 api_port_port=pn_cfg.api_port_port,
                 tracer=self._tracer,
                 session_manager=self._protocol_session_manager,
-                agent_did=self._attp_cfg.did,
                 did_resolver=did_resolver,
                 behavior_controller=behavior_controller,
             )
