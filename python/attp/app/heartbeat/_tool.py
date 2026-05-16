@@ -65,7 +65,7 @@ class ToolNodeHealthChecker:
 
     async def _check_tool_nodes(self) -> None:
         """检查所有已注册工具节点的健康状态。"""
-        tool_nodes = dict(self._tool_bridge._tool_nodes)
+        tool_nodes = self._tool_bridge.get_tool_nodes()
         if not tool_nodes:
             return
 
@@ -80,31 +80,31 @@ class ToolNodeHealthChecker:
                             self._fail_counts.pop(did, None)
                             logger.debug("tool node {} is healthy", did)
                         else:
-                            self._record_fail(did, info.ad_url)
+                            await self._record_fail(did, info.ad_url)
             except Exception as e:
                 logger.debug("tool node {} health check error: {}", did, e)
-                self._record_fail(did, info.ad_url)
+                await self._record_fail(did, info.ad_url)
 
-    def _record_fail(self, did: str, ad_url: str) -> None:
+    async def _record_fail(self, did: str, ad_url: str) -> None:
         """记录一次失败，超过阈值则 evict。"""
         self._fail_counts[did] = self._fail_counts.get(did, 0) + 1
         count = self._fail_counts[did]
 
         if count >= self._max_fail:
-            self._evict(did, ad_url)
+            await self._evict(did, ad_url)
         else:
             logger.warning(
                 "tool node {} failed ({}/{})",
                 did, count, self._max_fail,
             )
 
-    def _evict(self, did: str, ad_url: str) -> None:
+    async def _evict(self, did: str, ad_url: str) -> None:
         """移除工具节点并记录失败信息用于后续恢复。"""
         logger.warning(
             "tool node {} evicted after {} consecutive failures",
             did, self._max_fail,
         )
-        self._tool_bridge.unregister_tool_node(did)
+        await self._tool_bridge.unregister_tool_node(did)
         self._fail_counts.pop(did, None)
         if ad_url:
             self._failed_nodes[ad_url] = did

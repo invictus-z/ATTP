@@ -58,6 +58,7 @@ class WebAppConfig(ATTPBase):
 class ToolConfig(ATTPBase):
     host: str = "127.0.0.1"
     port: int = 8002
+    tool_node_ads: list[str] = Field(default_factory=list)  # 工具节点 ad.json URL 列表
 
 class HeartbeatConfig(ATTPBase):
     interval: int = 30
