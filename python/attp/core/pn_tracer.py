@@ -50,10 +50,9 @@ class ProtocolTracer:
         stored_hop: dict,
         prev_hop: dict,
         session_id: str,
-        protocol_node_address: str,
     ) -> tuple[bool, str]:
         return self._chain.verify_back_propagation(
-            stored_hop, prev_hop, session_id, protocol_node_address
+            stored_hop, prev_hop, session_id
         )
 
     # -- behavior traces --
@@ -88,6 +87,47 @@ class ProtocolTracer:
 
     async def load_analysis_session(self, session_id: str) -> dict | None:
         return await self._storage.load_analysis_session(session_id)
+
+    # -- malicious node reports --
+
+    async def save_malicious_report(self, report) -> None:
+        """保存恶意节点报告。
+
+        Args:
+            report: MaliciousNodeReport 实例
+        """
+        for did in report.malicious_dids:
+            await self._storage.save_malicious_report(
+                session_id=report.session_id,
+                malicious_did=did,
+                evidence_type=report.evidence_type.value,
+                evidence_description=report.evidence_description,
+                severity="high",
+                nonce=report.nonce,
+                timestamp=report.timestamp,
+                raw_evidence=report.raw_evidence,
+            )
+
+    async def query_malicious_nodes(
+        self,
+        session_id: str | None = None,
+        malicious_did: str | None = None,
+    ) -> list:
+        return await self._storage.query_malicious_nodes(session_id, malicious_did)
+
+    # -- node dossiers --
+
+    async def query_dossier(self, did: str) -> dict | None:
+        """查询单个 DID 的恶意节点档案。"""
+        return await self._storage.query_dossier(did)
+
+    async def query_all_dossiers(
+        self,
+        severity_level: str | None = None,
+        limit: int = 100,
+    ) -> list:
+        """查询所有档案，可按 severity_level 筛选。"""
+        return await self._storage.query_all_dossiers(severity_level, limit)
 
 
 # Backward-compatible alias

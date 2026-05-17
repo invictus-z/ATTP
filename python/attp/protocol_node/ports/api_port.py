@@ -44,6 +44,7 @@ class ApiPort:
     def _mount_routes(self) -> None:
         """挂载协议相关 API 路由。"""
         from attp.protocol_node.api.trace import get_behavior_router
+        from attp.protocol_node.api.malicious import get_malicious_router
         self._app.include_router(
             get_behavior_router(
                 tracer=self._tracer,
@@ -51,6 +52,7 @@ class ApiPort:
                 orchestrator=self._orchestrator,
             )
         )
+        self._app.include_router(get_malicious_router(tracer=self._tracer))
 
     async def start(self) -> None:
         """启动 API Port uvicorn 服务。"""

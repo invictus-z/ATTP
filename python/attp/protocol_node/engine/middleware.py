@@ -1,21 +1,27 @@
-"""消息拦截中间件 — Nonce 会话匹配 + 两阶段验证 + 行为记录。
+"""消息拦截中间件 — 存储前置 + 恶意节点判定 + 行为记录。
 
-实现 4 步串行验证管道：
+实现验证管道：
 1. 基础字段验证（BackMessage 结构完整性）
-2. 身份与签名验证（DID 解析 + identity signature + content signature）
-3. Nonce 会话分支（Branch A 暂存 / Branch B 匹配验证）
-4. 行为类型推断 + hop_count 分规则校验
+2. DID 解析 + 节点类型校验
+3. Nonce 会话分支：
+   - Branch A（回传1）：计算身份验证结果 → 始终暂存（不拒绝）
+   - Branch B（回传2）：恶意节点判定引擎（含回传1身份/可信名单校验）
+     → verify_back_propagation → 行为推断 → 更新可信名单
 """
 
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from attp.app.logging import get_logger
 from attp.core.authentication.did_resolver import DIDResolver, VALID_NODE_TYPES
 from attp.core.message.event import BackMessage
+from attp.protocol_node.engine.malicious_detector import (
+    MaliciousNodeDetector,
+    MaliciousNodeReport,
+)
 from attp.core.sessions.protocol_node import PendingMessage
 
 logger = get_logger("Middleware")
@@ -34,13 +40,27 @@ BEHAVIOR_TYPE_MAP: dict[tuple[str, str], str] = {
 class InterceptResult:
     """拦截结果。"""
 
-    status: str             # "stored" / "verified" / "error"
+    status: str             # "stored" / "verified" / "error" / "malicious"
     node_type: str | None
     error: str | None
     sender_did: str | None
     target_did: str | None = None
     behavior_type: str | None = None
     stored_msg: Any = None  # Branch B 时携带的 PendingMessage
+    malicious_report: MaliciousNodeReport | None = None  # 恶意检测报告
+
+
+async def _sweep_expired_pending(
+    session,
+    malicious_detector: MaliciousNodeDetector,
+    tracer,
+) -> None:
+    """扫描 session 中过期的 PendingMessage，逐一进行单回传判定。"""
+    expired = session.pop_expired_pending_messages()
+    for _nonce, msg in expired:
+        report = await malicious_detector.evaluate_single_back_prop(msg, session)
+        if report:
+            await tracer.save_malicious_report(report)
 
 
 def _validate_back_message(back_msg: BackMessage) -> tuple[bool, str]:
@@ -74,15 +94,16 @@ async def intercept_record(
     did_resolver: DIDResolver,
     tracer,
     session_manager,
+    malicious_detector: MaliciousNodeDetector,
 ) -> InterceptResult:
-    """消息拦截核心逻辑 — 4 步验证管道。
+    """消息拦截核心逻辑 — 验证管道。
 
     Args:
         back_msg: 解析后的 BackMessage 对象。
         did_resolver: DID 解析器实例。
         tracer: ProtocolTracer 实例。
-        chain_manager: ChainManager 实例（用于 validate_hop）。
         session_manager: SessionManager 实例（用于 nonce 暂存）。
+        malicious_detector: MaliciousNodeDetector 实例。
 
     Returns:
         InterceptResult 拦截结果。
@@ -101,8 +122,8 @@ async def intercept_record(
             error=f"hop_validation:{field_error}", sender_did=None,
         )
 
-    # ==================== Step 2: 身份与签名验证 ====================
-    # 2a. DID 解析 → 公钥 + 节点类型
+    # ==================== Step 2: 身份公钥获取 ====================
+    # 2. DID 解析 → 公钥 + 节点类型
     result = await did_resolver.resolve_full(node_did)
     if result.public_key is None:
         logger.warning("DID resolution failed for sender: {}", node_did)
@@ -123,32 +144,18 @@ async def intercept_record(
             error="invalid_type", sender_did=node_did,
         )
 
-    # 2b. 验证 Identity Signature
-    if not back_msg.verify_identity(result.public_key):
-        return InterceptResult(
-            status="error", node_type=node_type,
-            error="identity_signature_invalid", sender_did=node_did,
-        )
-
-    # 2c. 验证 Content Signature（发送方签名）
-    # 需要用 recorded_hop.sender_did 的公钥验签
-    sender_result = await did_resolver.resolve_full(recorded.sender_did)
-    if sender_result.public_key is None:
-        return InterceptResult(
-            status="error", node_type=node_type,
-            error="did_resolution_failed", sender_did=recorded.sender_did,
-        )
-    if not back_msg.verify_content(sender_result.public_key):
-        return InterceptResult(
-            status="error", node_type=node_type,
-            error="content_signature_invalid", sender_did=node_did,
-        )
+    # 缓存已解析的公钥，供后续 verify_back_propagation 使用
+    tracer.key_store.cache_public_key(node_did, result.public_key)
 
     # ==================== Step 3: Nonce 会话分支 ====================
     session = session_manager.get_or_create(session_id)
+
+    # 在 nonce 查找前扫描过期消息（避免 get_pending_message 静默丢弃过期消息）
+    await _sweep_expired_pending(session, malicious_detector, tracer)
+
     stored_msg = session.get_pending_message(nonce)
 
-    # 构造 PendingMessage 用的 hop dict（保持 PendingMessage 接口不变）
+    # 构造 PendingMessage 用的 hop dict
     hop_dict = {
         "node_did": recorded.sender_did,
         "target_did": recorded.target_did,
@@ -156,11 +163,17 @@ async def intercept_record(
         "Timestamp": recorded.timestamp,
         "Hop_Count": recorded.hop_count,
         "Signature": recorded.sig_content,
+        "session_id": session_id,
+        "protocol_node_address": pna,
     }
 
     if stored_msg is None:
-        # ====== Branch A: 首次到达（上游发送者 Phase 2） ======
+        # ====== Branch A: 回传1 到达 ======
+        # 存储前置：计算身份验证结果，始终存储
+        # 身份验证和可信名单校验移至 Branch B 的恶意检测器
+        identity_ok = back_msg.verify_identity(result.public_key)
 
+        # 暂存，等待下一步验证或判断
         pending = PendingMessage(
             hop=hop_dict,
             session_id=session_id,
@@ -169,10 +182,13 @@ async def intercept_record(
             sender_node_type=node_type,
             nonce=nonce,
             stored_at=time.time(),
+            node_did=node_did,
+            identity_public_key_pem=None,
+            identity_verified=identity_ok,
+            identity_verification_attempted=True,
         )
-        hop_dict["session_id"] = session_id
-        hop_dict["protocol_node_address"] = pna
         session.store_pending_message(nonce, pending)
+
         session_manager.save(session)
 
         return InterceptResult(
@@ -181,23 +197,30 @@ async def intercept_record(
         )
 
     else:
-        # ====== Branch B: 下游响应到达（Phase 1） ======
+        # ====== Branch B: 回传2 到达（接收方回传） ======
 
-        # 3a. 校验：stored_msg 的目标就是当前消息的发送者
-        if stored_msg.hop.get("target_did") != node_did:
+        # Step 4: 恶意节点判定引擎
+        report = await malicious_detector.evaluate_dual_back_prop(
+            stored_msg=stored_msg,
+            back_msg_2=back_msg,
+            session=session,
+        )
+        if report:
+            # 恶意节点检测到
             session.remove_pending_message(nonce)
             session_manager.save(session)
+            await tracer.save_malicious_report(report)
             return InterceptResult(
-                status="error", node_type=node_type,
-                error="receiver_mismatch", sender_did=node_did,
+                status="malicious", node_type=node_type,
+                error="malicious_node_detected", sender_did=node_did,
+                malicious_report=report,
             )
 
-        # 3b. 内容一致性验证（stored hop 与当前 recorded_hop）
+        # Step 5: 内容一致性验证
         ok, error_msg = tracer.verify_back_propagation(
             stored_hop=stored_msg.hop,
             prev_hop=hop_dict,
             session_id=session_id,
-            protocol_node_address=pna,
         )
         if not ok:
             session.remove_pending_message(nonce)
@@ -207,7 +230,7 @@ async def intercept_record(
                 error=f"back_propagation:{error_msg}", sender_did=node_did,
             )
 
-        # 3c. 推断行为类型
+        # Step 6: 推断行为类型
         sender_type = stored_msg.sender_node_type
         receiver_type = node_type
         behavior_type = BEHAVIOR_TYPE_MAP.get((sender_type, receiver_type))
@@ -219,7 +242,7 @@ async def intercept_record(
                 error="invalid_type_combination", sender_did=node_did,
             )
 
-        # 3d. hop_count=0 时类型必须为 U2A（用户意图入口）
+        # 6a. hop_count=0 时类型必须为 U2A
         current_hc = recorded.hop_count
         if current_hc == 0 and behavior_type != "U2A":
             session.remove_pending_message(nonce)
@@ -229,7 +252,7 @@ async def intercept_record(
                 error="hop_zero_must_be_u2a", sender_did=node_did,
             )
 
-        # 3e. Hop Count 校验（当前对 vs 前一对已完成消息）
+        # 6b. Hop Count 校验
         prev_completed_hc = session.get_last_completed_hop_count()
         if prev_completed_hc is not None:
             if behavior_type == "A2A":
@@ -249,9 +272,10 @@ async def intercept_record(
                         error="hop_count_violation_non_a2a", sender_did=node_did,
                     )
 
-        # 清理暂存 + 记录本对 hop_count 供下一对比较
-        session.remove_pending_message(nonce)
-        session.set_last_completed_hop_count(current_hc)
+        # Step 7: 验证通过，更新可信名单
+        session.complete_verification(
+            nonce, hop_count=current_hc, trusted_did=recorded.target_did,
+        )
         session_manager.save(session)
 
         return InterceptResult(
