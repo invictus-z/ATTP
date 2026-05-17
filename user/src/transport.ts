@@ -110,11 +110,20 @@ export interface ApiResponse {
  *        apiFetch('http://localhost:8001/api/config', { method: 'PUT', body: JSON.stringify(payload) })
  */
 export async function apiFetch(url: string, options?: RequestOptions): Promise<ApiResponse> {
-  const result = await window.electronAPI.request(url, options);
-  if (result.error) {
-    return { ok: false, status: result.status, data: null, error: result.error };
+  const method = options?.method || 'GET';
+  console.log(`[DEBUG-CONN][apiFetch] >>> ${method} ${url}`);
+  try {
+    const result = await window.electronAPI.request(url, options);
+    if (result.error) {
+      console.warn(`[DEBUG-CONN][apiFetch] <<< ${method} ${url} → FAIL (status=${result.status}, error="${result.error}")`);
+      return { ok: false, status: result.status, data: null, error: result.error };
+    }
+    console.log(`[DEBUG-CONN][apiFetch] <<< ${method} ${url} → OK (status=${result.status})`);
+    return result;
+  } catch (e: any) {
+    console.error(`[DEBUG-CONN][apiFetch] !!! ${method} ${url} → EXCEPTION: ${e.message || e}`);
+    return { ok: false, status: 0, data: null, error: e.message || String(e) };
   }
-  return result;
 }
 
 // ---- WebSocket ----
@@ -179,13 +188,16 @@ function ensureWsListeners() {
 export async function createWs(url: string): Promise<WsConnection> {
   ensureWsListeners();
 
+  console.log(`[DEBUG-CONN][createWs] >>> Requesting WS connection to: ${url}`);
   const result = await window.electronAPI.wsConnect(url);
 
   if (!result.ok || !result.id) {
+    console.error(`[DEBUG-CONN][createWs] !!! WS connection FAILED to ${url}: ${result.error || 'unknown error'}`);
     throw new Error(result.error || 'Failed to create WebSocket connection');
   }
 
   const id = result.id;
+  console.log(`[DEBUG-CONN][createWs] ✓ WS connected #${id} → ${url}`);
 
   return {
     id,

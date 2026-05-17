@@ -67,25 +67,31 @@ export function clearSessionProtocolUrl(sessionId: string) {
 /** 从 ~/.attp/user/config.json 加载配置 */
 async function loadUserConfig(): Promise<boolean> {
   loading.value = true
+  console.log('[DEBUG-CONN][loadUserConfig] Loading user config from ~/.attp/user/config.json...')
   try {
     const result = await window.electronAPI.readUserConfig()
     if (result.ok && result.data) {
       Object.assign(userConfig, result.data)
       initialized.value = true
 
+      console.log(`[DEBUG-CONN][loadUserConfig] ✓ Config loaded: did="${userConfig.did}", didKeyPath="${userConfig.didKeyPath}"`)
+      console.log(`[DEBUG-CONN][loadUserConfig]   protocolNodes (${userConfig.protocolNodes.length}):`, userConfig.protocolNodes.map(n => `"${n.name}"=${n.url}`))
+      console.log(`[DEBUG-CONN][loadUserConfig]   agents (${userConfig.agents.length}):`, userConfig.agents.map(a => `"${a.name}"=${a.baseUrl}`))
+
       // 如果密钥路径变了，清除缓存的私钥
       if (cachedKeyPath !== userConfig.didKeyPath) {
         cachedPrivateKey = null
         privateKeyLoaded.value = false
+        console.log('[DEBUG-CONN][loadUserConfig]   Key path changed — cleared cached private key')
       }
 
       return true
     } else {
-      console.warn('[ATTP] loadUserConfig failed:', result.error)
+      console.warn(`[DEBUG-CONN][loadUserConfig] ✗ Failed: ${result.error || 'no data'}`)
       return false
     }
   } catch (e) {
-    console.error('[ATTP] loadUserConfig error:', e)
+    console.error('[DEBUG-CONN][loadUserConfig] !!! Exception:', e)
     return false
   } finally {
     loading.value = false
