@@ -1,8 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useSettings } from '../composables/useSettings'
-import { useAttpProtocol } from '../composables/useAttpProtocol'
-import { Loader2, AlertTriangle, CheckCircle, XCircle, AlertCircle, Info, Fingerprint, Radio, Server, Trash2, Plus, Globe, Wrench, HeartPulse, RotateCcw, Check, RefreshCw, User, ShieldCheck, Link } from 'lucide-vue-next'
+import { Loader2, AlertTriangle, CheckCircle, XCircle, AlertCircle, Info, Fingerprint, Radio, Server, Trash2, Plus, Globe, Wrench, HeartPulse, RotateCcw, Check, RefreshCw } from 'lucide-vue-next'
 
 const {
   config, configStatus, configSaving, configReloading,
@@ -11,33 +10,7 @@ const {
   addNodeAd, removeNodeAd,
 } = useSettings()
 
-// ---- User ATTP Protocol Config ----
-const {
-  userConfig, initialized: attpInitialized, privateKeyLoaded,
-  loadUserConfig, saveUserConfig,
-  addProtocolUrl, removeProtocolUrl, addAgent, removeAgent,
-} = useAttpProtocol()
-
-const newProtocolUrl = ref('')
-const newAgentName = ref('')
-const newAgentUrl = ref('')
-
-async function saveAttpConfig() {
-  await saveUserConfig()
-}
-
-function handleAddProtocolUrl() {
-  const url = newProtocolUrl.value.trim()
-  if (url) { addProtocolUrl(url); newProtocolUrl.value = '' }
-}
-
-function handleAddAgent() {
-  const name = newAgentName.value.trim()
-  const url = newAgentUrl.value.trim()
-  if (name && url) { addAgent(name, url); newAgentName.value = ''; newAgentUrl.value = '' }
-}
-
-onMounted(() => { loadConfig(); loadUserConfig() })
+onMounted(() => { loadConfig() })
 
 window.addEventListener('load-settings', () => { loadConfig() })
 
@@ -202,69 +175,6 @@ const toastIcon = computed(() => {
                 <div><label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">Interval (s)</label><input type="number" v-model.number="config.heartbeat.interval" placeholder="30" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono"></div>
                 <div><label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">Timeout (s)</label><input type="number" v-model.number="config.heartbeat.timeout" placeholder="90" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono"></div>
                 <div><label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">Max Fail</label><input type="number" v-model.number="config.heartbeat.maxFail" placeholder="3" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono"></div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Group 7: User ATTP Identity -->
-          <div>
-            <div class="flex items-center gap-2 text-[11px] font-semibold text-gray-400 tracking-wider uppercase mb-3 px-1">
-              <User class="w-3.5 h-3.5" />
-              <span>User ATTP Identity</span>
-              <span v-if="attpInitialized" class="ml-auto px-1.5 py-0.5 rounded text-[9px] font-medium text-emerald-600 bg-emerald-50 border border-emerald-100">已配置</span>
-              <span v-else class="ml-auto px-1.5 py-0.5 rounded text-[9px] font-medium text-amber-600 bg-amber-50 border border-amber-100">未配置</span>
-            </div>
-            <div class="bg-white p-5 rounded-xl border border-gray-100 space-y-4">
-              <div>
-                <label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">User DID</label>
-                <input type="text" v-model="userConfig.did" placeholder="did:wba:..." class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono">
-              </div>
-              <div>
-                <label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">DID Document Path</label>
-                <input type="text" v-model="userConfig.didDocPath" placeholder="~/.attp/user/did/did.json" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono">
-              </div>
-              <div>
-                <label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">Private Key Path</label>
-                <input type="text" v-model="userConfig.didKeyPath" placeholder="~/.attp/user/did/key-1_private.pem" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono">
-                <p v-if="userConfig.didKeyPath && !privateKeyLoaded" class="mt-1 text-[10px] text-amber-500">⚠ 密钥将在下次发送消息时加载</p>
-                <p v-if="userConfig.didKeyPath && privateKeyLoaded" class="mt-1 text-[10px] text-emerald-500">✓ 密钥已加载</p>
-              </div>
-              <div>
-                <label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">Default Target DID</label>
-                <input type="text" v-model="userConfig.defaultTargetDid" placeholder="did:wba:..." class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono">
-              </div>
-              <div class="pt-2 border-t border-gray-50">
-                <div class="flex items-center gap-2 mb-3"><ShieldCheck class="w-3.5 h-3.5 text-gray-400" /><span class="text-[11px] font-medium text-gray-400 uppercase">Protocol Nodes</span></div>
-                <div class="space-y-2">
-                  <div v-for="(url, index) in userConfig.protocolUrls" :key="'proto-'+index" class="flex items-center gap-2">
-                    <input type="text" :value="url" readonly class="flex-1 text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 font-mono text-gray-600">
-                    <button @click="removeProtocolUrl(index)" class="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors shrink-0"><Trash2 class="w-4 h-4" /></button>
-                  </div>
-                  <div class="flex items-center gap-2">
-                    <input type="text" v-model="newProtocolUrl" placeholder="http://host:port" class="flex-1 text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono" @keydown.enter="handleAddProtocolUrl">
-                    <button @click="handleAddProtocolUrl" class="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-50 rounded-lg transition-colors shrink-0"><Plus class="w-4 h-4" /></button>
-                  </div>
-                </div>
-              </div>
-              <div class="pt-2 border-t border-gray-50">
-                <div class="flex items-center gap-2 mb-3"><Link class="w-3.5 h-3.5 text-gray-400" /><span class="text-[11px] font-medium text-gray-400 uppercase">Known Agents</span></div>
-                <div class="space-y-2">
-                  <div v-for="(agent, index) in userConfig.agents" :key="'agent-'+index" class="flex items-center gap-2">
-                    <span class="text-xs text-gray-500 w-20 shrink-0 truncate">{{ agent.name }}</span>
-                    <input type="text" :value="agent.baseUrl" readonly class="flex-1 text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 font-mono text-gray-600">
-                    <button @click="removeAgent(index)" class="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors shrink-0"><Trash2 class="w-4 h-4" /></button>
-                  </div>
-                  <div class="flex items-center gap-2">
-                    <input type="text" v-model="newAgentName" placeholder="Name" class="w-20 shrink-0 text-sm bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300">
-                    <input type="text" v-model="newAgentUrl" placeholder="http://host:port" class="flex-1 text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono" @keydown.enter="handleAddAgent">
-                    <button @click="handleAddAgent" class="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-50 rounded-lg transition-colors shrink-0"><Plus class="w-4 h-4" /></button>
-                  </div>
-                </div>
-              </div>
-              <div class="flex justify-end pt-2">
-                <button @click="saveAttpConfig()" class="px-4 py-2 text-sm font-medium text-white bg-gray-900 rounded-xl hover:bg-gray-800 transition-colors shadow-sm">
-                  <span class="flex items-center gap-1.5"><Check class="w-3.5 h-3.5" /> Save User Config</span>
-                </button>
               </div>
             </div>
           </div>

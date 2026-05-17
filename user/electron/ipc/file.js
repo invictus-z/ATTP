@@ -32,8 +32,7 @@ function getDefaultConfig() {
     did: '',
     didDocPath: '~/.attp/user/did/did.json',
     didKeyPath: '~/.attp/user/did/key-1_private.pem',
-    defaultTargetDid: '',
-    protocolUrls: [],
+    protocolNodes: [],
     agents: [],
   };
 }

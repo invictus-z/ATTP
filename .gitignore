@@ -9,3 +9,6 @@ dist/
 user/release/
 user/dist/
 user/node_modules/
+
+typescript/dist/
+typescript/node_modules/

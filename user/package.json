@@ -47,6 +47,9 @@
     "wait-on": "^8.0.3"
   },
   "dependencies": {
+    "@noble/curves": "^2.2.0",
+    "@noble/hashes": "^2.2.0",
+    "@noble/secp256k1": "^3.1.0",
     "@vitejs/plugin-vue": "^6.0.6",
     "dompurify": "^3.4.2",
     "electron-store": "^11.0.2",

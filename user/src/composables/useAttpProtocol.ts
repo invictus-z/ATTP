@@ -7,8 +7,9 @@
 
 import { ref, reactive } from 'vue'
 import type { UserAttpConfig } from '../transport'
-import { importPrivateKeyFromPem } from '../attp/key_helper'
+import { importPrivateKeyFromPem, type SignableKey } from '../attp/key_helper'
 import { buildNodeMessage, sendBackMessage, parseIncomingNodeMessage } from '../attp/protocol'
+import { UserSessionManager } from '@attp/core'
 import type { RecordedHop } from '@attp/core'
 
 // ---- Singleton State ----
@@ -17,19 +18,49 @@ const userConfig = reactive<UserAttpConfig>({
   did: '',
   didDocPath: '',
   didKeyPath: '',
-  defaultTargetDid: '',
-  protocolUrls: [],
+  protocolNodes: [],
   agents: [],
 })
 
-/** 缓存的私钥 CryptoKey 对象 */
-let cachedPrivateKey: CryptoKey | null = null
+/** 缓存的私钥（CryptoKey 或 Secp256k1PrivateKey） */
+let cachedPrivateKey: SignableKey | null = null
 let cachedKeyPath: string = ''
 
 const initialized = ref(false)
 const privateKeyLoaded = ref(false)
 const loading = ref(false)
 const saving = ref(false)
+
+// ---- Session Manager（基于 @attp/core UserSessionManager）----
+
+/** ATTP 会话管理器单例，持久化到 localStorage */
+const attpSessionManager = new UserSessionManager()
+
+// 初始化时从 localStorage 恢复
+attpSessionManager.loadFromStorage()
+
+/** 绑定 session 的 protocol URL */
+export function bindSessionProtocolUrl(sessionId: string, protocolUrl: string) {
+  console.log(`[ATTP] bindSessionProtocolUrl: session=${sessionId} → protocol=${protocolUrl}`)
+  const session = attpSessionManager.getOrCreate(sessionId)
+  session.protocolNodeAddress = protocolUrl
+  session.userDid = userConfig.did || undefined
+  attpSessionManager.save(session)
+  attpSessionManager.saveToStorage()
+}
+
+/** 获取 session 绑定的 protocol URL，若无则 fallback 到全局配置的第一个 */
+export function getSessionProtocolUrl(sessionId: string): string | null {
+  const session = attpSessionManager.get(sessionId)
+  if (session?.protocolNodeAddress) return session.protocolNodeAddress
+  return userConfig.protocolNodes.length > 0 ? userConfig.protocolNodes[0].url : null
+}
+
+/** 清除 session 的 protocol 绑定 */
+export function clearSessionProtocolUrl(sessionId: string) {
+  attpSessionManager.delete(sessionId)
+  attpSessionManager.saveToStorage()
+}
 
 // ---- Config I/O ----
 
@@ -65,14 +96,14 @@ async function loadUserConfig(): Promise<boolean> {
 async function saveUserConfig(): Promise<boolean> {
   saving.value = true
   try {
-    const config: UserAttpConfig = {
+    // Deep-clone to strip Vue reactive proxies (not serializable through Electron IPC)
+    const config: UserAttpConfig = JSON.parse(JSON.stringify({
       did: userConfig.did,
       didDocPath: userConfig.didDocPath,
       didKeyPath: userConfig.didKeyPath,
-      defaultTargetDid: userConfig.defaultTargetDid,
-      protocolUrls: [...userConfig.protocolUrls],
-      agents: [...userConfig.agents],
-    }
+      protocolNodes: userConfig.protocolNodes,
+      agents: userConfig.agents,
+    }))
     const result = await window.electronAPI.saveUserConfig(config)
     if (!result.ok) {
       console.warn('[ATTP] saveUserConfig failed:', result.error)
@@ -88,8 +119,8 @@ async function saveUserConfig(): Promise<boolean> {
 
 // ---- Key Management ----
 
-/** 读取 PEM 私钥文件并导入为 CryptoKey（带缓存） */
-async function loadPrivateKey(): Promise<CryptoKey | null> {
+/** 读取 PEM 私钥文件并导入为可签名密钥（带缓存） */
+async function loadPrivateKey(): Promise<SignableKey | null> {
   if (!userConfig.didKeyPath) {
     console.warn('[ATTP] No private key path configured')
     return null
@@ -133,8 +164,14 @@ async function loadPrivateKey(): Promise<CryptoKey | null> {
  * @returns 是否检测到 NodeMessage 并触发了回传
  */
 async function handleReceivedNodeMessage(incomingData: any): Promise<boolean> {
+  console.log('[ATTP] handleReceivedNodeMessage: 收到 WS 消息，检测 NodeMessage...')
   const nodeMessage = parseIncomingNodeMessage(incomingData)
-  if (!nodeMessage) return false
+  if (!nodeMessage) {
+    console.log('[ATTP] handleReceivedNodeMessage: 未检测到 NodeMessage，跳过（非 ATTP 消息或 Agent 未包裹）')
+    return false
+  }
+
+  console.log(`[ATTP] handleReceivedNodeMessage: 检测到 NodeMessage ✓ protocolUrl=${nodeMessage.protocolUrl}, nonce=${nodeMessage.nonce}`)
 
   if (!userConfig.did) {
     console.warn('[ATTP] handleReceivedNodeMessage: User DID 未配置，跳过回传')
@@ -186,20 +223,25 @@ async function sendMessageWithAttp(
   sessionId: string,
   targetDid: string,
 ): Promise<SendMessageResult> {
+  console.log(`[ATTP] sendMessageWithAttp called: sessionId=${sessionId}, targetDid=${targetDid}, contentLen=${content.length}`)
+
   if (!userConfig.did) {
-    return { success: false, error: 'User DID 未配置' }
+    console.error('[ATTP] sendMessageWithAttp FAILED: User DID 未配置')
+    return { success: false, error: 'User DID 未配置 — 请先在 Settings 中配置 ATTP Identity' }
   }
-  if (userConfig.protocolUrls.length === 0) {
-    return { success: false, error: 'Protocol Node URL 未配置' }
+
+  // 优先从 session 绑定取 protocolUrl，否则取全局配置
+  const protocolUrl = getSessionProtocolUrl(sessionId)
+  if (!protocolUrl) {
+    console.error('[ATTP] sendMessageWithAttp FAILED: Protocol Node URL 未配置（无 session 绑定也无全局配置）')
+    return { success: false, error: 'Protocol Node URL 未配置 — 请先在 Settings 中添加 Protocol Node，或在创建会话时绑定' }
   }
 
   const privateKey = await loadPrivateKey()
   if (!privateKey) {
-    return { success: false, error: '私钥加载失败' }
+    console.error('[ATTP] sendMessageWithAttp FAILED: 私钥加载失败')
+    return { success: false, error: '私钥加载失败 — 请检查 DID Key Path 配置' }
   }
-
-  const protocolUrl = userConfig.protocolUrls[0]
-  const effectiveTargetDid = targetDid || userConfig.defaultTargetDid
 
   // 1. 构造 NodeMessage + 签名
   let nodeMessageDict: Record<string, unknown>
@@ -210,7 +252,7 @@ async function sendMessageWithAttp(
     const built = await buildNodeMessage({
       sessionId,
       userDid: userConfig.did,
-      targetDid: effectiveTargetDid,
+      targetDid,
       content,
       protocolUrl,
       privateKey,
@@ -243,10 +285,10 @@ async function sendMessageWithAttp(
 
 // ---- Agents Management ----
 
-async function addAgent(name: string, baseUrl: string): Promise<boolean> {
+async function addAgent(name: string, baseUrl: string, did?: string): Promise<boolean> {
   const exists = userConfig.agents.some(a => a.baseUrl === baseUrl)
   if (exists) return false
-  userConfig.agents.push({ name, baseUrl })
+  userConfig.agents.push({ name, baseUrl, did: did || '' })
   return saveUserConfig()
 }
 
@@ -256,18 +298,29 @@ async function removeAgent(index: number): Promise<boolean> {
   return saveUserConfig()
 }
 
-// ---- Protocol URL Management ----
+// ---- Protocol Node Management（协议节点 = 溯源节点）----
 
-async function addProtocolUrl(url: string): Promise<boolean> {
-  const exists = userConfig.protocolUrls.includes(url)
+async function addProtocolNode(name: string, url: string): Promise<boolean> {
+  const exists = userConfig.protocolNodes.some(n => n.url === url)
   if (exists) return false
-  userConfig.protocolUrls.push(url)
+  userConfig.protocolNodes.push({ name, url })
   return saveUserConfig()
 }
 
-async function removeProtocolUrl(index: number): Promise<boolean> {
-  if (index < 0 || index >= userConfig.protocolUrls.length) return false
-  userConfig.protocolUrls.splice(index, 1)
+async function updateProtocolNode(index: number, name: string, url: string): Promise<boolean> {
+  if (index < 0 || index >= userConfig.protocolNodes.length) return false
+  userConfig.protocolNodes[index] = { name, url }
+  return saveUserConfig()
+}
+
+async function removeProtocolNode(index: number): Promise<boolean> {
+  if (index < 0 || index >= userConfig.protocolNodes.length) return false
+  userConfig.protocolNodes.splice(index, 1)
+  return saveUserConfig()
+}
+
+async function saveProtocolNodes(nodes: { name: string; url: string }[]): Promise<boolean> {
+  userConfig.protocolNodes = nodes.map(({ name, url }) => ({ name, url }))
   return saveUserConfig()
 }
 
@@ -294,10 +347,14 @@ export function useAttpProtocol() {
     handleReceivedNodeMessage,
     parseIncomingNodeMessage,
 
-    // Agents/Protocol Management
+    // Agents Management
     addAgent,
     removeAgent,
-    addProtocolUrl,
-    removeProtocolUrl,
+
+    // Protocol Node Management（协议节点 = 溯源节点）
+    addProtocolNode,
+    updateProtocolNode,
+    removeProtocolNode,
+    saveProtocolNodes,
   }
 }

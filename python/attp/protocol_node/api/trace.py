@@ -22,6 +22,18 @@ def get_behavior_router(
 ) -> APIRouter:
     router = APIRouter(prefix="/api")
 
+    # ------------------------------------------------------------------
+    # Health check
+    # ------------------------------------------------------------------
+
+    @router.get("/status")
+    async def get_status():
+        """Health check endpoint for protocol node connectivity detection."""
+        return {
+            "status": "ok",
+            "service": "protocol_node",
+        }
+
     @router.get("/behavior/{session_id}")
     async def get_behavior_trace(session_id: str, protocol_node_address: str = None):
         """Return full behavior trace: entries grouped by hop_count and field_type."""

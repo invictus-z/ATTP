@@ -1,14 +1,17 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useChat } from '../composables/useChat'
+import { useAttpProtocol, getSessionProtocolUrl, bindSessionProtocolUrl } from '../composables/useAttpProtocol'
 import { getActiveAgent } from '../agent_manager'
-import { Bot, Activity, Loader2, Plus, MessageSquare, Paperclip, ArrowUp } from 'lucide-vue-next'
+import { Bot, Activity, Loader2, Plus, MessageSquare, Paperclip, ArrowUp, Shield } from 'lucide-vue-next'
 
 const {
   currentSession, chatInput, sendMessage, renderMessageHtml,
   formatTime, getDateKey, formatDateLabel, agentStatus,
   createSession, initAgentContext,
 } = useChat()
+
+const { userConfig: attpUserConfig } = useAttpProtocol()
 
 const chatContainer = ref<HTMLElement>()
 const inputRef = ref<HTMLTextAreaElement>()
@@ -65,6 +68,19 @@ const handleNewChat = () => {
   createSession('New Chat')
   scrollToBottom()
 }
+
+const protocolNodes = computed(() => attpUserConfig.protocolNodes || [])
+
+const selectedProtocolUrl = computed({
+  get: () => {
+    if (!currentSession.value) return null
+    return getSessionProtocolUrl(currentSession.value.id)
+  },
+  set: (url: string | null) => {
+    if (!currentSession.value || !url) return
+    bindSessionProtocolUrl(currentSession.value.id, url)
+  },
+})
 
 const autoResize = (e: Event) => {
   const el = e.target as HTMLTextAreaElement
@@ -150,6 +166,29 @@ onMounted(() => { scrollToBottom() })
 
         <!-- Input Area -->
         <div class="p-5 bg-surface border-t border-gray-100 shrink-0">
+          <!-- Trace Node Selector -->
+          <div v-if="protocolNodes.length > 0" class="max-w-4xl mx-auto mb-2.5 flex items-center gap-2">
+            <div class="flex items-center gap-1.5 text-gray-400">
+              <Shield class="w-3.5 h-3.5" />
+              <span class="text-[11px] font-medium">溯源节点</span>
+            </div>
+            <select
+              v-model="selectedProtocolUrl"
+              class="flex-1 text-[12px] text-gray-600 bg-white border border-gray-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-300 transition-colors appearance-none cursor-pointer max-w-[320px]"
+            >
+              <option v-for="node in protocolNodes" :key="node.url" :value="node.url">
+                {{ node.name }} ({{ node.url.replace(/^https?:\/\//, '') }})
+              </option>
+            </select>
+            <div v-if="selectedProtocolUrl" class="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" title="已绑定溯源节点"></div>
+          </div>
+          <div v-else class="max-w-4xl mx-auto mb-2.5">
+            <span class="text-[11px] text-gray-300 flex items-center gap-1.5">
+              <Shield class="w-3.5 h-3.5" />
+              未配置溯源节点 — 请在 Settings 中添加 Protocol Node
+            </span>
+          </div>
+
           <div class="max-w-4xl mx-auto relative flex items-end bg-white border border-gray-200 focus-within:border-gray-300 focus-within:shadow-[0_0_0_4px_rgba(0,0,0,0.02)] rounded-2xl p-2 transition-all duration-200">
             <button class="p-2.5 text-gray-400 hover:text-gray-600 rounded-xl hover:bg-gray-50 transition-colors shrink-0">
               <Paperclip class="w-5 h-5" />

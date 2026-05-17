@@ -6,13 +6,18 @@
 
 // ---- User ATTP Config ----
 
+export interface TraceNodeEntry {
+  name: string;
+  url: string;
+}
+
 export interface UserAttpConfig {
   did: string;
   didDocPath: string;
   didKeyPath: string;
-  defaultTargetDid: string;
-  protocolUrls: string[];
-  agents: { name: string; baseUrl: string }[];
+  /** Protocol Nodes（协议节点 / 溯源节点，同一概念） */
+  protocolNodes: TraceNodeEntry[];
+  agents: { name: string; baseUrl: string; did?: string }[];
 }
 
 interface IpcFileResult {

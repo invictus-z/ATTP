@@ -3,8 +3,9 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useChat } from './composables/useChat'
 import { useNodes } from './composables/useNodes'
+import { useAttpProtocol } from './composables/useAttpProtocol'
 import { getActiveAgent, getAgents, getActiveAgentId, setActiveAgent, onAgentSwitch, removeAgent, addAgent, loadAgents, renameAgent } from './agent_manager'
-import { Bot, Server, X, MessageSquare, ChevronDown, History, Settings, Pencil, Shield, Wrench } from 'lucide-vue-next'
+import { Bot, Server, X, MessageSquare, ChevronDown, History, Settings, Pencil, Shield, Wrench, User } from 'lucide-vue-next'
 
 const route = useRoute()
 const router = useRouter()
@@ -15,7 +16,8 @@ const {
 
 const showAddAgentModal = ref(false)
 const newAgentName = ref('')
-const newAgentUrl = ref('http://localhost:80001')
+const newAgentDid = ref('')
+const newAgentUrl = ref('http://localhost:8001')
 const nodesCollapsed = ref(false)
 
 // Agent context menu state
@@ -70,6 +72,7 @@ if (typeof window !== 'undefined') {
 }
 
 const { agentNodes, fetchNodes, getNodeIcon } = useNodes()
+const { loadUserConfig } = useAttpProtocol()
 
 const activeAgent = computed(() => getActiveAgent())
 const agentList = computed(() => getAgents())
@@ -80,6 +83,7 @@ const activeNav = computed(() => {
   if (route.path.startsWith('/sessions')) return 'sessions'
   if (route.path.startsWith('/settings')) return 'settings'
   if (route.path.startsWith('/trace')) return 'trace'
+  if (route.path.startsWith('/user-config')) return 'user-config'
   return 'home'
 })
 
@@ -95,8 +99,9 @@ const removeAgentAction = (event: Event, agentId: string) => {
 
 const addNewAgent = () => {
   if (newAgentName.value.trim() && newAgentUrl.value.trim()) {
-    addAgent(newAgentName.value.trim(), newAgentUrl.value.trim())
+    addAgent(newAgentName.value.trim(), newAgentUrl.value.trim(), newAgentDid.value.trim() || undefined)
     newAgentName.value = ''
+    newAgentDid.value = ''
     newAgentUrl.value = 'http://localhost:18080'
     showAddAgentModal.value = false
     // Connect WS for the new agent
@@ -114,8 +119,12 @@ const toggleNodesCollapsed = () => {
   nodesCollapsed.value = !nodesCollapsed.value
 }
 
-onMounted(() => {
-  loadAgents()
+onMounted(async () => {
+  // 1. Load user config first (agents + trace nodes live there now)
+  await loadUserConfig()
+  // 2. Load agents from config
+  await loadAgents()
+  // 3. Init chat context and connect
   initAgentContext()
   connectAllAgents()
   fetchNodes()
@@ -142,10 +151,36 @@ onAgentSwitch(() => {
         </div>
       </div>
 
-      <!-- Nav -->
-      <nav class="flex-1 overflow-y-auto px-3 space-y-6">
+      <!-- Unified Nav -->
+      <nav class="flex-1 overflow-y-auto px-3 pt-3 pb-2">
+        <!-- 溯源 & 工具 -->
+        <div class="space-y-0.5 mb-4">
+          <button
+            @click="navigate('/trace')"
+            :class="[
+              'nav-btn w-full flex items-center px-2.5 py-2 text-[13px] rounded-lg transition-colors',
+              activeNav === 'trace' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800'
+            ]"
+            title="溯源模块（协议节点）"
+          >
+            <Shield class="w-4 h-4 mr-2.5 opacity-70" />
+            <span>溯源模块</span>
+          </button>
+          <button
+            disabled
+            class="nav-btn w-full flex items-center px-2.5 py-2 text-[13px] rounded-lg transition-colors text-gray-300 cursor-not-allowed"
+            title="工具管理 — 即将推出"
+          >
+            <Wrench class="w-4 h-4 mr-2.5 opacity-50" />
+            <span>工具管理</span>
+            <span class="ml-auto text-[9px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-400 font-medium">Soon</span>
+          </button>
+        </div>
+
+        <div class="h-px bg-gray-100 mx-2 mb-4"></div>
+
         <!-- AGENTS -->
-        <div>
+        <div class="mb-4">
           <div class="px-2 text-[11px] font-medium text-gray-400 mb-1.5 flex items-center justify-between">
             <span>Agents</span>
             <button @click="showAddAgentModal = true" class="p-0.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded transition-colors cursor-pointer" title="Add Agent">
@@ -185,46 +220,43 @@ onAgentSwitch(() => {
         </div>
 
         <!-- Active Agent Section (only when agent active) -->
-        <div v-if="hasActiveAgent" class="space-y-5">
-          <!-- Section divider: active agent name -->
-          <div>
-            <div class="px-2 flex items-center gap-2 mb-2">
-              <div class="flex-1 h-px bg-gray-100"></div>
-              <span class="text-[10px] font-medium text-gray-400 whitespace-nowrap">{{ activeAgent?.name || 'Agent' }}</span>
-              <div class="flex-1 h-px bg-gray-100"></div>
-            </div>
-            <div class="space-y-0.5">
-              <button
-                @click="navigate('/home')"
-                :class="[
-                  'nav-btn w-full flex items-center px-2.5 py-2 text-[13px] rounded-lg transition-colors',
-                  activeNav === 'home' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800'
-                ]"
-              >
-                <MessageSquare class="w-4 h-4 mr-2.5 opacity-70" />
-                <span>Home</span>
-              </button>
-              <button
-                @click="navigate('/settings')"
-                :class="[
-                  'nav-btn w-full flex items-center px-2.5 py-2 text-[13px] rounded-lg transition-colors',
-                  activeNav === 'settings' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800'
-                ]"
-              >
-                <Settings class="w-4 h-4 mr-2.5 opacity-70" />
-                <span>Config</span>
-              </button>
-              <button
-                @click="navigate('/sessions')"
-                :class="[
-                  'nav-btn w-full flex items-center px-2.5 py-2 text-[13px] rounded-lg transition-colors',
-                  activeNav === 'sessions' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800'
-                ]"
-              >
-                <History class="w-4 h-4 mr-2.5 opacity-70" />
-                <span>Sessions</span>
-              </button>
-            </div>
+        <div v-if="hasActiveAgent">
+          <div class="px-2 flex items-center gap-2 mb-2">
+            <div class="flex-1 h-px bg-gray-100"></div>
+            <span class="text-[10px] font-medium text-gray-400 whitespace-nowrap">{{ activeAgent?.name || 'Agent' }}</span>
+            <div class="flex-1 h-px bg-gray-100"></div>
+          </div>
+          <div class="space-y-0.5 mb-4">
+            <button
+              @click="navigate('/home')"
+              :class="[
+                'nav-btn w-full flex items-center px-2.5 py-2 text-[13px] rounded-lg transition-colors',
+                activeNav === 'home' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800'
+              ]"
+            >
+              <MessageSquare class="w-4 h-4 mr-2.5 opacity-70" />
+              <span>Home</span>
+            </button>
+            <button
+              @click="navigate('/settings')"
+              :class="[
+                'nav-btn w-full flex items-center px-2.5 py-2 text-[13px] rounded-lg transition-colors',
+                activeNav === 'settings' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800'
+              ]"
+            >
+              <Settings class="w-4 h-4 mr-2.5 opacity-70" />
+              <span>Config</span>
+            </button>
+            <button
+              @click="navigate('/sessions')"
+              :class="[
+                'nav-btn w-full flex items-center px-2.5 py-2 text-[13px] rounded-lg transition-colors',
+                activeNav === 'sessions' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800'
+              ]"
+            >
+              <History class="w-4 h-4 mr-2.5 opacity-70" />
+              <span>Sessions</span>
+            </button>
           </div>
 
           <!-- Network / Nodes -->
@@ -257,32 +289,23 @@ onAgentSwitch(() => {
         </div>
       </nav>
 
-      <!-- Bottom Modules (parallel to agents) -->
+      <!-- Bottom: User Config -->
       <div class="px-3 py-3 border-t border-gray-100 space-y-0.5">
         <button
-          @click="navigate('/trace')"
+          @click="navigate('/user-config')"
           :class="[
             'nav-btn w-full flex items-center px-2.5 py-2 text-[13px] rounded-lg transition-colors',
-            activeNav === 'trace' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800'
+            activeNav === 'user-config' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800'
           ]"
-          title="溯源模块（协议节点）"
+          title="用户配置"
         >
-          <Shield class="w-4 h-4 mr-2.5 opacity-70" />
-          <span>溯源模块</span>
-        </button>
-        <button
-          disabled
-          class="nav-btn w-full flex items-center px-2.5 py-2 text-[13px] rounded-lg transition-colors text-gray-300 cursor-not-allowed"
-          title="工具管理 — 即将推出"
-        >
-          <Wrench class="w-4 h-4 mr-2.5 opacity-50" />
-          <span>工具管理</span>
-          <span class="ml-auto text-[9px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-400 font-medium">Soon</span>
+          <User class="w-4 h-4 mr-2.5 opacity-70" />
+          <span>用户配置</span>
         </button>
       </div>
 
-      <!-- Bottom spacer (no more Settings button here) -->
-      <div class="p-3 mt-auto">
+      <!-- Bottom spacer -->
+      <div class="p-3">
         <div class="text-[10px] text-gray-300 text-center">v0.4.0</div>
       </div>
     </aside>
@@ -342,6 +365,10 @@ onAgentSwitch(() => {
           <div>
             <label class="block text-xs font-medium text-gray-500 mb-1.5">Base URL</label>
             <input v-model="newAgentUrl" placeholder="http://localhost:18080" class="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-200 font-mono" />
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-gray-500 mb-1.5">Agent DID <span class="text-gray-300 font-normal">(可选，ATTP 签名目标)</span></label>
+            <input v-model="newAgentDid" placeholder="did:wba:host:agent-name" class="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-200 font-mono" />
           </div>
         </div>
         <div class="flex justify-end gap-2 mt-5">

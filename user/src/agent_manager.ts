@@ -4,16 +4,15 @@
  */
 
 import { ref } from 'vue';
-import { apiFetch } from './transport';
+import { apiFetch, type UserAttpConfig } from './transport';
 
 export interface AgentEntry {
   id: string;
   name: string;
   baseUrl: string;       // e.g. "http://192.168.1.50:8001"
+  did?: string;          // Agent 的 DID 身份（如 did:wba:host:agent-name）
   status: 'active' | 'offline' | 'connecting';
 }
-
-const STORAGE_KEY = 'attp_agents';
 
 // ---- Registry (reactive) ----
 
@@ -77,7 +76,7 @@ export function onAgentSwitch(callback: () => void): void {
   onAgentSwitchCallbacks.push(callback);
 }
 
-export function addAgent(name: string, baseUrl: string): AgentEntry {
+export function addAgent(name: string, baseUrl: string, did?: string): AgentEntry {
   // Ensure no trailing slash
   baseUrl = baseUrl.replace(/\/+$/, '');
 
@@ -86,6 +85,7 @@ export function addAgent(name: string, baseUrl: string): AgentEntry {
     id,
     name,
     baseUrl,
+    did: did || '',
     status: 'offline',
   };
   agents.value.push(entry);
@@ -150,25 +150,38 @@ export async function testAgentConnection(baseUrl: string): Promise<{ ok: boolea
 
 // ---- Persistence ----
 
-function persist(): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(agents.value));
+async function persist(): Promise<void> {
+  try {
+    const configResult = await window.electronAPI.readUserConfig();
+    const config: UserAttpConfig = configResult.ok && configResult.data
+      ? { ...configResult.data }
+      : { did: '', didDocPath: '', didKeyPath: '', protocolNodes: [], agents: [] };
+    // Deep-clone to strip Vue reactive proxies (not serializable through Electron IPC)
+    config.agents = JSON.parse(JSON.stringify(agents.value.map(a => ({ name: a.name, baseUrl: a.baseUrl, did: a.did }))));
+    await window.electronAPI.saveUserConfig(JSON.parse(JSON.stringify(config)));
+  } catch (e) {
+    console.error('[AgentManager] persist failed:', e);
+  }
 }
 
-export function loadAgents(): void {
+export async function loadAgents(): Promise<void> {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      agents.value = JSON.parse(raw);
+    const configResult = await window.electronAPI.readUserConfig();
+    if (configResult.ok && configResult.data?.agents) {
+      agents.value = configResult.data.agents.map((a: any, i: number) => ({
+        id: 'agent_' + i + '_' + a.baseUrl.replace(/[^a-zA-Z0-9]/g, '_'),
+        name: a.name,
+        baseUrl: a.baseUrl,
+        did: a.did || '',
+        status: 'offline' as const,
+      }));
     }
   } catch {
     agents.value = [];
   }
 
   // Restore active agent
-  const savedId = localStorage.getItem('attp_active_agent');
-  if (savedId && agents.value.find(a => a.id === savedId)) {
-    activeAgentId.value = savedId;
-  } else if (agents.value.length > 0) {
+  if (agents.value.length > 0) {
     activeAgentId.value = agents.value[0].id;
   }
 

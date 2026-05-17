@@ -2,7 +2,7 @@ import { ref, reactive, computed } from 'vue'
 import { renderMarkdown } from '../markdown'
 import { getActiveAgent, getActiveAgentId, getAgentById, getAgents, wsUrl, wsUrlForAgent, apiUrl, onAgentSwitch, updateAgentStatus } from '../agent_manager'
 import { createWs, onWsMessage, onWsOpen, onWsClose, onWsError, apiFetch, type WsConnection } from '../transport'
-import { useAttpProtocol } from './useAttpProtocol'
+import { useAttpProtocol, bindSessionProtocolUrl } from './useAttpProtocol'
 
 export interface ChatMessage {
   role: 'user' | 'agent'
@@ -106,6 +106,8 @@ export function useChat() {
 
   const currentSession = computed(() => sessions.value.find(s => s.id === currentSessionId.value))
 
+  const { userConfig: attpUserConfig } = useAttpProtocol()
+
   const createSession = (initialTitle: string) => {
     const newSession: ChatSession = {
       id: 'sess_' + Date.now().toString(),
@@ -117,6 +119,14 @@ export function useChat() {
     }
     sessions.value.unshift(newSession)
     currentSessionId.value = newSession.id
+
+    // 自动绑定当前全局 protocol URL 到新 session
+    if (attpUserConfig.protocolNodes.length > 0) {
+      bindSessionProtocolUrl(newSession.id, attpUserConfig.protocolNodes[0].url)
+    } else {
+      console.warn('[ATTP] createSession: 无可用的 Protocol Node URL，session 未绑定协议节点')
+    }
+
     saveSessions()
     return newSession
   }
@@ -558,32 +568,44 @@ export function useChat() {
     if (!text || !currentSessionId.value) return
     const agentId = getActiveAgentId()
     addMessageToSession(currentSessionId.value, 'user', text)
-    if (agentId) {
-      const conn = agentWsMap.get(agentId)
-      const connected = agentWsConnectedMap.get(agentId)
-      if (conn && connected) {
-        if (attpInitialized.value) {
-          const agent = getAgentById(agentId)
-          const targetDid = (agent as any)?.did || ''
-          const attpResult = await sendMessageWithAttp(text, currentSessionId.value, targetDid)
-          if (attpResult.success && attpResult.nodeMessageDict) {
-            conn.send(JSON.stringify({
-              type: 'chat',
-              content: text,
-              session_id: currentSessionId.value,
-              NodeMessage: attpResult.nodeMessageDict,
-            }))
-          } else {
-            console.warn('[ATTP] sendMessageWithAttp failed, sending plain:', attpResult.error)
-            conn.send(JSON.stringify({ type: 'chat', content: text, session_id: currentSessionId.value }))
-          }
-        } else {
-          conn.send(JSON.stringify({ type: 'chat', content: text, session_id: currentSessionId.value }))
-        }
-      } else {
-        console.warn('WebSocket not open for active agent')
-      }
+
+    if (!agentId) {
+      console.error('[ATTP] sendMessage FAILED: 无活跃 Agent')
+      return
     }
+
+    const conn = agentWsMap.get(agentId)
+    const connected = agentWsConnectedMap.get(agentId)
+    if (!conn || !connected) {
+      console.error('[ATTP] sendMessage FAILED: WebSocket 未连接')
+      return
+    }
+
+    // 强制 ATTP-only：必须初始化并成功构造 NodeMessage
+    if (!attpInitialized.value) {
+      console.error('[ATTP] sendMessage BLOCKED: ATTP 协议未初始化 — 请先在 Settings 中加载配置')
+      return
+    }
+
+    const agent = getAgentById(agentId)
+    const targetDid = agent?.did || ''
+    console.log(`[ATTP] sendMessage: agentId=${agentId}, targetDid=${targetDid}, sessionId=${currentSessionId.value}`)
+
+    const attpResult = await sendMessageWithAttp(text, currentSessionId.value, targetDid)
+    if (attpResult.success && attpResult.nodeMessageDict) {
+      const payload = JSON.stringify({
+        type: 'chat',
+        content: text,
+        session_id: currentSessionId.value,
+        NodeMessage: attpResult.nodeMessageDict,
+      })
+      console.log('[ATTP] sendMessage: WS 发送带 NodeMessage 的消息 ✓')
+      conn.send(payload)
+    } else {
+      console.error('[ATTP] sendMessage BLOCKED: NodeMessage 构造失败 —', attpResult.error)
+      // 不发送！ATTP-only 模式下拒绝裸 JSON
+    }
+
     chatInput.value = ''
   }
 

@@ -10,6 +10,7 @@ const router = createRouter({
     { path: '/sessions', name: 'sessions', component: () => import('./views/SessionsView.vue') },
     { path: '/settings', name: 'settings', component: () => import('./views/SettingsView.vue') },
     { path: '/trace', name: 'trace', component: () => import('./views/TraceView.vue') },
+    { path: '/user-config', name: 'user-config', component: () => import('./views/UserConfigView.vue') },
   ],
 })
 
