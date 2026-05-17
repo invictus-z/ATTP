@@ -2,6 +2,7 @@ import { ref, reactive, computed } from 'vue'
 import { renderMarkdown } from '../markdown'
 import { getActiveAgent, getActiveAgentId, getAgentById, getAgents, wsUrl, wsUrlForAgent, apiUrl, onAgentSwitch, updateAgentStatus } from '../agent_manager'
 import { createWs, onWsMessage, onWsOpen, onWsClose, onWsError, apiFetch, type WsConnection } from '../transport'
+import { useAttpProtocol } from './useAttpProtocol'
 
 export interface ChatMessage {
   role: 'user' | 'agent'
@@ -421,6 +422,9 @@ export function useChat() {
           } else {
             if (targetSessionId) addMessageToAgentSession(agentId, targetSessionId, 'agent', data.content, senderName)
           }
+
+          // ATTP: 异步检测收到的 NodeMessage 并回传 BackMessage（fire-and-forget，不阻塞渲染）
+          handleReceivedNodeMessage(data)
         }
       } catch (e) { console.error(`[WS] Message error for agent ${agentId}:`, e) }
     }
@@ -547,7 +551,9 @@ export function useChat() {
     }
   }
 
-  const sendMessage = () => {
+  const { initialized: attpInitialized, sendMessageWithAttp, handleReceivedNodeMessage } = useAttpProtocol()
+
+  const sendMessage = async () => {
     const text = chatInput.value.trim()
     if (!text || !currentSessionId.value) return
     const agentId = getActiveAgentId()
@@ -556,7 +562,24 @@ export function useChat() {
       const conn = agentWsMap.get(agentId)
       const connected = agentWsConnectedMap.get(agentId)
       if (conn && connected) {
-        conn.send(JSON.stringify({ type: 'chat', content: text, session_id: currentSessionId.value }))
+        if (attpInitialized.value) {
+          const agent = getAgentById(agentId)
+          const targetDid = (agent as any)?.did || ''
+          const attpResult = await sendMessageWithAttp(text, currentSessionId.value, targetDid)
+          if (attpResult.success && attpResult.nodeMessageDict) {
+            conn.send(JSON.stringify({
+              type: 'chat',
+              content: text,
+              session_id: currentSessionId.value,
+              NodeMessage: attpResult.nodeMessageDict,
+            }))
+          } else {
+            console.warn('[ATTP] sendMessageWithAttp failed, sending plain:', attpResult.error)
+            conn.send(JSON.stringify({ type: 'chat', content: text, session_id: currentSessionId.value }))
+          }
+        } else {
+          conn.send(JSON.stringify({ type: 'chat', content: text, session_id: currentSessionId.value }))
+        }
       } else {
         console.warn('WebSocket not open for active agent')
       }
