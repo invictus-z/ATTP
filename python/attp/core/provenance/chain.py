@@ -26,11 +26,15 @@ class ChainManager:
         self._key_store = key_store
 
     def append_hop(self, metadata: dict, content: str, node_did: str,
-                   target_did: str, private_key_path: str) -> dict:
+                   target_did: str, private_key_path: str,
+                   increment_hop: bool = True) -> dict:
         metadata = metadata.copy()
         session_id = metadata.get("Session_ID")
         hop = metadata.get("Hop")
-        hop_count = (hop["Hop_Count"] + 1) if hop else 0
+        if hop:
+            hop_count = hop["Hop_Count"] + 1 if increment_hop else hop["Hop_Count"]
+        else:
+            hop_count = 0
 
         timestamp = time.time()
         hop_hash = calculate_hop_hash(

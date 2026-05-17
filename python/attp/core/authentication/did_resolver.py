@@ -212,7 +212,7 @@ def _find_verification_method(
 def build_did_resolution_url(
     did: str, base_url_override: Optional[str] = None
 ) -> str:
-    """构建 DID 文档的 HTTPS 解析 URL。"""
+    """构建 DID 文档的 HTTP 解析 URL。"""
     parts = did.split(":")
     if len(parts) < 3 or parts[0] != "did":
         raise ValueError("Invalid DID format")
@@ -223,7 +223,7 @@ def build_did_resolution_url(
 
     domain = urllib.parse.unquote(parts[2])
     path_segments = parts[3:]
-    base_url = (base_url_override or f"https://{domain}").rstrip("/")
+    base_url = (base_url_override or f"http://{domain}").rstrip("/")
     if path_segments:
         encoded_path = "/".join(
             urllib.parse.unquote(seg) for seg in path_segments

@@ -10,8 +10,7 @@ import aiohttp
 from anp.openanp import RemoteAgent
 from anp.authentication import DIDWbaAuthHeader
 from attp.app.logging import get_logger
-from attp.core.message.event import NodeMessage, RecordedHop
-from attp.core.message.back_sender import send_back_message
+from attp.core.message.event import NodeMessage, RecordedHop, BackMessage
 
 logger = get_logger("Client")
 
@@ -347,8 +346,8 @@ class ATTPClient:
         """Send message to user via websocket with ATTP protocol wrapping.
 
         Constructs a NodeMessage (A2U) with signed RecordedHop and includes
-        it in the WS push metadata, then sends BackMessage Phase 2 to the
-        protocol node.
+        it in the WS push metadata, then sends BackMessage to the protocol
+        node.
 
         Args:
             current_session_id: Current session ID
@@ -357,10 +356,13 @@ class ATTPClient:
         Returns:
             Status message
         """
-        metadata: dict[str, Any] = {"Session_ID": current_session_id}
-
-        # Try to build ATTP NodeMessage for A2U
+        # 1. 构建 ATTP NodeMessage (A2U)
         node_msg_dict = None
+        nonce = None
+        recorded = None
+        protocol_url = ""
+        private_key_path = None
+
         try:
             session = self._session_manager.get_or_create(current_session_id)
             trace = session.get_trace_metadata() if session else None
@@ -368,19 +370,17 @@ class ATTPClient:
             if trace and self._tracer:
                 protocol_url = trace.get("Protocol_Node_Address", "")
                 prev_hop = trace.get("Hop", {})
-                # User DID from the previous U2A hop
                 user_did = prev_hop.get("node_did", "")
-
                 private_key_path = str(self.auth.private_key_path) if getattr(self.auth, "private_key_path", None) else None
 
                 if protocol_url and user_did and private_key_path:
-                    # Use append_hop to construct signed RecordedHop (auto-increments hop_count)
                     hop_metadata = self._tracer.append_hop(
-                        metadata=dict(trace),  # copy to avoid mutation
+                        metadata=dict(trace),
                         content=content,
-                        node_did=self.agent_did,   # sender = Agent
-                        target_did=user_did,        # target = User
+                        node_did=self.agent_did,
+                        target_did=user_did,
                         private_key_path=private_key_path,
+                        increment_hop=False,
                     )
 
                     hop = hop_metadata.get("Hop")
@@ -401,21 +401,50 @@ class ATTPClient:
                             recorded_hop=recorded,
                         )
                         node_msg_dict = node_msg.to_dict()
-
-                        # Phase 2: Send BackMessage to protocol node (async, non-blocking)
-                        private_key = self._tracer.load_private_key(private_key_path)
-                        await send_back_message(
-                            protocol_url=protocol_url,
-                            node_did=self.agent_did,
-                            nonce=nonce,
-                            recorded_hop=recorded,
-                            private_key=private_key,
-                        )
-
                         logger.debug("A2U NodeMessage constructed for session {}", current_session_id)
         except Exception as e:
-            logger.warning("Failed to build A2U NodeMessage, sending plain: {}", e)
+            logger.warning("Failed to build A2U NodeMessage: {}", e)
+            return f"Error: Failed to build A2U NodeMessage - {str(e)}"
 
+        # ========== 时序规则：先回传协议节点，再发给用户 ==========
+        # 2. 回传：向协议节点发送 BackMessage，等待确认
+        if protocol_url and private_key_path and recorded:
+            try:
+                private_key = self._tracer.load_private_key(private_key_path)
+
+                back_msg = BackMessage(
+                    protocol_url=protocol_url,
+                    node_did=self.agent_did,
+                    nonce=nonce,
+                    sig_identity="",
+                    recorded_hop=recorded,
+                )
+                back_msg.sign_identity(private_key)
+
+                async with aiohttp.ClientSession() as http_session:
+                    async with http_session.post(
+                        f"{protocol_url}/record",
+                        json=back_msg.to_dict(),
+                        timeout=aiohttp.ClientTimeout(total=10),
+                    ) as resp:
+                        if resp.status == 200:
+                            resp_data = await resp.json()
+                            if resp_data.get("status") not in ("stored", "ok"):
+                                logger.warning(
+                                    "Protocol node rejected back-propagation: {}",
+                                    resp_data,
+                                )
+                                return f"Error: Protocol node rejected - {resp_data.get('error', 'unknown')}"
+                            logger.debug("Back-propagation confirmed by protocol node")
+                        else:
+                            logger.warning("Protocol node returned HTTP {}", resp.status)
+                            return f"Error: Protocol node returned HTTP {resp.status}"
+            except Exception as e:
+                logger.warning("Failed to send back-propagation to protocol node: {}", e)
+                return f"Error: Failed to send back-propagation - {str(e)}"
+
+        # 3. 回传确认后，发送给用户
+        metadata: dict[str, Any] = {"Session_ID": current_session_id}
         if node_msg_dict:
             metadata["NodeMessage"] = node_msg_dict
 

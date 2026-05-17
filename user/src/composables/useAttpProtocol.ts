@@ -9,6 +9,7 @@ import { ref, reactive } from 'vue'
 import type { UserAttpConfig } from '../transport'
 import { importPrivateKeyFromPem } from '../attp/key_helper'
 import { buildNodeMessage, sendBackMessage, parseIncomingNodeMessage } from '../attp/protocol'
+import type { RecordedHop } from '@attp/core'
 
 // ---- Singleton State ----
 
@@ -172,11 +173,13 @@ export interface SendMessageResult {
 }
 
 /**
- * 完整的 ATTP 发送流程：
+ * 完整的 ATTP U2A 发送流程：
  *   1. 加载私钥
  *   2. 构造 NodeMessage + 签名
- *   3. 返回 NodeMessage dict（由调用方通过 WS 发送）
- *   4. 异步触发 BackMessage 回传（Phase 2）
+ *   3. 先发送 BackMessage 到协议节点，等待确认
+ *   4. 确认后返回 NodeMessage dict（由调用方通过 WS 发送给 Agent）
+ *
+ * 时序规则：先回传协议节点，再发给 Agent。
  */
 async function sendMessageWithAttp(
   content: string,
@@ -198,8 +201,13 @@ async function sendMessageWithAttp(
   const protocolUrl = userConfig.protocolUrls[0]
   const effectiveTargetDid = targetDid || userConfig.defaultTargetDid
 
+  // 1. 构造 NodeMessage + 签名
+  let nodeMessageDict: Record<string, unknown>
+  let nonce: string
+  let recordedHop: RecordedHop
+
   try {
-    const { nodeMessage, nonce, recordedHop } = await buildNodeMessage({
+    const built = await buildNodeMessage({
       sessionId,
       userDid: userConfig.did,
       targetDid: effectiveTargetDid,
@@ -207,25 +215,30 @@ async function sendMessageWithAttp(
       protocolUrl,
       privateKey,
     })
-
-    const nodeMessageDict = nodeMessage.toDict()
-
-    // Phase 2: 异步回传 BackMessage（不阻塞 UI）
-    sendBackMessage({
-      protocolUrl,
-      userDid: userConfig.did,
-      nonce,
-      recordedHop,
-      privateKey,
-    }).catch(e => {
-      console.warn('[ATTP] BackMessage async error:', e)
-    })
-
-    return { success: true, nodeMessageDict }
+    nodeMessageDict = built.nodeMessage.toDict()
+    nonce = built.nonce
+    recordedHop = built.recordedHop
   } catch (e) {
-    console.error('[ATTP] sendMessageWithAttp error:', e)
-    return { success: false, error: String(e) }
+    console.error('[ATTP] buildNodeMessage error:', e)
+    return { success: false, error: `构建 NodeMessage 失败 - ${String(e)}` }
   }
+
+  // ========== 时序规则：先回传协议节点，再发给 Agent ==========
+  // 2. 回传：向协议节点发送 BackMessage，等待确认
+  const backOk = await sendBackMessage({
+    protocolUrl,
+    userDid: userConfig.did,
+    nonce,
+    recordedHop,
+    privateKey,
+  })
+
+  if (!backOk) {
+    return { success: false, error: '协议节点未确认回传' }
+  }
+
+  // 3. 回传确认后，返回 NodeMessage dict 供调用方发送
+  return { success: true, nodeMessageDict }
 }
 
 // ---- Agents Management ----
