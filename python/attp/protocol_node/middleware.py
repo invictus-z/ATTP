@@ -1,12 +1,12 @@
-"""消息拦截中间件 — 可信名单校验 + 恶意节点判定 + 行为记录。
+"""消息拦截中间件 — 存储前置 + 恶意节点判定 + 行为记录。
 
 实现验证管道：
 1. 基础字段验证（BackMessage 结构完整性）
-2. 身份签名验证（DID 解析 + identity signature）
-3. 可信名单校验（新增：回传1身份必须在可信名单中）
-4. Nonce 会话分支：
-   - Branch A（回传1）：身份验证 + 可信名单校验 → 暂存
-   - Branch B（回传2）：恶意节点判定引擎 → verify_back_propagation → 行为推断
+2. DID 解析 + 节点类型校验
+3. Nonce 会话分支：
+   - Branch A（回传1）：计算身份验证结果 → 始终暂存（不拒绝）
+   - Branch B（回传2）：恶意节点判定引擎（含回传1身份/可信名单校验）
+     → verify_back_propagation → 行为推断 → 更新可信名单
 """
 
 from __future__ import annotations
@@ -19,7 +19,6 @@ from attp.app.logging import get_logger
 from attp.core.authentication.did_resolver import DIDResolver, VALID_NODE_TYPES
 from attp.core.message.event import BackMessage
 from attp.protocol_node.malicious_detector import (
-    EvidenceType,
     MaliciousNodeDetector,
     MaliciousNodeReport,
 )
@@ -49,6 +48,19 @@ class InterceptResult:
     behavior_type: str | None = None
     stored_msg: Any = None  # Branch B 时携带的 PendingMessage
     malicious_report: MaliciousNodeReport | None = None  # 恶意检测报告
+
+
+async def _sweep_expired_pending(
+    session,
+    malicious_detector: MaliciousNodeDetector,
+    tracer,
+) -> None:
+    """扫描 session 中过期的 PendingMessage，逐一进行单回传判定。"""
+    expired = session.pop_expired_pending_messages()
+    for _nonce, msg in expired:
+        report = await malicious_detector.evaluate_single_back_prop(msg, session)
+        if report:
+            await tracer.save_malicious_report(report)
 
 
 def _validate_back_message(back_msg: BackMessage) -> tuple[bool, str]:
@@ -110,7 +122,7 @@ async def intercept_record(
             error=f"hop_validation:{field_error}", sender_did=None,
         )
 
-    # ==================== Step 2: 身份签名验证 ====================
+    # ==================== Step 2: 身份公钥获取 ====================
     # 2. DID 解析 → 公钥 + 节点类型
     result = await did_resolver.resolve_full(node_did)
     if result.public_key is None:
@@ -132,8 +144,15 @@ async def intercept_record(
             error="invalid_type", sender_did=node_did,
         )
 
+    # 缓存已解析的公钥，供后续 verify_back_propagation 使用
+    tracer.key_store.cache_public_key(node_did, result.public_key)
+
     # ==================== Step 3: Nonce 会话分支 ====================
     session = session_manager.get_or_create(session_id)
+
+    # 在 nonce 查找前扫描过期消息（避免 get_pending_message 静默丢弃过期消息）
+    await _sweep_expired_pending(session, malicious_detector, tracer)
+
     stored_msg = session.get_pending_message(nonce)
 
     # 构造 PendingMessage 用的 hop dict
@@ -150,62 +169,9 @@ async def intercept_record(
 
     if stored_msg is None:
         # ====== Branch A: 回传1 到达 ======
-        # 3. 验证 Identity Signature 以及 可信名单是否匹配
-        trusted_did = session.get_trusted_target_did()
-
-        # 回传1 身份签名无法解开
+        # 存储前置：计算身份验证结果，始终存储
+        # 身份验证和可信名单校验移至 Branch B 的恶意检测器
         identity_ok = back_msg.verify_identity(result.public_key)
-        if not identity_ok:
-            malicious = trusted_did if trusted_did else node_did
-            if malicious_detector:
-                report = MaliciousNodeReport(
-                    malicious_dids=[malicious],
-                    evidence_type=EvidenceType.IDENTITY_TAMPERING,
-                    evidence_description=(
-                        f"回传1的身份签名无法用DID解析出的公钥验证，"
-                        f"恶意节点: {malicious}"
-                    ),
-                    session_id=session_id,
-                    nonce=nonce,
-                    timestamp=time.time(),
-                    raw_evidence={"node_did": node_did, "trusted_did": trusted_did},
-                )
-                await tracer.save_malicious_report(report)
-                return InterceptResult(
-                    status="malicious", node_type=node_type,
-                    error="identity_signature_invalid", sender_did=node_did,
-                    malicious_report=report,
-                )
-            return InterceptResult(
-                status="error", node_type=node_type,
-                error="identity_signature_invalid", sender_did=node_did,
-            )
-        
-        if trusted_did is not None and node_did != trusted_did:
-            # 回传1 的身份与可信名单不一致 → 可信名单中的节点为恶意
-            if malicious_detector:
-                report = MaliciousNodeReport(
-                    malicious_dids=[trusted_did],
-                    evidence_type=EvidenceType.TRUSTED_LIST_VIOLATION,
-                    evidence_description=(
-                        f"回传1的DID({node_did})与可信名单({trusted_did})不一致，"
-                        f"可信名单中的节点为恶意"
-                    ),
-                    session_id=session_id,
-                    nonce=nonce,
-                    timestamp=time.time(),
-                    raw_evidence={"node_did": node_did, "trusted_did": trusted_did},
-                )
-                await tracer.save_malicious_report(report)
-                return InterceptResult(
-                    status="malicious", node_type=node_type,
-                    error="trusted_list_violation", sender_did=node_did,
-                    malicious_report=report,
-                )
-            return InterceptResult(
-                status="error", node_type=node_type,
-                error="trusted_list_violation", sender_did=node_did,
-            )
 
         # 暂存，等待下一步验证或判断
         pending = PendingMessage(
@@ -219,8 +185,10 @@ async def intercept_record(
             node_did=node_did,
             identity_public_key_pem=None,
             identity_verified=identity_ok,
+            identity_verification_attempted=True,
         )
         session.store_pending_message(nonce, pending)
+
         session_manager.save(session)
 
         return InterceptResult(
@@ -231,37 +199,28 @@ async def intercept_record(
     else:
         # ====== Branch B: 回传2 到达（接收方回传） ======
 
-        # 3. 回传2 身份签名验证（兜底：恶意检测器内部也会验证，此处为无检测器时的保底）
-        if not malicious_detector:
-            if not back_msg.verify_identity(result.public_key):
-                return InterceptResult(
-                    status="error", node_type=node_type,
-                    error="identity_signature_invalid", sender_did=node_did,
-                )
-
         # Step 4: 恶意节点判定引擎
-        if malicious_detector:
-            report = await malicious_detector.evaluate_dual_back_prop(
-                stored_msg=stored_msg,
-                back_msg_2=back_msg,
+        report = await malicious_detector.evaluate_dual_back_prop(
+            stored_msg=stored_msg,
+            back_msg_2=back_msg,
+            session=session,
+        )
+        if report:
+            # 恶意节点检测到
+            session.remove_pending_message(nonce)
+            session_manager.save(session)
+            await tracer.save_malicious_report(report)
+            return InterceptResult(
+                status="malicious", node_type=node_type,
+                error="malicious_node_detected", sender_did=node_did,
+                malicious_report=report,
             )
-            if report:
-                # 恶意节点检测到
-                session.remove_pending_message(nonce)
-                session_manager.save(session)
-                await tracer.save_malicious_report(report)
-                return InterceptResult(
-                    status="malicious", node_type=node_type,
-                    error="malicious_node_detected", sender_did=node_did,
-                    malicious_report=report,
-                )
 
-        # Step 5: 内容一致性验证（复用现有 verify_back_propagation）
+        # Step 5: 内容一致性验证
         ok, error_msg = tracer.verify_back_propagation(
             stored_hop=stored_msg.hop,
             prev_hop=hop_dict,
             session_id=session_id,
-            protocol_node_address=pna,
         )
         if not ok:
             session.remove_pending_message(nonce)
@@ -314,10 +273,9 @@ async def intercept_record(
                     )
 
         # Step 7: 验证通过，更新可信名单
-        session.remove_pending_message(nonce)
-        session.set_last_completed_hop_count(current_hc)
-        session.set_trusted_target_did(recorded.target_did)
-        session.mark_nonce_completed(nonce)
+        session.complete_verification(
+            nonce, hop_count=current_hc, trusted_did=recorded.target_did,
+        )
         session_manager.save(session)
 
         return InterceptResult(

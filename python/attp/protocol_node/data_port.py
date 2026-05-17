@@ -14,6 +14,26 @@ from attp.core.message.event import BackMessage
 
 logger = get_logger("DataPort")
 
+ERROR_MAP: dict[str, tuple[int, str]] = {
+    "missing_record_log": (400, "Missing Record_Log"),
+    "hop_validation": (400, "Hop validation failed"),
+    "did_resolution_failed": (404, "DID resolution failed"),
+    "missing_type_field": (400, "Missing ATTPNodeType"),
+    "invalid_type": (400, "Invalid ATTP node type"),
+    "missing_nonce": (400, "Missing nonce"),
+    "missing_identity_signature": (400, "Missing Identity_Signature"),
+    "identity_signature_invalid": (403, "Identity signature invalid"),
+    "sender_mismatch_not_self": (403, "Sender mismatch"),
+    "receiver_mismatch": (403, "Receiver mismatch"),
+    "back_propagation": (403, "Back-propagation verification failed"),
+    "invalid_type_combination": (400, "Invalid type combination"),
+    "hop_count_violation_a2a": (400, "Hop count violation (A2A must +1)"),
+    "hop_count_violation_non_a2a": (400, "Hop count violation (non-A2A must stay)"),
+    "hop_zero_must_be_u2a": (400, "hop_count=0 must be U2A (user intent)"),
+    "content_signature_invalid": (403, "Content signature invalid"),
+    "trusted_list_violation": (403, "Trusted list violation"),
+}
+
 if TYPE_CHECKING:
     from attp.core.pn_tracer import ProtocolTracer
     from attp.core.sessions.protocol_node import ProtocolSessionManager
@@ -28,9 +48,9 @@ class DataPort:
         session_manager: ProtocolSessionManager,
         host: str,
         port: int,
-        did_resolver=None,
-        behavior_controller=None,
-        malicious_detector=None,
+        did_resolver,
+        behavior_controller,
+        malicious_detector,
     ):
         self._tracer = tracer
         self._session_manager = session_manager
@@ -70,98 +90,79 @@ class DataPort:
             pna = back_msg.protocol_url
 
             # === Nonce 验证管道 ===
-            if did_resolver_ref:
-                from attp.protocol_node.middleware import intercept_record
+            from attp.protocol_node.middleware import intercept_record
 
-                result = await intercept_record(
-                    back_msg, did_resolver_ref, tracer_ref,
-                    session_manager=session_mgr,
-                    malicious_detector=malicious_detector_ref,
+            result = await intercept_record(
+                back_msg, did_resolver_ref, tracer_ref,
+                session_manager=session_mgr,
+                malicious_detector=malicious_detector_ref,
+            )
+
+            if result.status == "error":
+                error_key = result.error.split(":")[0] if result.error else ""
+                code, msg = ERROR_MAP.get(
+                    error_key, (500, result.error or "Unknown error")
+                )
+                logger.error(
+                    "Record rejected: session={}, error_key={}, detail={}",
+                    session_id, error_key, result.error,
+                )
+                return JSONResponse({"error": msg}, status_code=code)
+
+            if result.status == "stored":
+                logger.info("Record stored (pending): session={}", session_id)
+                return JSONResponse({"status": "stored"})
+
+            if result.status == "malicious":
+                report = result.malicious_report
+                logger.warning(
+                    "Malicious node detected: session={}, dids={}, type={}",
+                    session_id,
+                    report.malicious_dids if report else [],
+                    report.evidence_type.value if report else "unknown",
+                )
+                return JSONResponse(
+                    {
+                        "status": "malicious_detected",
+                        "malicious_dids": report.malicious_dids if report else [],
+                        "evidence_type": report.evidence_type.value if report else "",
+                        "description": report.evidence_description if report else "",
+                    },
+                    status_code=403,
                 )
 
-                if result.status == "error":
-                    ERROR_MAP = {
-                        "missing_record_log": (400, "Missing Record_Log"),
-                        "hop_validation": (400, "Hop validation failed"),
-                        "did_resolution_failed": (404, "DID resolution failed"),
-                        "missing_type_field": (400, "Missing ATTPNodeType"),
-                        "invalid_type": (400, "Invalid ATTP node type"),
-                        "missing_nonce": (400, "Missing nonce"),
-                        "missing_identity_signature": (400, "Missing Identity_Signature"),
-                        "identity_signature_invalid": (403, "Identity signature invalid"),
-                        "sender_mismatch_not_self": (403, "Sender mismatch"),
-                        "receiver_mismatch": (403, "Receiver mismatch"),
-                        "back_propagation": (403, "Back-propagation verification failed"),
-                        "invalid_type_combination": (400, "Invalid type combination"),
-                        "hop_count_violation_a2a": (400, "Hop count violation (A2A must +1)"),
-                        "hop_count_violation_non_a2a": (400, "Hop count violation (non-A2A must stay)"),
-                        "hop_zero_must_be_u2a": (400, "hop_count=0 must be U2A (user intent)"),
-                        "content_signature_invalid": (403, "Content signature invalid"),
-                        "trusted_list_violation": (403, "Trusted list violation"),
-                    }
-                    error_key = result.error.split(":")[0] if result.error else ""
-                    code, msg = ERROR_MAP.get(
-                        error_key, (500, result.error or "Unknown error")
-                    )
-                    return JSONResponse({"error": msg}, status_code=code)
+            if result.status == "verified":
+                behavior_type = result.behavior_type
+                stored = result.stored_msg
 
-                if result.status == "stored":
-                    return JSONResponse({"status": "stored"})
+                await tracer_ref.save_behavior_entry(
+                    session_id=session_id,
+                    protocol_node_address=pna,
+                    node_did=stored.sender_did,
+                    hop_count=stored.hop.get("Hop_Count", 0),
+                    field_type=behavior_type,
+                    content=stored.hop.get("Content", ""),
+                    target=stored.hop.get("target_did", ""),
+                    timestamp=stored.hop.get("Timestamp", 0),
+                )
+                logger.info(
+                    "BehaviorEntry saved: sender={}, receiver={}, type={}",
+                    stored.sender_did, result.sender_did, behavior_type,
+                )
 
-                if result.status == "malicious":
-                    report = result.malicious_report
-                    logger.warning(
-                        "Malicious node detected: session={}, dids={}, type={}",
-                        session_id,
-                        report.malicious_dids if report else [],
-                        report.evidence_type.value if report else "unknown",
-                    )
-                    return JSONResponse(
-                        {
-                            "status": "malicious_detected",
-                            "malicious_dids": report.malicious_dids if report else [],
-                            "evidence_type": report.evidence_type.value if report else "",
-                            "description": report.evidence_description if report else "",
-                        },
-                        status_code=403,
-                    )
+                await behavior_controller_ref.handle(
+                    behavior_type, body, result,
+                )
 
-                if result.status == "verified":
-                    behavior_type = result.behavior_type
-                    stored = result.stored_msg
+                _orch = _orch_holder[0]
+                if behavior_type == "U2A" and _orch and session_id:
+                    content = stored.hop.get("Content", "")
+                    await _orch.on_field_U2A_recorded(session_id, content)
 
-                    await tracer_ref.save_behavior_entry(
-                        session_id=session_id,
-                        protocol_node_address=pna,
-                        node_did=stored.sender_did,
-                        hop_count=stored.hop.get("Hop_Count", 0),
-                        field_type=behavior_type,
-                        content=stored.hop.get("Content", ""),
-                        target=stored.hop.get("target_did", ""),
-                        timestamp=stored.hop.get("Timestamp", 0),
-                    )
-                    logger.info(
-                        "BehaviorEntry saved: sender={}, receiver={}, type={}",
-                        stored.sender_did, result.sender_did, behavior_type,
-                    )
+                if _orch and session_id:
+                    await _orch.on_record_received(session_id)
 
-                    if behavior_controller_ref:
-                        await behavior_controller_ref.handle(
-                            behavior_type, body, result,
-                        )
-
-                    _orch = _orch_holder[0]
-                    if behavior_type == "U2A" and _orch and session_id:
-                        content = stored.hop.get("Content", "")
-                        await _orch.on_field_U2A_recorded(session_id, content)
-
-                    if _orch and session_id:
-                        await _orch.on_record_received(session_id)
-
-                    return JSONResponse({"status": "Record verified and saved"})
-            # === 结束 ===
-
-            return JSONResponse({"status": "No log in record metadata"})
+                return JSONResponse({"status": "Record verified and saved"})
 
         # Store mutable reference for set_orchestrator
         self._orch_holder = _orch_holder

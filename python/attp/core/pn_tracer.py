@@ -50,10 +50,9 @@ class ProtocolTracer:
         stored_hop: dict,
         prev_hop: dict,
         session_id: str,
-        protocol_node_address: str,
     ) -> tuple[bool, str]:
         return self._chain.verify_back_propagation(
-            stored_hop, prev_hop, session_id, protocol_node_address
+            stored_hop, prev_hop, session_id
         )
 
     # -- behavior traces --

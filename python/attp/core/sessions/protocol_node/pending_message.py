@@ -27,6 +27,7 @@ class PendingMessage:
     node_did: str = ""                       # BackMessage.node_did（回传者身份）
     identity_public_key_pem: str | None = None  # 已解析的公钥 PEM
     identity_verified: bool = False          # Branch A 中身份签名是否验证通过
+    identity_verification_attempted: bool = False  # 是否尝试过身份验证（区分未验证和验证失败）
 
     def is_expired(self) -> bool:
         return time.time() - self.stored_at > self.ttl_seconds
@@ -44,6 +45,7 @@ class PendingMessage:
             "node_did": self.node_did,
             "identity_public_key_pem": self.identity_public_key_pem,
             "identity_verified": self.identity_verified,
+            "identity_verification_attempted": self.identity_verification_attempted,
         }
 
     @classmethod
@@ -60,4 +62,5 @@ class PendingMessage:
             node_did=data.get("node_did", ""),
             identity_public_key_pem=data.get("identity_public_key_pem"),
             identity_verified=data.get("identity_verified", False),
+            identity_verification_attempted=data.get("identity_verification_attempted", False),
         )

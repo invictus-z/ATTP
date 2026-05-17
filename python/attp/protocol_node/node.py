@@ -46,6 +46,8 @@ class ProtocolNode:
         self._data_port = None
         self._api_port = None
         self._orchestrator: AnalysisOrchestrator | None = None
+        self._sweep_task: asyncio.Task | None = None
+        self._malicious_detector: MaliciousNodeDetector | None = None
 
     @property
     def config(self) -> ProtocolNodeConfigFile:
@@ -78,6 +80,7 @@ class ProtocolNode:
         )
         behavior_controller = BehaviorController()
         malicious_detector = MaliciousNodeDetector(did_resolver)
+        self._malicious_detector = malicious_detector
 
         # 4. 创建 DataPort + ApiPort
         from attp.protocol_node.data_port import DataPort
@@ -111,6 +114,9 @@ class ProtocolNode:
             tg.create_task(self._data_port.start())
             tg.create_task(self._api_port.start())
 
+        # 7. 启动过期 PendingMessage 周期扫描
+        self._sweep_task = asyncio.create_task(self._periodic_sweep())
+
         logger.info(
             "ProtocolNode started: data_port={}:{}, api_port={}:{}",
             web.data_port_host, web.data_port_port,
@@ -119,11 +125,42 @@ class ProtocolNode:
 
     async def stop(self) -> None:
         """并发停止双端口服务。"""
+        if self._sweep_task:
+            self._sweep_task.cancel()
+            try:
+                await self._sweep_task
+            except asyncio.CancelledError:
+                pass
+            self._sweep_task = None
         if self._data_port and self._api_port:
             async with asyncio.TaskGroup() as tg:
                 tg.create_task(self._data_port.stop())
                 tg.create_task(self._api_port.stop())
         logger.info("ProtocolNode stopped")
+
+    # ------------------------------------------------------------------
+    # 过期 PendingMessage 周期扫描
+    # ------------------------------------------------------------------
+
+    async def _periodic_sweep(self) -> None:
+        """每 60 秒扫描所有 session 的过期 PendingMessage，进行单回传判定。"""
+        try:
+            while True:
+                await asyncio.sleep(60)
+                if not self._session_manager or not self._malicious_detector or not self._tracer:
+                    continue
+                for session in list(self._session_manager._sessions.values()):
+                    expired = session.pop_expired_pending_messages()
+                    for _nonce, msg in expired:
+                        report = await self._malicious_detector.evaluate_single_back_prop(
+                            msg, session,
+                        )
+                        if report:
+                            await self._tracer.save_malicious_report(report)
+                    if expired:
+                        self._session_manager.save(session)
+        except asyncio.CancelledError:
+            pass
 
     # ------------------------------------------------------------------
     # Orchestrator 管理

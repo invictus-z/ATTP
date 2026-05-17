@@ -1,8 +1,8 @@
 """恶意节点判定引擎 — 双回传/单回传场景的恶意节点决策树。
 
 实现方案中的恶意节点判定机制：
-- 双回传：身份签名 → DID 比对 → 内容签名交叉验证
-- 单回传：可信名单比对 + 后续活动检测
+- 双回传：回传1身份验证 → 回传2身份验证 → DID 比对 → 内容签名交叉验证
+- 单回传：身份检查 → 可信名单比对 → 后续活动检测
 """
 
 from __future__ import annotations
@@ -73,15 +73,17 @@ class MaliciousNodeDetector:
         self,
         stored_msg: PendingMessage,
         back_msg_2: BackMessage,
+        session,
     ) -> MaliciousNodeReport | None:
         """双回传场景恶意判定。
 
-        回传1 的身份签名验证和可信名单校验已在 middleware Branch A 中完成，
-        此处仅负责回传2 的检查、DID 比对和内容签名交叉验证。
+        完整决策树：回传1身份验证 → 可信名单校验 → 回传2身份验证
+        → DID 比对 → 内容签名交叉验证。
 
         Args:
-            stored_msg: 回传1（先到达，已暂存，身份+名单校验已通过）
+            stored_msg: 回传1（先到达，已暂存，身份验证结果在 identity_verified 中）
             back_msg_2: 回传2（后到达，当前消息）
+            session: ProtocolSession 实例（用于可信名单访问）
 
         Returns:
             MaliciousNodeReport 如果检测到恶意，None 如果通过。
@@ -95,7 +97,47 @@ class MaliciousNodeDetector:
             "back_msg_2": back_msg_2.to_dict(),
         }
 
-        # --- Step 1: 回传2 身份签名检查 ---
+        trusted_list = session.get_trusted_did_list()
+
+        # --- Step 0a: 回传1身份签名检查 ---
+        if not stored_msg.identity_verified:
+            # 恶意节点必然在可信名单中，一起通报
+            if trusted_list:
+                return _build_report(
+                    malicious_dids=list(trusted_list),
+                    evidence_type=EvidenceType.IDENTITY_TAMPERING,
+                    description=f"回传1身份签名无法验证，"
+                                f"恶意节点在可信名单中，一起通报: {trusted_list}",
+                    session_id=session_id,
+                    nonce=nonce,
+                    raw_evidence=raw_evidence,
+                )
+            # 可信名单为空（Session 初始状态），报告回传1的 node_did
+            return _build_report(
+                malicious_dids=[bp1_did],
+                evidence_type=EvidenceType.IDENTITY_TAMPERING,
+                description=f"回传1身份签名无法验证(无可信名单)，"
+                            f"报告发送者: {bp1_did}",
+                session_id=session_id,
+                nonce=nonce,
+                raw_evidence=raw_evidence,
+            )
+
+        # --- Step 0b: 回传1可信名单校验 ---
+        latest_trusted = session.get_latest_trusted_did()
+        if latest_trusted is not None and bp1_did != latest_trusted:
+            # 回传1 DID 与最新名单不一致 → 可信名单中的节点为恶意
+            return _build_report(
+                malicious_dids=list(trusted_list),
+                evidence_type=EvidenceType.TRUSTED_LIST_VIOLATION,
+                description=f"回传1的DID({bp1_did})与最新名单({latest_trusted})不一致，"
+                            f"可信名单中的节点为恶意，一起通报: {trusted_list}",
+                session_id=session_id,
+                nonce=nonce,
+                raw_evidence=raw_evidence,
+            )
+
+        # --- Step 1: 回传2身份签名检查 ---
         bp2_did = back_msg_2.node_did
         bp2_result = await self._did_resolver.resolve_full(bp2_did)
         if bp2_result.public_key is None:
@@ -134,7 +176,7 @@ class MaliciousNodeDetector:
                 raw_evidence=raw_evidence,
             )
 
-        # --- Step 3: 回传1 内容签名自检 ---
+        # --- Step 3: 回传1内容签名自检 ---
         bp1_sender_did = stored_msg.sender_did
         bp1_sender_result = await self._did_resolver.resolve_full(bp1_sender_did)
         if bp1_sender_result.public_key is None:
@@ -148,7 +190,6 @@ class MaliciousNodeDetector:
                 raw_evidence=raw_evidence,
             )
 
-        # 构造回传1的 BackMessage 用于验证内容签名
         bp1_sig_content = stored_msg.hop.get("Signature", "")
         bp1_content_hash = self._compute_recorded_hop_content_hash(stored_msg.hop)
 
@@ -164,7 +205,7 @@ class MaliciousNodeDetector:
                 raw_evidence=raw_evidence,
             )
 
-        # --- Step 4: 回传2 内容签名交叉验证 ---
+        # --- Step 4: 回传2内容签名交叉验证 ---
         bp2_content_hash = back_msg_2.recorded_hop.content_hash()
 
         # 尝试用回传1发送者的公钥验证回传2的内容签名
@@ -177,7 +218,7 @@ class MaliciousNodeDetector:
             return None
 
         # 回传1发送者的公钥不能解开回传2的内容签名
-        # 无法区分是发送方伪造了内容签名还是接收方篡改了内容签名
+        # 无法区分是发送方伪造还是接收方篡改，两节点一起通报
         return _build_report(
             malicious_dids=[bp1_did, bp2_did],
             evidence_type=EvidenceType.INDISTINGUISHABLE_PAIR,
@@ -193,42 +234,93 @@ class MaliciousNodeDetector:
         pending_msg: PendingMessage,
         session,
     ) -> MaliciousNodeReport | None:
-        """单回传场景恶意判定。
+        """单回传场景恶意判定 — 完整决策树。
 
-        回传1 的身份签名验证和可信名单校验已在 middleware Branch A 中完成，
-        此处仅负责后续活动检测以区分「接收未回传」与「未发送却回传」。
+        恶意节点行为可能性：
+        1. 接收了没回传（后续必定还会作恶，可通过 Payload 暴露）
+        2. 没发送却发送了回传（纯垃圾消息）
+        3. 发送了没回传（虽找不到恶意发送节点，但接收方依然会回传真实内容）
+        4. 发送了但 nonce 不一样，导致两条单回传
 
         Args:
-            pending_msg: 唯一的回传消息（已过期或 session 结束时残留，身份+名单已通过）
-            session: ProtocolSession 实例（用于检测后续活动）
+            pending_msg: 唯一的回传消息（身份验证结果在 identity_verified 中）
+            session: ProtocolSession 实例
 
         Returns:
             MaliciousNodeReport 如果检测到恶意，None 如果应抛弃。
         """
         session_id = pending_msg.session_id
         nonce = pending_msg.nonce
+        node_did = pending_msg.node_did
 
         raw_evidence = {
             "pending_msg": pending_msg.to_dict(),
         }
 
-        # 检查 session 是否有后续活动
-        has_subsequent = session.has_subsequent_activity_after(nonce)
+        trusted_list = session.get_trusted_did_list()
 
-        if has_subsequent:
-            # 判定为"接收了但未回传"，当前 payload 的 target_did 为恶意
-            target = pending_msg.hop.get("target_did", "")
+        # --- Case A: 身份签名解不开 ---
+        if not pending_msg.identity_verified:
+            if trusted_list:
+                return _build_report(
+                    malicious_dids=list(trusted_list),
+                    evidence_type=EvidenceType.IDENTITY_TAMPERING,
+                    description=f"单回传身份签名无效，对应情况2(垃圾消息)，"
+                                f"可信名单中的节点为恶意，一起通报: {trusted_list}",
+                    session_id=session_id,
+                    nonce=nonce,
+                    raw_evidence=raw_evidence,
+                )
             return _build_report(
-                malicious_dids=[target],
-                evidence_type=EvidenceType.NO_PROPAGATION,
-                description=f"单回传+后续活动存在：节点接收了但未回传，"
-                            f"target({target})为恶意",
+                malicious_dids=[node_did],
+                evidence_type=EvidenceType.IDENTITY_TAMPERING,
+                description=f"单回传身份签名无效(无可信名单)，报告发送者: {node_did}",
                 session_id=session_id,
                 nonce=nonce,
                 raw_evidence=raw_evidence,
             )
 
-        # 无后续消息 → 判定为"未发送却发了回传"（垃圾消息），抛弃
+        # --- Case B: 身份签名解得开，但 DID ≠ 最新名单 ---
+        latest_trusted = session.get_latest_trusted_did()
+        if latest_trusted is not None and node_did != latest_trusted:
+            return _build_report(
+                malicious_dids=list(trusted_list),
+                evidence_type=EvidenceType.TRUSTED_LIST_VIOLATION,
+                description=f"单回传DID({node_did})与最新名单({latest_trusted})不一致，"
+                            f"可信名单中的节点为恶意，一起通报: {trusted_list}",
+                session_id=session_id,
+                nonce=nonce,
+                raw_evidence=raw_evidence,
+            )
+
+        # --- Case C: 身份签名解得开，且 DID = 最新名单 ---
+        has_subsequent = session.has_subsequent_activity_after(nonce)
+
+        if has_subsequent:
+            # 检查是否有后续消息能验证身份且身份不一致
+            has_diff = session.has_subsequent_with_different_verified_identity(
+                nonce, node_did,
+            )
+            if has_diff:
+                # 判定为"接收了但未回传"，target_did 为恶意
+                target = pending_msg.hop.get("target_did", "")
+                return _build_report(
+                    malicious_dids=[target],
+                    evidence_type=EvidenceType.NO_PROPAGATION,
+                    description=f"单回传+后续有不同身份消息："
+                                f"节点接收了但未回传，target({target})为恶意",
+                    session_id=session_id,
+                    nonce=nonce,
+                    raw_evidence=raw_evidence,
+                )
+            # 后续消息都是恶意节点发的，不予记录
+            logger.info(
+                "单回传有后续活动但无不同身份，视为恶意节点自发自弃: "
+                "session={}, nonce={}", session_id, nonce,
+            )
+            return None
+
+        # 无后续消息 → 抛弃，不予记录
         logger.info(
             "单回传无后续活动，视为垃圾消息抛弃: session={}, nonce={}",
             session_id, nonce,

@@ -31,18 +31,15 @@ class ChainManager:
         session_id = metadata.get("Session_ID")
         hop = metadata.get("Hop")
         hop_count = (hop["Hop_Count"] + 1) if hop else 0
-        # Protocol_Node_Address 由调用方注入到 session metadata，在 append_hop 中传播
-        protocol_node_address = metadata.get("Protocol_Node_Address")
 
         timestamp = time.time()
         hop_hash = calculate_hop_hash(
             content=content,
-            node_did=node_did,
+            sender_did=node_did,
             target_did=target_did,
             hop_count=hop_count,
             timestamp=timestamp,
             session_id=session_id,
-            protocol_node_address=protocol_node_address,
         )
 
         private_key = self._key_store.load_private_key(private_key_path)
@@ -112,7 +109,6 @@ class ChainManager:
         stored_hop: dict,
         prev_hop: dict,
         session_id: str,
-        protocol_node_address: str,
     ) -> tuple[bool, str]:
         """验证回传 record 与已存储 record 的一致性。
 
@@ -122,7 +118,6 @@ class ChainManager:
             stored_hop: Branch A 暂存的 hop dict。
             prev_hop: Branch B 到达的 hop dict（从 BackMessage.recorded_hop 构造）。
             session_id: 会话标识。
-            protocol_node_address: 协议节点地址。
         Returns:
             (True, "") 验证通过；(False, 错误描述) 验证失败。
         """
@@ -138,22 +133,20 @@ class ChainManager:
 
         store_hop_hash = calculate_hop_hash(
             content=stored_hop.get("Content", ""),
-            node_did=stored_hop.get("node_did", ""),
+            sender_did=stored_hop.get("node_did", ""),
             target_did=stored_hop.get("target_did", ""),
             hop_count=stored_hop.get("Hop_Count", 0),
             timestamp=stored_hop.get("Timestamp", 0.0),
             session_id=stored_hop.get("session_id"),
-            protocol_node_address=stored_hop.get("protocol_node_address"),
         )
 
         prev_hop_hash = calculate_hop_hash(
             content=prev_hop.get("Content", ""),
-            node_did=prev_node_did,
+            sender_did=prev_node_did,
             target_did=prev_hop.get("target_did", ""),
             hop_count=prev_hop.get("Hop_Count", 0),
             timestamp=prev_hop.get("Timestamp", 0.0),
             session_id=session_id,
-            protocol_node_address=protocol_node_address,
         )
 
         prev_public_key = self._key_store.get(prev_node_did)
