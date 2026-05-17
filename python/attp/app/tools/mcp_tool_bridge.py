@@ -24,7 +24,7 @@ from mcp.server.fastmcp import FastMCP
 
 from attp.app.logging import get_logger, UVICORN_SILENT_LOG_CONFIG
 from attp.core.message.event import NodeMessage, RecordedHop
-from attp.core.message.back_sender import send_back_message
+from attp.core.message.back_sender import send_back_message, BackPropagationError
 
 logger = get_logger("ToolBridge")
 
@@ -313,12 +313,12 @@ class MCPToolBridge:
         完整流程（4 次回传）：
         === 第一跳 A2T (Agent → Tool) ===
         1. 通过 AgentTracer.append_hop 构建 RecordedHop_A2T（正确递增 hop_count）
-        2. 发送 NodeMessage(A2T) → Tool Node
-        3. 发送 BackMessage #1 (Phase 2, Agent 报告) → Protocol Node
+        2. 发送 BackMessage #1 (Phase 2, Agent 报告) → Protocol Node（严格门控）
+        3. 发送 NodeMessage(A2T) → Tool Node
 
         === 第二跳 T2A (Tool → Agent) ===
         4. 等待 tool_response（含 NodeMessage(T2A)），hop_count 保持不变
-        5. 发送 BackMessage #4 (Phase 1, Agent 确认) → Protocol Node
+        5. 发送 BackMessage #4 (Phase 1, Agent 确认) → Protocol Node（严格门控）
         """
         tool_info = self._tool_nodes.get(tool_did)
         if not tool_info:
@@ -360,6 +360,7 @@ class MCPToolBridge:
                     node_did=self._agent_did,
                     target_did=tool_did,
                     private_key_path=private_key_path,
+                    increment_hop=False,
                 )
             except Exception as e:
                 logger.error("Failed to append tracing hop: {}", e)
@@ -390,6 +391,19 @@ class MCPToolBridge:
 
         endpoint = tool_info.attp_endpoint
 
+        # === 第一跳 A2T: BackMessage #1 (Phase 2, Agent 报告) → Protocol Node ===
+        if protocol_node_address and private_key:
+            try:
+                await send_back_message(
+                    protocol_url=protocol_node_address,
+                    node_did=self._agent_did,
+                    nonce=nonce,
+                    recorded_hop=recorded_hop_a2t,
+                    private_key=private_key,
+                )
+            except BackPropagationError as e:
+                return f"Error: BackMessage #1 failed: {e}"
+
         # === 第一跳 A2T: 发送 tool_request 到 Tool Node ===
         try:
             async with aiohttp.ClientSession() as http_session:
@@ -412,16 +426,6 @@ class MCPToolBridge:
             logger.error("Failed to call tool node {}: {}", tool_did, e)
             return f"Error: Failed to reach tool node {tool_did}: {e}"
 
-        # === 第一跳 A2T: BackMessage #1 (Phase 2, Agent 报告) → Protocol Node ===
-        if protocol_node_address and private_key:
-            await send_back_message(
-                protocol_url=protocol_node_address,
-                node_did=self._agent_did,
-                nonce=nonce,
-                recorded_hop=recorded_hop_a2t,
-                private_key=private_key,
-            )
-
         # === 第二跳 T2A: 解析 tool_response 中的 NodeMessage(T2A) ===
         # T2A 的 hop_count 保持工具节点返回的值不变（不递增）
         node_message_t2a_data = result_body.get("node_message")
@@ -438,8 +442,10 @@ class MCPToolBridge:
                     recorded_hop=recorded_hop_t2a,
                     private_key=private_key,
                 )
+            except BackPropagationError as e:
+                return f"Error: BackMessage #4 failed: {e}"
             except Exception as e:
-                logger.warning("Failed to send T2A BackMessage #4 to protocol node: {}", e)
+                logger.warning("Failed to process T2A NodeMessage: {}", e)
 
         # 更新 session 的 trace metadata
         if self._session_manager and chat_id and "Hop" in metadata:

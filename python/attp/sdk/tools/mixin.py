@@ -23,17 +23,17 @@ import time
 from pathlib import Path
 from typing import Any
 
-import aiohttp
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from attp.core.authentication.keys import KeyStore, load_private_key
 from attp.core.authentication.signatures import sign_hash
-from attp.core.message.event import BackMessage, NodeMessage, RecordedHop
+from attp.core.message.event import NodeMessage, RecordedHop
+from attp.core.message.back_sender import send_back_message, BackPropagationError
 from attp.core.provenance.chain import ChainManager
 from attp.core.sessions.node_message import NodeMessage as BehaviorNodeMessage
-from attp.core.storage.sqlite_store import SqliteStore
+from attp.core.storage import SqliteStore
 from attp.core.pn_tracer import ProtocolTracer
 
 logger = logging.getLogger("attp.sdk.tools.mixin")
@@ -181,40 +181,6 @@ class ToolNodeMixin(abc.ABC):
             return None, None, "", "", ""
 
     # ------------------------------------------------------------------
-    # BackMessage 发送
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    async def _send_back_message(
-        protocol_url: str,
-        node_did: str,
-        nonce: str,
-        recorded_hop: RecordedHop,
-        private_key,
-        label: str = "",
-    ) -> None:
-        """构建并发送单次 BackMessage → Protocol Node。"""
-        back_msg = BackMessage(
-            protocol_url=protocol_url,
-            node_did=node_did,
-            nonce=nonce,
-            sig_identity="",
-            recorded_hop=recorded_hop,
-        )
-        back_msg.sign_identity(private_key)
-
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                f"{protocol_url}/record",
-                json=back_msg.to_dict(),
-                timeout=aiohttp.ClientTimeout(total=10),
-            ) as resp:
-                if resp.status == 200:
-                    logger.debug("%s sent to protocol node", label)
-                else:
-                    logger.warning("%s rejected: HTTP %d", label, resp.status)
-
-    # ------------------------------------------------------------------
     # _handle_tool_request — 模板方法
     # ------------------------------------------------------------------
 
@@ -224,12 +190,12 @@ class ToolNodeMixin(abc.ABC):
         === 第一跳 A2T 确认 ===
         1. 解析 NodeMessage(A2T)
         2. 执行工具（子类 _execute_tool）
-        3. BackMessage #2 (Phase 1, Tool 确认 A2T) → Protocol Node
+        3. BackMessage #2 (Phase 1, Tool 确认 A2T) → Protocol Node（严格门控）
 
         === 第二跳 T2A (Tool → Agent) ===
         4. 构建 RecordedHop_T2A（Tool 签名）
-        5. 返回 tool_response（含 NodeMessage(T2A)）
-        6. BackMessage #3 (Phase 2, Tool 报告 T2A) → Protocol Node
+        5. BackMessage #3 (Phase 2, Tool 报告 T2A) → Protocol Node（严格门控）
+        6. 确认后返回 tool_response（含 NodeMessage(T2A)）
         """
         sender_did = body.get("sender_did", "")
         tool_name = body.get("tool_name", "")
@@ -263,12 +229,15 @@ class ToolNodeMixin(abc.ABC):
         # === 第一跳 A2T: BackMessage #2 (Phase 1, Tool 确认) → Protocol Node ===
         if protocol_url and recorded_hop_a2t and private_key:
             try:
-                await self._send_back_message(
-                    protocol_url, self.did, nonce, recorded_hop_a2t,
-                    private_key, "A2T BackMessage #2 (Phase 1)",
+                await send_back_message(
+                    protocol_url=protocol_url,
+                    node_did=self.did,
+                    nonce=nonce,
+                    recorded_hop=recorded_hop_a2t,
+                    private_key=private_key,
                 )
-            except Exception as e:
-                logger.warning("Failed to send A2T BackMessage #2: %s", e)
+            except BackPropagationError as e:
+                return JSONResponse({"error": f"BackMessage #2 failed: {e}"}, status_code=502)
 
         # === 第二跳 T2A: 构建 RecordedHop_T2A ===
         t2a_nonce = f"{nonce}_t2a" if nonce else f"{tool_name}_{time.time()}"
@@ -278,7 +247,7 @@ class ToolNodeMixin(abc.ABC):
             target_did=sender_did,
             content=f"tool_response({tool_name}): {result_str[:200]}",
             timestamp=time.time(),
-            hop_count=recorded_hop_a2t.hop_count + 1 if recorded_hop_a2t else 1,
+            hop_count=recorded_hop_a2t.hop_count if recorded_hop_a2t else 0,
         )
 
         if private_key:
@@ -298,12 +267,15 @@ class ToolNodeMixin(abc.ABC):
         # === 第二跳 T2A: BackMessage #3 (Phase 2, Tool 报告) → Protocol Node ===
         if protocol_url and private_key:
             try:
-                await self._send_back_message(
-                    protocol_url, self.did, t2a_nonce, recorded_hop_t2a,
-                    private_key, "T2A BackMessage #3 (Phase 2)",
+                await send_back_message(
+                    protocol_url=protocol_url,
+                    node_did=self.did,
+                    nonce=t2a_nonce,
+                    recorded_hop=recorded_hop_t2a,
+                    private_key=private_key,
                 )
-            except Exception as e:
-                logger.warning("Failed to send T2A BackMessage #3: %s", e)
+            except BackPropagationError as e:
+                return JSONResponse({"error": f"BackMessage #3 failed: {e}"}, status_code=502)
 
         # 返回 tool_response（含 NodeMessage(T2A)）
         return JSONResponse({

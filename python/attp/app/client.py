@@ -10,7 +10,8 @@ import aiohttp
 from anp.openanp import RemoteAgent
 from anp.authentication import DIDWbaAuthHeader
 from attp.app.logging import get_logger
-from attp.core.message.event import NodeMessage, RecordedHop, BackMessage
+from attp.core.message.event import NodeMessage, RecordedHop
+from attp.core.message.back_sender import send_back_message, BackPropagationError
 
 logger = get_logger("Client")
 
@@ -280,41 +281,18 @@ class ATTPClient:
         )
 
         # ========== 时序规则：先回传协议节点，再发给 B ==========
-        # 回传1：A 向协议节点发送 BackMessage，等待确认
         if protocol_url and private_key_path:
             try:
                 private_key = self._tracer.load_private_key(private_key_path)
-
-                back_msg = BackMessage(
+                await send_back_message(
                     protocol_url=protocol_url,
                     node_did=sender_did,
                     nonce=nonce,
-                    sig_identity="",
                     recorded_hop=recorded,
+                    private_key=private_key,
                 )
-                back_msg.sign_identity(private_key)
-
-                async with aiohttp.ClientSession() as http_session:
-                    async with http_session.post(
-                        f"{protocol_url}/record",
-                        json=back_msg.to_dict(),
-                        timeout=aiohttp.ClientTimeout(total=10),
-                    ) as resp:
-                        if resp.status == 200:
-                            resp_data = await resp.json()
-                            if resp_data.get("status") not in ("stored", "ok"):
-                                logger.warning(
-                                    "Protocol node rejected back-propagation: {}",
-                                    resp_data,
-                                )
-                                return f"Error: Protocol node rejected - {resp_data.get('error', 'unknown')}"
-                            logger.debug("Back-propagation confirmed by protocol node")
-                        else:
-                            logger.warning("Protocol node returned HTTP {}", resp.status)
-                            return f"Error: Protocol node returned HTTP {resp.status}"
-            except Exception as e:
-                logger.warning("Failed to send back-propagation to protocol node: {}", e)
-                return f"Error: Failed to send back-propagation - {str(e)}"
+            except BackPropagationError as e:
+                return f"Error: {e}"
 
         # 回传1确认后，发送 NodeMessage 给 B
         try:
@@ -407,41 +385,18 @@ class ATTPClient:
             return f"Error: Failed to build A2U NodeMessage - {str(e)}"
 
         # ========== 时序规则：先回传协议节点，再发给用户 ==========
-        # 2. 回传：向协议节点发送 BackMessage，等待确认
         if protocol_url and private_key_path and recorded:
             try:
                 private_key = self._tracer.load_private_key(private_key_path)
-
-                back_msg = BackMessage(
+                await send_back_message(
                     protocol_url=protocol_url,
                     node_did=self.agent_did,
                     nonce=nonce,
-                    sig_identity="",
                     recorded_hop=recorded,
+                    private_key=private_key,
                 )
-                back_msg.sign_identity(private_key)
-
-                async with aiohttp.ClientSession() as http_session:
-                    async with http_session.post(
-                        f"{protocol_url}/record",
-                        json=back_msg.to_dict(),
-                        timeout=aiohttp.ClientTimeout(total=10),
-                    ) as resp:
-                        if resp.status == 200:
-                            resp_data = await resp.json()
-                            if resp_data.get("status") not in ("stored", "ok"):
-                                logger.warning(
-                                    "Protocol node rejected back-propagation: {}",
-                                    resp_data,
-                                )
-                                return f"Error: Protocol node rejected - {resp_data.get('error', 'unknown')}"
-                            logger.debug("Back-propagation confirmed by protocol node")
-                        else:
-                            logger.warning("Protocol node returned HTTP {}", resp.status)
-                            return f"Error: Protocol node returned HTTP {resp.status}"
-            except Exception as e:
-                logger.warning("Failed to send back-propagation to protocol node: {}", e)
-                return f"Error: Failed to send back-propagation - {str(e)}"
+            except BackPropagationError as e:
+                return f"Error: {e}"
 
         # 3. 回传确认后，发送给用户
         metadata: dict[str, Any] = {"Session_ID": current_session_id}
