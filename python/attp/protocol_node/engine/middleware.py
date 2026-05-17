@@ -18,7 +18,7 @@ from typing import Any
 from attp.app.logging import get_logger
 from attp.core.authentication.did_resolver import DIDResolver, VALID_NODE_TYPES
 from attp.core.message.event import BackMessage
-from attp.protocol_node.malicious_detector import (
+from attp.protocol_node.engine.malicious_detector import (
     MaliciousNodeDetector,
     MaliciousNodeReport,
 )

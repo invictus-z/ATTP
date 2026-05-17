@@ -90,7 +90,7 @@ class DataPort:
             pna = back_msg.protocol_url
 
             # === Nonce 验证管道 ===
-            from attp.protocol_node.middleware import intercept_record
+            from attp.protocol_node.engine.middleware import intercept_record
 
             result = await intercept_record(
                 back_msg, did_resolver_ref, tracer_ref,

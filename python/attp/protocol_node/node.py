@@ -14,8 +14,8 @@ from attp.core.sessions.protocol_node import ProtocolSessionManager
 from attp.core.pn_tracer import ProtocolTracer
 from attp.core.authentication import DIDResolver
 from attp.protocol_node.config.config import ProtocolNodeConfigFile
-from attp.protocol_node.behavior_controller import BehaviorController
-from attp.protocol_node.malicious_detector import MaliciousNodeDetector
+from attp.protocol_node.engine.behavior_controller import BehaviorController
+from attp.protocol_node.engine.malicious_detector import MaliciousNodeDetector
 
 if TYPE_CHECKING:
     from attp.core.analysis.orchestrator import AnalysisOrchestrator
@@ -83,8 +83,8 @@ class ProtocolNode:
         self._malicious_detector = malicious_detector
 
         # 4. 创建 DataPort + ApiPort
-        from attp.protocol_node.data_port import DataPort
-        from attp.protocol_node.api_port import ApiPort
+        from attp.protocol_node.ports.data_port import DataPort
+        from attp.protocol_node.ports.api_port import ApiPort
 
         web = cfg.web
         self._data_port = DataPort(
