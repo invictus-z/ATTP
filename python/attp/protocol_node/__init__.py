@@ -1,4 +1,4 @@
-"""ATTP Protocol Node — 独立的双端口协议节点服务。"""
+"""ATTP Protocol Node — 独立的单端口协议节点服务。"""
 
 from attp.protocol_node.node import ProtocolNode
 

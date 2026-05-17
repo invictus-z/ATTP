@@ -20,12 +20,10 @@ class PNBase(BaseModel):
 
 
 class PNWebConfig(PNBase):
-    """双端口网络配置。"""
+    """网络配置（单端口）。"""
 
-    data_port_host: str = "0.0.0.0"
-    data_port_port: int = 9000
-    api_port_host: str = "0.0.0.0"
-    api_port_port: int = 9001
+    host: str = "0.0.0.0"
+    port: int = 9000
 
 
 class StorageConfig(PNBase):
@@ -50,7 +48,7 @@ class ProtocolNodeConfigFile(PNBase):
 
     对应 JSON 结构：
     {
-        "web": { "dataPortHost": ..., "dataPortPort": ..., ... },
+        "web": { "host": ..., "port": ... },
         "storage": { "dataDir": ..., "dbPath": ... },
         "analysis": { "enabled": ..., ... }
     }

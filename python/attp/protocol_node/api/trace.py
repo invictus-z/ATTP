@@ -19,8 +19,11 @@ def get_behavior_router(
     tracer: ProtocolTracer,
     session_manager: Any = None,
     orchestrator: Any = None,
+    orchestrator_holder: list | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/api")
+    # 统一 late-binding：优先使用 orchestrator_holder
+    _orch_ref = orchestrator_holder if orchestrator_holder is not None else [orchestrator]
 
     # ------------------------------------------------------------------
     # Health check
@@ -263,15 +266,17 @@ def get_behavior_router(
     @router.post("/analysis/trigger/{session_id}")
     async def trigger_analysis(session_id: str):
         """Manually trigger taint analysis (async, returns immediately)."""
-        if not orchestrator:
+        _orch = _orch_ref[0]
+        if not _orch:
             return {"triggered": False, "reason": "analysis_disabled"}
-        return await orchestrator.trigger_analysis_async(session_id)
+        return await _orch.trigger_analysis_async(session_id)
 
     @router.get("/analysis/status/{session_id}")
     async def get_analysis_status(session_id: str):
         """Query async analysis task status and phase."""
-        if not orchestrator:
+        _orch = _orch_ref[0]
+        if not _orch:
             return {"status": "not_found", "session_id": session_id}
-        return orchestrator.get_analysis_status(session_id)
+        return _orch.get_analysis_status(session_id)
 
     return router

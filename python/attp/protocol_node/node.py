@@ -1,4 +1,4 @@
-"""ProtocolNode — 协议节点主类，管理双端口生命周期。
+"""ProtocolNode — 协议节点主类，管理单端口生命周期。
 
 自包含设计：传入 config_path 即可，内部自行加载配置、创建所有依赖组件。
 """
@@ -24,7 +24,7 @@ logger = get_logger("ProtocolNode")
 
 
 class ProtocolNode:
-    """协议节点：封装 DataPort（端口一）+ ApiPort（端口二）。
+    """协议节点：单端口（ProtocolPort）对外服务。
 
     使用方式::
 
@@ -43,8 +43,7 @@ class ProtocolNode:
         # 以下组件在 start() 中异步创建
         self._tracer: ProtocolTracer | None = None
         self._session_manager: ProtocolSessionManager | None = None
-        self._data_port = None
-        self._api_port = None
+        self._port = None
         self._orchestrator: AnalysisOrchestrator | None = None
         self._sweep_task: asyncio.Task | None = None
         self._malicious_detector: MaliciousNodeDetector | None = None
@@ -64,7 +63,7 @@ class ProtocolNode:
     # ------------------------------------------------------------------
 
     async def start(self) -> None:
-        """加载配置 → 创建所有组件 → 并发启动双端口。"""
+        """加载配置 → 创建所有组件 → 启动单端口。"""
         cfg = self._config
 
         # 1. 创建 ProtocolTracer
@@ -82,49 +81,38 @@ class ProtocolNode:
         malicious_detector = MaliciousNodeDetector(did_resolver)
         self._malicious_detector = malicious_detector
 
-        # 4. 创建 DataPort + ApiPort
-        from attp.protocol_node.ports.data_port import DataPort
-        from attp.protocol_node.ports.api_port import ApiPort
+        # 4. 创建统一 ProtocolPort
+        from attp.protocol_node.ports.protocol_port import ProtocolPort
 
         web = cfg.web
-        self._data_port = DataPort(
+        self._port = ProtocolPort(
             tracer=self._tracer,
             session_manager=self._session_manager,
-            host=web.data_port_host,
-            port=web.data_port_port,
+            host=web.host,
+            port=web.port,
             did_resolver=did_resolver,
             behavior_controller=behavior_controller,
             malicious_detector=malicious_detector,
-        )
-        self._api_port = ApiPort(
-            tracer=self._tracer,
-            session_manager=self._session_manager,
-            host=web.api_port_host,
-            port=web.api_port_port,
         )
 
         # 5. 可选：创建 AnalysisOrchestrator
         self._orchestrator = self._build_orchestrator()
         if self._orchestrator:
-            self._data_port.set_orchestrator(self._orchestrator)
-            self._api_port.set_orchestrator(self._orchestrator)
+            self._port.set_orchestrator(self._orchestrator)
 
-        # 6. 并发启动双端口
-        async with asyncio.TaskGroup() as tg:
-            tg.create_task(self._data_port.start())
-            tg.create_task(self._api_port.start())
+        # 6. 启动端口
+        await self._port.start()
 
         # 7. 启动过期 PendingMessage 周期扫描
         self._sweep_task = asyncio.create_task(self._periodic_sweep())
 
         logger.info(
-            "ProtocolNode started: data_port={}:{}, api_port={}:{}",
-            web.data_port_host, web.data_port_port,
-            web.api_port_host, web.api_port_port,
+            "ProtocolNode started: port={}:{}",
+            web.host, web.port,
         )
 
     async def stop(self) -> None:
-        """并发停止双端口服务。"""
+        """停止端口服务。"""
         if self._sweep_task:
             self._sweep_task.cancel()
             try:
@@ -132,10 +120,8 @@ class ProtocolNode:
             except asyncio.CancelledError:
                 pass
             self._sweep_task = None
-        if self._data_port and self._api_port:
-            async with asyncio.TaskGroup() as tg:
-                tg.create_task(self._data_port.stop())
-                tg.create_task(self._api_port.stop())
+        if self._port:
+            await self._port.stop()
         logger.info("ProtocolNode stopped")
 
     # ------------------------------------------------------------------
@@ -169,10 +155,8 @@ class ProtocolNode:
     def set_orchestrator(self, orchestrator: AnalysisOrchestrator | None) -> None:
         """注入或清除 AnalysisOrchestrator。"""
         self._orchestrator = orchestrator
-        if self._data_port:
-            self._data_port.set_orchestrator(orchestrator)
-        if self._api_port:
-            self._api_port.set_orchestrator(orchestrator)
+        if self._port:
+            self._port.set_orchestrator(orchestrator)
         if orchestrator:
             logger.info("AnalysisOrchestrator injected into ProtocolNode")
         else:
@@ -188,10 +172,8 @@ class ProtocolNode:
 
         # 端口变更检测
         if (
-            old_cfg.web.data_port_host != self._config.web.data_port_host
-            or old_cfg.web.data_port_port != self._config.web.data_port_port
-            or old_cfg.web.api_port_host != self._config.web.api_port_host
-            or old_cfg.web.api_port_port != self._config.web.api_port_port
+            old_cfg.web.host != self._config.web.host
+            or old_cfg.web.port != self._config.web.port
         ):
             logger.warning(
                 "ProtocolNode 端口配置已变更，需要手动重启才能生效 (old={}, new={})",
