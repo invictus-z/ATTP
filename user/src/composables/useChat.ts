@@ -443,18 +443,29 @@ export function useChat() {
   /** Connect WebSocket for a specific agent */
   const connectAgentWs = async (agentId: string) => {
     // Skip if already connected or currently connecting
-    if (connectingAgents.has(agentId)) return
-    if (agentWsMap.has(agentId) && agentWsConnectedMap.get(agentId)) return
+    if (connectingAgents.has(agentId)) {
+      console.log(`[DEBUG-CONN][connectAgentWs] Skipping ${agentId} — already connecting`)
+      return
+    }
+    if (agentWsMap.has(agentId) && agentWsConnectedMap.get(agentId)) {
+      console.log(`[DEBUG-CONN][connectAgentWs] Skipping ${agentId} — already connected`)
+      return
+    }
 
     const agent = getAgentById(agentId)
-    if (!agent) return
+    if (!agent) {
+      console.warn(`[DEBUG-CONN][connectAgentWs] No agent found for id=${agentId}`)
+      return
+    }
 
     // Mark as connecting to prevent duplicate concurrent connections
     connectingAgents.add(agentId)
+    console.log(`[DEBUG-CONN][connectAgentWs] Connecting WS for agent "${agent.name}" (${agentId}), baseUrl="${agent.baseUrl}"`)
 
     // Close existing connection if any
     const existing = agentWsMap.get(agentId)
     if (existing) {
+      console.log(`[DEBUG-CONN][connectAgentWs] Closing existing connection for ${agentId}`)
       try { await existing.close() } catch {}
       agentWsMap.delete(agentId)
     }
@@ -467,6 +478,7 @@ export function useChat() {
     if (agentId === getActiveAgentId()) updateAgentStatusBadge('connecting')
 
     try {
+      console.log(`[DEBUG-CONN][connectAgentWs] Creating WS → ${targetUrl}`)
       const conn = await createWs(targetUrl)
       agentWsMap.set(agentId, conn)
       agentWsConnectedMap.set(agentId, true)
@@ -522,17 +534,26 @@ export function useChat() {
 
   const checkAgentStatus = () => {
     const statusUrl = apiUrl('/api/status')
-    if (!statusUrl || !getActiveAgent()) { updateAgentStatusBadge('offline'); return }
+    if (!statusUrl || !getActiveAgent()) {
+      console.warn('[DEBUG-CONN][checkAgentStatus] No status URL or no active agent — setting offline')
+      updateAgentStatusBadge('offline')
+      return
+    }
     const activeId = getActiveAgentId()
+    console.log(`[DEBUG-CONN][checkAgentStatus] Checking status → ${statusUrl} (agentId=${activeId})`)
     apiFetch(statusUrl).then(result => {
       if (activeId && agentWsConnectedMap.get(activeId)) return
-      updateAgentStatusBadge(result.ok && result.data?.status === 'active' ? 'connecting' : 'offline')
-    }).catch(() => {
+      const newStatus = result.ok && result.data?.status === 'active' ? 'connecting' : 'offline'
+      console.log(`[DEBUG-CONN][checkAgentStatus] Result: ok=${result.ok}, data=`, result.data, `→ badge=${newStatus}`)
+      updateAgentStatusBadge(newStatus)
+    }).catch((e) => {
+      console.warn(`[DEBUG-CONN][checkAgentStatus] Exception: ${e}`)
       if (activeId && !agentWsConnectedMap.get(activeId)) updateAgentStatusBadge('offline')
     })
   }
 
   const initAgentContext = () => {
+    console.log('[DEBUG-CONN][initAgentContext] Initializing agent context...')
     // Flush previous agent's sessions
     flushActiveSessions()
 
@@ -541,14 +562,18 @@ export function useChat() {
 
     const agent = getActiveAgent()
     if (agent) {
+      console.log(`[DEBUG-CONN][initAgentContext] Active agent: "${agent.name}" (${agent.id}), baseUrl="${agent.baseUrl}", wsConnected=${agentWsConnectedMap.get(agent.id)}`)
       // Check if WS is already connected for this agent
       if (agentWsConnectedMap.get(agent.id)) {
+        console.log(`[DEBUG-CONN][initAgentContext] WS already connected for "${agent.name}" — setting active`)
         updateAgentStatusBadge('active')
       } else {
+        console.log(`[DEBUG-CONN][initAgentContext] WS not connected — checking status and connecting...`)
         checkAgentStatus()
         connectAgentWs(agent.id)
       }
     } else {
+      console.warn('[DEBUG-CONN][initAgentContext] No active agent — setting offline')
       updateAgentStatusBadge('offline')
     }
 

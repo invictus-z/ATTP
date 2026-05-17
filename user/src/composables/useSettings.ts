@@ -87,11 +87,14 @@ function fillConfig(cfg: any) {
 export function useSettings() {
   const loadConfig = async () => {
     configStatus.value = 'loading'
+    const configUrl = apiUrl('/api/config')
+    console.log(`[DEBUG-CONN][useSettings] loadConfig → ${configUrl}`)
     try {
-      const result = await apiFetch(apiUrl('/api/config'))
+      const result = await apiFetch(configUrl)
       const data = result.data
 
       if (result.error || data?.error || !data?.config) {
+        console.warn(`[DEBUG-CONN][useSettings] loadConfig FAIL: error="${result.error}", data.error="${data?.error}", hasConfig=${!!data?.config}`)
         configStatus.value = 'disabled'
         return
       }
@@ -99,8 +102,9 @@ export function useSettings() {
       fillConfig(data.config)
       _originalWebAppConfig = { host: config.webApp.host, port: config.webApp.port }
       configStatus.value = 'active'
+      console.log(`[DEBUG-CONN][useSettings] loadConfig OK: did="${config.did}", webApp=${config.webApp.host}:${config.webApp.port}`)
     } catch (e) {
-      console.error('Failed to load config:', e)
+      console.error('[DEBUG-CONN][useSettings] loadConfig EXCEPTION:', e)
       configStatus.value = 'error'
     }
   }

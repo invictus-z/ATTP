@@ -159,6 +159,8 @@ export async function sendBackMessage(params: SendBackMessageParams): Promise<bo
 
     // HTTP POST 到协议节点
     const url = `${protocolUrl.replace(/\/+$/, '')}/record`;
+    console.log(`[DEBUG-CONN][sendBackMessage] POST → ${url}`);
+    console.log(`[DEBUG-CONN][sendBackMessage]     protocolUrl="${protocolUrl}", nodeDid="${userDid}", nonce="${nonce}"`);
     const result = await apiFetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -166,7 +168,9 @@ export async function sendBackMessage(params: SendBackMessageParams): Promise<bo
     });
 
     if (!result.ok) {
-      console.warn('[ATTP] BackMessage POST failed:', result.status, result.error);
+      console.warn(`[DEBUG-CONN][sendBackMessage] ✗ POST ${url} → FAIL: HTTP ${result.status}, error="${result.error}"`);
+    } else {
+      console.log(`[DEBUG-CONN][sendBackMessage] ✓ POST ${url} → OK`);
     }
 
     return result.ok;

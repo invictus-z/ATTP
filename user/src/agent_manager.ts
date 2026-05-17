@@ -45,22 +45,33 @@ export function getActiveAgentUrl(): string {
 /** Build a full API URL for the given active agent path, e.g. /api/status */
 export function apiUrl(path: string): string {
   const agent = getActiveAgent();
-  if (!agent) return path;
+  if (!agent) {
+    console.warn(`[DEBUG-CONN][apiUrl] No active agent — returning raw path: ${path}`);
+    return path;
+  }
   const base = agent.baseUrl.replace(/\/+$/, '');
-  return `${base}${path}`;
+  const fullUrl = `${base}${path}`;
+  console.log(`[DEBUG-CONN][apiUrl] agent="${agent.name}" baseUrl="${agent.baseUrl}" → ${fullUrl}`);
+  return fullUrl;
 }
 
 /** Build a full WebSocket URL for the given active agent path, e.g. /ws */
 export function wsUrl(path: string): string {
   const agent = getActiveAgent();
-  return agent ? wsUrlForAgent(agent, path) : '';
+  if (!agent) {
+    console.warn(`[DEBUG-CONN][wsUrl] No active agent — returning empty`);
+    return '';
+  }
+  return wsUrlForAgent(agent, path);
 }
 
 /** Build a full WebSocket URL for a specific agent */
 export function wsUrlForAgent(agent: AgentEntry, path: string): string {
   const base = agent.baseUrl.replace(/\/+$/, '');
   const wsBase = base.replace(/^http/, 'ws');
-  return `${wsBase}${path}`;
+  const fullUrl = `${wsBase}${path}`;
+  console.log(`[DEBUG-CONN][wsUrlForAgent] agent="${agent.name}" baseUrl="${agent.baseUrl}" → wsUrl="${fullUrl}"`);
+  return fullUrl;
 }
 
 export function setActiveAgent(id: string): void {
@@ -136,14 +147,18 @@ export function renameAgent(id: string, newName: string): void {
 
 /** Test connectivity to an agent by hitting /api/status via IPC */
 export async function testAgentConnection(baseUrl: string): Promise<{ ok: boolean; data?: any; error?: string }> {
+  const url = baseUrl.replace(/\/+$/, '') + '/api/status';
+  console.log(`[DEBUG-CONN][testAgent] Testing connection → ${url}`);
   try {
-    const url = baseUrl.replace(/\/+$/, '') + '/api/status';
     const result = await apiFetch(url);
     if (!result.ok) {
+      console.warn(`[DEBUG-CONN][testAgent] ✗ ${url} → FAIL: HTTP ${result.status}, error="${result.error}"`);
       return { ok: false, error: `HTTP ${result.status}` };
     }
+    console.log(`[DEBUG-CONN][testAgent] ✓ ${url} → OK, data=`, result.data);
     return { ok: true, data: result.data };
   } catch (e: any) {
+    console.error(`[DEBUG-CONN][testAgent] !!! ${url} → EXCEPTION: ${e.message || e}`);
     return { ok: false, error: e.message || 'Connection failed' };
   }
 }
@@ -165,8 +180,10 @@ async function persist(): Promise<void> {
 }
 
 export async function loadAgents(): Promise<void> {
+  console.log('[DEBUG-CONN][loadAgents] Loading agents from user config...');
   try {
     const configResult = await window.electronAPI.readUserConfig();
+    console.log('[DEBUG-CONN][loadAgents] readUserConfig result:', configResult.ok ? 'OK' : 'FAIL', configResult.error || '');
     if (configResult.ok && configResult.data?.agents) {
       agents.value = configResult.data.agents.map((a: any, i: number) => ({
         id: 'agent_' + i + '_' + a.baseUrl.replace(/[^a-zA-Z0-9]/g, '_'),
@@ -175,14 +192,24 @@ export async function loadAgents(): Promise<void> {
         did: a.did || '',
         status: 'offline' as const,
       }));
+      console.log(`[DEBUG-CONN][loadAgents] Loaded ${agents.value.length} agent(s):`);
+      agents.value.forEach(a => {
+        console.log(`[DEBUG-CONN][loadAgents]   - "${a.name}" id=${a.id} baseUrl="${a.baseUrl}" did="${a.did}"`);
+      });
+    } else {
+      console.warn('[DEBUG-CONN][loadAgents] No agents found in config (data.agents empty or missing)');
     }
-  } catch {
+  } catch (e) {
+    console.error('[DEBUG-CONN][loadAgents] Exception:', e);
     agents.value = [];
   }
 
   // Restore active agent
   if (agents.value.length > 0) {
     activeAgentId.value = agents.value[0].id;
+    console.log(`[DEBUG-CONN][loadAgents] Active agent set to: ${activeAgentId.value} ("${agents.value[0].name}")`);
+  } else {
+    console.warn('[DEBUG-CONN][loadAgents] No agents available — active agent is null');
   }
 
   // Refresh all agent statuses on load
