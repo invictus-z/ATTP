@@ -42,7 +42,7 @@ class NodeBehaviorProfile:
     """Aggregated behavior profile for one node at one hop."""
 
     node_did: str
-    hop_count: int
+    hop_count: list[int]
     field_a: list[dict] = field(default_factory=list)
     field_b: list[dict] = field(default_factory=list)
     field_d: list[dict] = field(default_factory=list)
@@ -89,7 +89,7 @@ class NodeTaintVerdict:
     """Analysis verdict for a single node."""
 
     node_did: str
-    hop_count: int
+    hop_count: list[int]
     aligned: bool = True
     deviation_type: str = "none"
     influence_detected: bool = False
@@ -148,7 +148,7 @@ class TaintReport:
             items = [EvidenceItem.from_dict(e) for e in v.get("evidence_items", [])]
             verdicts.append(NodeTaintVerdict(
                 node_did=v.get("node_did", ""),
-                hop_count=v.get("hop_count", 0),
+                hop_count=v.get("hop_count", [0, 0]),
                 aligned=v.get("aligned", True),
                 deviation_type=v.get("deviation_type", "none"),
                 influence_detected=v.get("influence_detected", False),

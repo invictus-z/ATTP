@@ -12,7 +12,7 @@ logger = get_logger("Tracing")
 _HOP_REQUIRED_FIELDS: dict[str, type | tuple[type, ...]] = {
     "node_did": str,
     "target_did": str,
-    "Hop_Count": int,
+    "Hop_Count": list,
     "Timestamp": (float, int),
     "Signature": str,
     "Content": str,
@@ -27,14 +27,18 @@ class ChainManager:
 
     def append_hop(self, metadata: dict, content: str, node_did: str,
                    target_did: str, private_key_path: str,
-                   increment_hop: bool = True) -> dict:
+                   behavior_type: str | None = None) -> dict:
         metadata = metadata.copy()
         session_id = metadata.get("Session_ID")
         hop = metadata.get("Hop")
         if hop:
-            hop_count = hop["Hop_Count"] + 1 if increment_hop else hop["Hop_Count"]
+            prev = hop["Hop_Count"]
+            if behavior_type == "A2A":
+                hop_count = [prev[0] + 1, 0]
+            else:
+                hop_count = [prev[0], prev[1] + 1]
         else:
-            hop_count = 0
+            hop_count = [0, 0]
 
         timestamp = time.time()
         hop_hash = calculate_hop_hash(
@@ -88,8 +92,10 @@ class ChainManager:
             return False, "[FIELD_VALUE] 'node_did' must be non-empty"
         if not hop["target_did"]:
             return False, "[FIELD_VALUE] 'target_did' must be non-empty"
-        if hop["Hop_Count"] < 0:
-            return False, f"[HOP_COUNT] Hop_Count must be >= 0, got {hop['Hop_Count']}"
+        if len(hop["Hop_Count"]) != 2:
+            return False, f"[HOP_COUNT] Hop_Count must be [a2a_count, intra_count], got {hop['Hop_Count']}"
+        if hop["Hop_Count"][0] < 0 or hop["Hop_Count"][1] < 0:
+            return False, f"[HOP_COUNT] Hop_Count elements must be >= 0, got {hop['Hop_Count']}"
         if not hop["Signature"]:
             return False, "[FIELD_VALUE] 'Signature' must be non-empty"
 
@@ -139,7 +145,7 @@ class ChainManager:
             content=stored_hop.get("Content", ""),
             sender_did=stored_hop.get("node_did", ""),
             target_did=stored_hop.get("target_did", ""),
-            hop_count=stored_hop.get("Hop_Count", 0),
+            hop_count=stored_hop.get("Hop_Count", [0, 0]),
             timestamp=stored_hop.get("Timestamp", 0.0),
             session_id=stored_hop.get("session_id"),
         )
@@ -148,7 +154,7 @@ class ChainManager:
             content=prev_hop.get("Content", ""),
             sender_did=prev_node_did,
             target_did=prev_hop.get("target_did", ""),
-            hop_count=prev_hop.get("Hop_Count", 0),
+            hop_count=prev_hop.get("Hop_Count", [0, 0]),
             timestamp=prev_hop.get("Timestamp", 0.0),
             session_id=session_id,
         )

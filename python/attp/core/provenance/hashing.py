@@ -17,7 +17,7 @@ def calculate_hop_hash(
     content: str,
     sender_did: str,
     target_did: str,
-    hop_count: int,
+    hop_count: list[int],
     timestamp: float,
     session_id: str,
 ) -> str:

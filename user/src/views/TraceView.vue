@@ -28,7 +28,7 @@ interface BehaviorEntry {
 }
 
 interface HopNode {
-  hop_count: number
+  hop_count: number[]
   node_did: string
   A2T: BehaviorEntry[]
   A2U: BehaviorEntry[]
@@ -609,11 +609,11 @@ onMounted(() => {
                 <span class="text-[11px] text-gray-400">{{ aggregateData.traces.nodes.length }} hops</span>
               </div>
               <div class="space-y-3">
-                <div v-for="node in aggregateData.traces.nodes" :key="node.hop_count"
+                <div v-for="node in aggregateData.traces.nodes" :key="node.hop_count.join('.')"
                   class="flex items-start gap-3 p-3 bg-gray-50/50 rounded-xl border border-gray-100"
                 >
                   <div class="w-8 h-8 rounded-full bg-white border border-gray-200 flex items-center justify-center shrink-0 text-[12px] font-semibold text-gray-600 shadow-sm">
-                    {{ node.hop_count }}
+                    {{ node.hop_count[0] }}.{{ node.hop_count[1] }}
                   </div>
                   <div class="flex-1 min-w-0">
                     <div class="text-[12px] font-mono text-gray-500 mb-2 truncate" :title="node.node_did">{{ formatDid(node.node_did) }}</div>
@@ -671,16 +671,16 @@ onMounted(() => {
               <!-- Timeline line -->
               <div class="absolute left-[19px] top-3 bottom-3 w-px bg-gray-200 border-l border-dashed border-gray-300 z-0"></div>
 
-              <div v-for="node in behaviorData.nodes" :key="node.hop_count" class="relative flex gap-4 mb-8 z-10">
+              <div v-for="node in behaviorData.nodes" :key="node.hop_count.join('.')" class="relative flex gap-4 mb-8 z-10">
                 <!-- Hop badge -->
                 <div class="w-10 h-10 rounded-full bg-white border-2 border-indigo-200 flex items-center justify-center shrink-0 shadow-sm z-10">
-                  <span class="text-[12px] font-bold text-indigo-600">{{ node.hop_count }}</span>
+                  <span class="text-[12px] font-bold text-indigo-600">{{ node.hop_count[0] }}.{{ node.hop_count[1] }}</span>
                 </div>
 
                 <div class="flex-1 min-w-0 space-y-3">
                   <!-- Node DID -->
                   <div class="flex items-center gap-2">
-                    <span class="text-[13px] font-semibold text-gray-800">Hop {{ node.hop_count }}</span>
+                    <span class="text-[13px] font-semibold text-gray-800">Hop {{ node.hop_count[0] }}.{{ node.hop_count[1] }}</span>
                     <span class="text-[11px] font-mono text-gray-400 truncate" :title="node.node_did">{{ node.node_did }}</span>
                   </div>
 

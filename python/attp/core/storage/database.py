@@ -44,7 +44,8 @@ class Database:
                     session_id  TEXT NOT NULL,
                     protocol_node_address  TEXT NOT NULL,
                     node_did    TEXT NOT NULL,
-                    hop_count   INTEGER NOT NULL,
+                    hop_count_a2a   INTEGER NOT NULL,
+                    hop_count_intra INTEGER NOT NULL,
                     field_type  TEXT NOT NULL,
                     content     TEXT,
                     target      TEXT DEFAULT '',
@@ -58,7 +59,7 @@ class Database:
             ''')
             await db.execute('''
                 CREATE INDEX IF NOT EXISTS idx_bt_hop
-                    ON behavior_traces(session_id, protocol_node_address, hop_count)
+                    ON behavior_traces(session_id, protocol_node_address, hop_count_a2a, hop_count_intra)
             ''')
 
             # analysis_reports
@@ -115,7 +116,6 @@ class Database:
                     malicious_did           TEXT NOT NULL,
                     evidence_type           TEXT NOT NULL,
                     evidence_description    TEXT,
-                    severity                TEXT DEFAULT 'medium',
                     nonce                   TEXT,
                     timestamp               REAL,
                     raw_evidence            TEXT DEFAULT '{}'

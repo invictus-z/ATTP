@@ -79,8 +79,10 @@ def _validate_back_message(back_msg: BackMessage) -> tuple[bool, str]:
         return False, "sender_did is empty"
     if not r.target_did:
         return False, "target_did is empty"
-    if r.hop_count < 0:
-        return False, f"hop_count must be >= 0, got {r.hop_count}"
+    if not isinstance(r.hop_count, list) or len(r.hop_count) != 2:
+        return False, f"hop_count must be [a2a_count, intra_count], got {r.hop_count}"
+    if r.hop_count[0] < 0 or r.hop_count[1] < 0:
+        return False, f"hop_count elements must be >= 0, got {r.hop_count}"
     if r.timestamp <= 0:
         return False, f"timestamp must be positive, got {r.timestamp}"
     if not r.sig_content:
@@ -242,9 +244,9 @@ async def intercept_record(
                 error="invalid_type_combination", sender_did=node_did,
             )
 
-        # 6a. hop_count=0 时类型必须为 U2A
+        # 6a. hop_count=[0, 0] 时类型必须为 U2A
         current_hc = recorded.hop_count
-        if current_hc == 0 and behavior_type != "U2A":
+        if current_hc == [0, 0] and behavior_type != "U2A":
             session.remove_pending_message(nonce)
             session_manager.save(session)
             return InterceptResult(
@@ -256,7 +258,7 @@ async def intercept_record(
         prev_completed_hc = session.get_last_completed_hop_count()
         if prev_completed_hc is not None:
             if behavior_type == "A2A":
-                if current_hc != prev_completed_hc + 1:
+                if current_hc[0] != prev_completed_hc[0] + 1 or current_hc[1] != 0:
                     session.remove_pending_message(nonce)
                     session_manager.save(session)
                     return InterceptResult(
@@ -264,7 +266,7 @@ async def intercept_record(
                         error="hop_count_violation_a2a", sender_did=node_did,
                     )
             else:
-                if current_hc != prev_completed_hc:
+                if current_hc[0] != prev_completed_hc[0] or current_hc[1] != prev_completed_hc[1] + 1:
                     session.remove_pending_message(nonce)
                     session_manager.save(session)
                     return InterceptResult(

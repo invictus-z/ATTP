@@ -58,7 +58,7 @@ class ProtocolTracer:
     # -- behavior traces --
 
     async def save_behavior_entry(self, session_id: str, protocol_node_address: str,
-                                  node_did: str, hop_count: int,
+                                  node_did: str, hop_count: list[int],
                                   field_type: str, content: str,
                                   target: str = "", timestamp: float = 0.0,
                                   extra: dict | None = None) -> None:
@@ -102,7 +102,6 @@ class ProtocolTracer:
                 malicious_did=did,
                 evidence_type=report.evidence_type.value,
                 evidence_description=report.evidence_description,
-                severity="high",
                 nonce=report.nonce,
                 timestamp=report.timestamp,
                 raw_evidence=report.raw_evidence,

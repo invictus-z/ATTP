@@ -30,7 +30,7 @@ class ProtocolSession:
     # -- 消息验证状态 --
     pending_messages: dict[str, PendingMessage] = field(default_factory=dict)
     completed_nonces: list[str] = field(default_factory=list)
-    last_completed_hop_count: int | None = None
+    last_completed_hop_count: list[int] | None = None
 
     # -- 可信名单 --
     trusted_did_list: list[str] = field(default_factory=list)
@@ -74,10 +74,10 @@ class ProtocolSession:
     # Hop count validation
     # ================================================================
 
-    def get_last_completed_hop_count(self) -> int | None:
+    def get_last_completed_hop_count(self) -> list[int] | None:
         return self.last_completed_hop_count
 
-    def set_last_completed_hop_count(self, hc: int) -> None:
+    def set_last_completed_hop_count(self, hc: list[int]) -> None:
         self.last_completed_hop_count = hc
         self.updated_at = time.time()
 
@@ -138,7 +138,7 @@ class ProtocolSession:
     # ================================================================
 
     def complete_verification(
-        self, nonce: str, hop_count: int, trusted_did: str,
+        self, nonce: str, hop_count: list[int], trusted_did: str,
     ) -> None:
         """一次完成 Branch B 验证通过后的所有状态更新。"""
         self.remove_pending_message(nonce)

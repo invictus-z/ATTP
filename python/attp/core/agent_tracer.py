@@ -35,10 +35,10 @@ class AgentTracer:
 
     def append_hop(self, metadata: dict, content: str, node_did: str,
                    target_did: str, private_key_path: str,
-                   increment_hop: bool = True) -> dict:
+                   behavior_type: str | None = None) -> dict:
         return self._chain.append_hop(
             metadata, content, node_did, target_did, private_key_path,
-            increment_hop=increment_hop,
+            behavior_type=behavior_type,
         )
 
     # -- internal access (for DIDResolver injection) --

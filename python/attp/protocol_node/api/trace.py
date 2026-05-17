@@ -35,16 +35,17 @@ def get_behavior_router(
         }
 
     @router.get("/behavior/{session_id}")
-    async def get_behavior_trace(session_id: str, protocol_node_address: str = None):
+    async def get_behavior_trace(session_id: str, protocol_node_address: str | None = None):
         """Return full behavior trace: entries grouped by hop_count and field_type."""
         try:
             entries = await tracer.recover_behavior_trace(session_id, protocol_node_address)
 
-            nodes: dict[int, dict] = {}
+            nodes: dict[tuple, dict] = {}
             for row in entries:
                 hc = row["hop_count"]
-                if hc not in nodes:
-                    nodes[hc] = {
+                hc_key = (hc[0], hc[1])
+                if hc_key not in nodes:
+                    nodes[hc_key] = {
                         "hop_count": hc,
                         "node_did": row["node_did"],
                         "A2T": [],
@@ -56,7 +57,7 @@ def get_behavior_router(
                 ft = row["field_type"]
                 base_ft = ft.split(":")[0]
                 parts = ft.split(":")
-                if base_ft in nodes[hc]:
+                if base_ft in nodes[hc_key]:
                     entry = {
                         "node_did": row["node_did"],
                         "content": row.get("content", ""),
@@ -67,12 +68,12 @@ def get_behavior_router(
                         entry["verification_status"] = parts[1]
                     if len(parts) >= 3:
                         entry["node_type"] = parts[2]
-                    nodes[hc][base_ft].append(entry)
+                    nodes[hc_key][base_ft].append(entry)
 
             return {
                 "session_id": session_id,
                 "protocol_node_address": protocol_node_address,
-                "nodes": sorted(nodes.values(), key=lambda n: n["hop_count"]),
+                "nodes": sorted(nodes.values(), key=lambda n: (n["hop_count"][0], n["hop_count"][1])),
             }
         except Exception as e:
             logger.error("Error recovering behavior trace for {}: {}", session_id, e)
@@ -151,7 +152,7 @@ def get_behavior_router(
     # ------------------------------------------------------------------
 
     @router.get("/analysis/aggregate/{session_id}")
-    async def get_aggregate_analysis(session_id: str, protocol_node_address: str = None):
+    async def get_aggregate_analysis(session_id: str, protocol_node_address: str | None = None):
         """Return behavior traces + analysis reports + alerts combined."""
         # 1. Fetch behavior traces
         try:
@@ -168,11 +169,12 @@ def get_behavior_router(
             report_rows = []
 
         # 3. Group traces by hop_count (include DB id for evidence linking)
-        nodes: dict[int, dict] = {}
+        nodes: dict[tuple, dict] = {}
         for row in trace_entries:
             hc = row["hop_count"]
-            if hc not in nodes:
-                nodes[hc] = {
+            hc_key = (hc[0], hc[1])
+            if hc_key not in nodes:
+                nodes[hc_key] = {
                     "hop_count": hc,
                     "node_did": row["node_did"],
                     "A2T": [],
@@ -184,7 +186,7 @@ def get_behavior_router(
             ft = row["field_type"]
             base_ft = ft.split(":")[0]
             parts = ft.split(":")
-            if base_ft in nodes[hc]:
+            if base_ft in nodes[hc_key]:
                 entry = {
                     "id": row.get("id"),
                     "node_did": row["node_did"],
@@ -196,8 +198,8 @@ def get_behavior_router(
                     entry["verification_status"] = parts[1]
                 if len(parts) >= 3:
                     entry["node_type"] = parts[2]
-                nodes[hc][base_ft].append(entry)
-        grouped_traces = sorted(nodes.values(), key=lambda n: n["hop_count"])
+                nodes[hc_key][base_ft].append(entry)
+        grouped_traces = sorted(nodes.values(), key=lambda n: (n["hop_count"][0], n["hop_count"][1]))
 
         # 4. Parse reports and extract alerts
         parsed_reports = []

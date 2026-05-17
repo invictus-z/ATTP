@@ -360,7 +360,7 @@ class MCPToolBridge:
                     node_did=self._agent_did,
                     target_did=tool_did,
                     private_key_path=private_key_path,
-                    increment_hop=False,
+                    behavior_type="A2T",
                 )
             except Exception as e:
                 logger.error("Failed to append tracing hop: {}", e)

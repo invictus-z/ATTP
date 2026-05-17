@@ -22,7 +22,6 @@ class MaliciousRepository(BaseRepository):
         malicious_did: str,
         evidence_type: str,
         evidence_description: str = "",
-        severity: str = "medium",
         nonce: str = "",
         timestamp: float = 0.0,
         raw_evidence: dict | None = None,
@@ -31,14 +30,14 @@ class MaliciousRepository(BaseRepository):
         await self._db.execute(
             """INSERT INTO malicious_nodes
                (session_id, malicious_did, evidence_type, evidence_description,
-                severity, nonce, timestamp, raw_evidence)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                nonce, timestamp, raw_evidence)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (session_id, malicious_did, evidence_type, evidence_description,
-             severity, nonce, timestamp, raw_json),
+             nonce, timestamp, raw_json),
         )
         logger.info(
-            "Saved malicious report: session={}, did={}, type={}, severity={}",
-            session_id, malicious_did, evidence_type, severity,
+            "Saved malicious report: session={}, did={}, type={}",
+            session_id, malicious_did, evidence_type,
         )
         await self._upsert_dossier(
             malicious_did, evidence_type, session_id, evidence_description,
@@ -57,11 +56,11 @@ class MaliciousRepository(BaseRepository):
         if malicious_did:
             conditions.append("malicious_did = ?")
             params.append(malicious_did)
-        where = " AND ".join(conditions) if conditions else "1=1"
-        return await self._db.execute_fetch(
-            f"SELECT * FROM malicious_nodes WHERE {where} ORDER BY timestamp DESC",
-            tuple(params),
-        )
+        if not conditions:
+            sql = "SELECT * FROM malicious_nodes ORDER BY timestamp DESC"
+        else:
+            sql = "SELECT * FROM malicious_nodes WHERE " + " AND ".join(conditions) + " ORDER BY timestamp DESC"
+        return await self._db.execute_fetch(sql, tuple(params))
 
     async def _upsert_dossier(
         self,

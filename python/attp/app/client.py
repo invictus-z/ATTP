@@ -252,6 +252,7 @@ class ATTPClient:
                     node_did=sender_did,
                     target_did=target_did,
                     private_key_path=private_key_path,
+                    behavior_type="A2A",
                 )
         except Exception as e:
             logger.error("Failed to append tracing hop: {}", e)
@@ -358,7 +359,7 @@ class ATTPClient:
                         node_did=self.agent_did,
                         target_did=user_did,
                         private_key_path=private_key_path,
-                        increment_hop=False,
+                        behavior_type="A2U",
                     )
 
                     hop = hop_metadata.get("Hop")

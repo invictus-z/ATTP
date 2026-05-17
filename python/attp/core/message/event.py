@@ -32,7 +32,7 @@ class RecordedHop:
     target_did: str
     content: str
     timestamp: float
-    hop_count: int
+    hop_count: list[int]
     sig_content: str = ""
 
     def content_hash(self) -> str:

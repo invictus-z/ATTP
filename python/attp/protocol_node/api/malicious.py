@@ -1,5 +1,7 @@
 """恶意节点查询 API 路由。"""
 
+import json
+
 from fastapi import APIRouter, Query
 
 from attp.app.logging import get_logger
@@ -24,9 +26,9 @@ def get_malicious_router(tracer: ProtocolTracer) -> APIRouter:
                         "malicious_did": r["malicious_did"],
                         "evidence_type": r["evidence_type"],
                         "evidence_description": r.get("evidence_description", ""),
-                        "severity": r.get("severity", "medium"),
                         "nonce": r.get("nonce", ""),
                         "timestamp": r.get("timestamp"),
+                        "raw_evidence": json.loads(r["raw_evidence"]) if r.get("raw_evidence") else {},
                     }
                     for r in reports
                 ],
@@ -49,9 +51,9 @@ def get_malicious_router(tracer: ProtocolTracer) -> APIRouter:
                         "session_id": r["session_id"],
                         "evidence_type": r["evidence_type"],
                         "evidence_description": r.get("evidence_description", ""),
-                        "severity": r.get("severity", "medium"),
                         "nonce": r.get("nonce", ""),
                         "timestamp": r.get("timestamp"),
+                        "raw_evidence": json.loads(r["raw_evidence"]) if r.get("raw_evidence") else {},
                     }
                     for r in reports
                 ],
@@ -80,8 +82,9 @@ def get_malicious_router(tracer: ProtocolTracer) -> APIRouter:
                 "severity_level": dossier["severity_level"],
                 "first_seen_at": dossier["first_seen_at"],
                 "last_seen_at": dossier["last_seen_at"],
-                "evidence_breakdown": dossier.get("evidence_breakdown", "{}"),
+                "evidence_breakdown": json.loads(dossier.get("evidence_breakdown", "{}")),
                 "last_evidence_type": dossier["last_evidence_type"],
+                "last_session_id": dossier["last_session_id"],
                 "last_evidence_desc": dossier["last_evidence_desc"],
                 "incidents": [
                     {
@@ -90,6 +93,7 @@ def get_malicious_router(tracer: ProtocolTracer) -> APIRouter:
                         "evidence_description": r.get("evidence_description", ""),
                         "nonce": r.get("nonce", ""),
                         "timestamp": r.get("timestamp"),
+                        "raw_evidence": json.loads(r["raw_evidence"]) if r.get("raw_evidence") else {},
                     }
                     for r in incidents
                 ],
@@ -117,8 +121,9 @@ def get_malicious_router(tracer: ProtocolTracer) -> APIRouter:
                         "severity_level": d["severity_level"],
                         "first_seen_at": d["first_seen_at"],
                         "last_seen_at": d["last_seen_at"],
-                        "evidence_breakdown": d.get("evidence_breakdown", "{}"),
+                        "evidence_breakdown": json.loads(d.get("evidence_breakdown", "{}")),
                         "last_evidence_type": d["last_evidence_type"],
+                        "last_session_id": d["last_session_id"],
                         "last_evidence_desc": d["last_evidence_desc"],
                     }
                     for d in dossiers

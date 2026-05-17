@@ -37,11 +37,11 @@ class ToolSession:
 
     # -- hop count tracking --
 
-    def get_last_hop_count(self) -> int | None:
+    def get_last_hop_count(self) -> list[int] | None:
         """获取最近一次完成的 hop_count。"""
         return self.metadata.get("_last_hop_count")
 
-    def set_last_hop_count(self, hc: int) -> None:
+    def set_last_hop_count(self, hc: list[int]) -> None:
         """记录最近一次完成的 hop_count。"""
         self.metadata["_last_hop_count"] = hc
         self.updated_at = time.time()

@@ -44,7 +44,7 @@ ANALYSIS_PROMPT = """\
     "node_verdicts": [
         {{
             "node_did": "节点DID",
-            "hop_count": 跳数,
+            "hop_count": [A2A跳数, intra跳数],
             "aligned": true/false,
             "deviation_type": "none/goal_hijack/constraint_violation/unauthorized_action",
             "influence_detected": true/false,

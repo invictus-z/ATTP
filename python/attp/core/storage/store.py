@@ -39,7 +39,7 @@ class SqliteStore:
         session_id: str,
         protocol_node_address: str,
         node_did: str,
-        hop_count: int,
+        hop_count: list[int],
         field_type: str,
         content: str,
         target: str = "",
@@ -89,14 +89,13 @@ class SqliteStore:
         malicious_did: str,
         evidence_type: str,
         evidence_description: str = "",
-        severity: str = "medium",
         nonce: str = "",
         timestamp: float = 0.0,
         raw_evidence: dict | None = None,
     ) -> None:
         await self._malicious.save_malicious_report(
             session_id, malicious_did, evidence_type, evidence_description,
-            severity, nonce, timestamp, raw_evidence,
+            nonce, timestamp, raw_evidence,
         )
 
     async def query_malicious_nodes(

@@ -111,7 +111,7 @@ class SemanticTaintAnalyzer:
                     ))
                 verdicts.append(NodeTaintVerdict(
                     node_did=v.get("node_did", ""),
-                    hop_count=v.get("hop_count", 0),
+                    hop_count=v.get("hop_count", [0, 0]) if isinstance(v.get("hop_count"), list) else [v.get("hop_count", 0), 0],
                     aligned=v.get("aligned", True),
                     deviation_type=v.get("deviation_type", "none"),
                     influence_detected=v.get("influence_detected", False),
@@ -148,14 +148,15 @@ class SemanticTaintAnalyzer:
     # ------------------------------------------------------------------
 
     def _reconstruct_profiles(self, traces: list[dict]) -> list[NodeBehaviorProfile]:
-        """Group traces by (node_did, hop_count) into behavior profiles."""
+        """Group traces by (node_did, hop_count[0]) into behavior profiles."""
         profiles_map: dict[tuple[str, int], NodeBehaviorProfile] = {}
         for row in traces:
-            key = (row["node_did"], row["hop_count"])
+            hc = row["hop_count"]
+            key = (row["node_did"], hc[0])
             if key not in profiles_map:
                 profiles_map[key] = NodeBehaviorProfile(
                     node_did=row["node_did"],
-                    hop_count=row["hop_count"],
+                    hop_count=hc,
                 )
             profile = profiles_map[key]
             entry = {
@@ -171,7 +172,7 @@ class SemanticTaintAnalyzer:
                 profile.field_b.append(entry)
             elif ft == "A2A":
                 profile.field_d.append(entry)
-        return sorted(profiles_map.values(), key=lambda p: p.hop_count)
+        return sorted(profiles_map.values(), key=lambda p: p.hop_count[0])
 
     def _build_flow_graph(self, profiles: list[NodeBehaviorProfile]) -> str:
         """Build a human-readable message flow graph."""

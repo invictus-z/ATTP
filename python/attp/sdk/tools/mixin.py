@@ -247,7 +247,7 @@ class ToolNodeMixin(abc.ABC):
             target_did=sender_did,
             content=f"tool_response({tool_name}): {result_str[:200]}",
             timestamp=time.time(),
-            hop_count=recorded_hop_a2t.hop_count if recorded_hop_a2t else 0,
+            hop_count=list(recorded_hop_a2t.hop_count) if recorded_hop_a2t else [0, 0],
         )
 
         if private_key:

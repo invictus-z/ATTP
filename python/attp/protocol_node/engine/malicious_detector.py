@@ -340,7 +340,7 @@ class MaliciousNodeDetector:
             "target_did": hop.get("target_did", ""),
             "content": hop.get("Content", ""),
             "timestamp": hop.get("Timestamp", 0.0),
-            "hop_count": hop.get("Hop_Count", 0),
+            "hop_count": hop.get("Hop_Count", [0, 0]),
         }, sort_keys=True)
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
