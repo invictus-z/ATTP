@@ -30,4 +30,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onWsError: (callback) => {
     ipcRenderer.on('ws-error', (_, data) => callback(data));
   },
+
+  // ---- File Operations ----
+  readFile: (filepath) => ipcRenderer.invoke('read-file', filepath),
+  readUserConfig: () => ipcRenderer.invoke('read-user-config'),
+  saveUserConfig: (config) => ipcRenderer.invoke('save-user-config', config),
+  getHomeDir: () => ipcRenderer.invoke('get-home-dir'),
 });

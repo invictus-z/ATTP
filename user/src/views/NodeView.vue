@@ -3,7 +3,7 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useNodes } from '../composables/useNodes'
 import { useChat } from '../composables/useChat'
-import { Network, Link2, GitMerge, Paperclip, ArrowUp } from 'lucide-vue-next'
+import { Network, Link2, Paperclip, ArrowUp } from 'lucide-vue-next'
 
 const route = useRoute()
 const router = useRouter()
@@ -50,12 +50,6 @@ const handleKeydown = (e: KeyboardEvent) => {
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault()
     handleNodeSend()
-  }
-}
-
-const handleViewTrace = () => {
-  if (currentNode.value) {
-    window.dispatchEvent(new CustomEvent('show-flow-diagram'))
   }
 }
 
@@ -145,17 +139,9 @@ onMounted(() => {
         </div>
       </div>
 
-      <!-- View Trace Logs Button + Input -->
-      <div class="shrink-0 border-t border-gray-100 bg-white">
-        <!-- Trace Button -->
-        <div class="max-w-4xl mx-auto px-8 pt-3">
-          <button @click="handleViewTrace" class="text-[12px] text-gray-400 hover:text-gray-600 flex items-center gap-1.5 transition-colors">
-            <GitMerge class="w-3.5 h-3.5" />
-            View Trace Logs
-          </button>
-        </div>
-        <!-- Input -->
-        <div class="p-5">
+      <!-- Input -->
+      <div class="shrink-0 border-t border-gray-100 bg-white p-5">
+        <div>
           <div class="max-w-4xl mx-auto relative flex items-end bg-white border border-gray-200 focus-within:border-gray-300 focus-within:shadow-[0_0_0_4px_rgba(0,0,0,0.02)] rounded-2xl p-2 transition-all duration-200">
             <button class="p-2.5 text-gray-400 hover:text-gray-600 rounded-xl hover:bg-gray-50 transition-colors shrink-0">
               <Paperclip class="w-5 h-5" />

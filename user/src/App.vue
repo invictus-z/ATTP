@@ -4,9 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useChat } from './composables/useChat'
 import { useNodes } from './composables/useNodes'
 import { getActiveAgent, getAgents, getActiveAgentId, setActiveAgent, onAgentSwitch, removeAgent, addAgent, loadAgents, renameAgent } from './agent_manager'
-import TraceModal from './components/TraceModal.vue'
-import FlowDiagram from './components/FlowDiagram.vue'
-import { Bot, Server, X, MessageSquare, ChevronDown, History, Settings, Download, Pencil, Shield, Wrench } from 'lucide-vue-next'
+import { Bot, Server, X, MessageSquare, ChevronDown, History, Settings, Pencil, Shield, Wrench } from 'lucide-vue-next'
 
 const route = useRoute()
 const router = useRouter()
@@ -19,7 +17,6 @@ const showAddAgentModal = ref(false)
 const newAgentName = ref('')
 const newAgentUrl = ref('http://localhost:80001')
 const nodesCollapsed = ref(false)
-const exportToastVisible = ref(false)
 
 // Agent context menu state
 const contextMenu = ref({ visible: false, x: 0, y: 0, agentId: '', agentName: '', agentUrl: '' })
@@ -82,6 +79,7 @@ const activeNav = computed(() => {
   if (route.path.startsWith('/node')) return 'node'
   if (route.path.startsWith('/sessions')) return 'sessions'
   if (route.path.startsWith('/settings')) return 'settings'
+  if (route.path.startsWith('/trace')) return 'trace'
   return 'home'
 })
 
@@ -127,11 +125,6 @@ onAgentSwitch(() => {
   fetchNodes()
 })
 
-// Export toast listener
-window.addEventListener('show-export-toast', () => {
-  exportToastVisible.value = true
-  setTimeout(() => { exportToastVisible.value = false }, 3000)
-})
 </script>
 
 <template>
@@ -267,13 +260,15 @@ window.addEventListener('show-export-toast', () => {
       <!-- Bottom Modules (parallel to agents) -->
       <div class="px-3 py-3 border-t border-gray-100 space-y-0.5">
         <button
-          disabled
-          class="nav-btn w-full flex items-center px-2.5 py-2 text-[13px] rounded-lg transition-colors text-gray-300 cursor-not-allowed"
-          title="溯源模块（协议节点）— 即将推出"
+          @click="navigate('/trace')"
+          :class="[
+            'nav-btn w-full flex items-center px-2.5 py-2 text-[13px] rounded-lg transition-colors',
+            activeNav === 'trace' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800'
+          ]"
+          title="溯源模块（协议节点）"
         >
-          <Shield class="w-4 h-4 mr-2.5 opacity-50" />
+          <Shield class="w-4 h-4 mr-2.5 opacity-70" />
           <span>溯源模块</span>
-          <span class="ml-auto text-[9px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-400 font-medium">Soon</span>
         </button>
         <button
           disabled
@@ -356,20 +351,5 @@ window.addEventListener('show-export-toast', () => {
       </div>
     </div>
 
-    <!-- Trace Timeline Modal -->
-    <TraceModal />
-    <!-- Flow Diagram Modal -->
-    <FlowDiagram />
-
-    <!-- Export Toast -->
-    <div :class="[
-      'fixed top-6 right-6 z-50 transition-all duration-300',
-      exportToastVisible ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-10 pointer-events-none'
-    ]">
-      <div class="flex items-center gap-2.5 px-4 py-3 rounded-xl border shadow-lg text-sm bg-emerald-50 border-emerald-100 text-emerald-700">
-        <Download class="w-4 h-4" />
-        <span>溯源报告已导出</span>
-      </div>
-    </div>
   </div>
 </template>

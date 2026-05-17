@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useSettings } from '../composables/useSettings'
-import { Loader2, AlertTriangle, CheckCircle, XCircle, AlertCircle, Info, Fingerprint, Radio, Server, Trash2, Plus, Globe, Wrench, HeartPulse, RotateCcw, Check, RefreshCw } from 'lucide-vue-next'
+import { useAttpProtocol } from '../composables/useAttpProtocol'
+import { Loader2, AlertTriangle, CheckCircle, XCircle, AlertCircle, Info, Fingerprint, Radio, Server, Trash2, Plus, Globe, Wrench, HeartPulse, RotateCcw, Check, RefreshCw, User, ShieldCheck, Link } from 'lucide-vue-next'
 
 const {
   config, configStatus, configSaving, configReloading,
@@ -10,9 +11,34 @@ const {
   addNodeAd, removeNodeAd,
 } = useSettings()
 
-onMounted(() => { loadConfig() })
+// ---- User ATTP Protocol Config ----
+const {
+  userConfig, initialized: attpInitialized, privateKeyLoaded,
+  loadUserConfig, saveUserConfig,
+  addProtocolUrl, removeProtocolUrl, addAgent, removeAgent,
+} = useAttpProtocol()
 
-// Listen for route-triggered load
+const newProtocolUrl = ref('')
+const newAgentName = ref('')
+const newAgentUrl = ref('')
+
+async function saveAttpConfig() {
+  await saveUserConfig()
+}
+
+function handleAddProtocolUrl() {
+  const url = newProtocolUrl.value.trim()
+  if (url) { addProtocolUrl(url); newProtocolUrl.value = '' }
+}
+
+function handleAddAgent() {
+  const name = newAgentName.value.trim()
+  const url = newAgentUrl.value.trim()
+  if (name && url) { addAgent(name, url); newAgentName.value = ''; newAgentUrl.value = '' }
+}
+
+onMounted(() => { loadConfig(); loadUserConfig() })
+
 window.addEventListener('load-settings', () => { loadConfig() })
 
 const statusBadgeClass = computed(() => {
@@ -54,7 +80,6 @@ const toastIcon = computed(() => {
 
 <template>
   <div class="flex flex-col h-full fade-in">
-    <!-- Header -->
     <header class="bg-white border-b border-gray-100 shrink-0 px-8 py-6 shadow-[0_4px_20px_-15px_rgba(0,0,0,0.05)] z-10">
       <div class="max-w-4xl mx-auto">
         <div class="flex items-center gap-2.5 mb-1.5">
@@ -65,11 +90,9 @@ const toastIcon = computed(() => {
       </div>
     </header>
 
-    <!-- Content -->
     <div class="flex-1 overflow-y-auto p-8 relative">
       <div class="max-w-4xl mx-auto space-y-6 pb-4">
 
-        <!-- Loading State -->
         <div v-if="configStatus === 'loading'" class="flex items-center justify-center py-16">
           <div class="flex items-center gap-3 text-gray-400">
             <Loader2 class="w-5 h-5 animate-spin" />
@@ -77,7 +100,6 @@ const toastIcon = computed(() => {
           </div>
         </div>
 
-        <!-- ATTP Disabled -->
         <div v-else-if="configStatus === 'disabled'">
           <div class="bg-amber-50 border border-amber-100 rounded-xl p-6 text-center">
             <div class="w-12 h-12 rounded-xl bg-amber-100 flex items-center justify-center mx-auto mb-3">
@@ -88,14 +110,12 @@ const toastIcon = computed(() => {
           </div>
         </div>
 
-        <!-- Config Form -->
         <div v-else-if="configStatus === 'active'" class="space-y-6">
 
           <!-- Group 1: DID Identity -->
           <div>
             <div class="flex items-center gap-2 text-[11px] font-semibold text-gray-400 tracking-wider uppercase mb-3 px-1">
-              <Fingerprint class="w-3.5 h-3.5" />
-              <span>DID Identity</span>
+              <Fingerprint class="w-3.5 h-3.5" /><span>DID Identity</span>
             </div>
             <div class="bg-white p-5 rounded-xl border border-gray-100 space-y-4">
               <div>
@@ -108,8 +128,7 @@ const toastIcon = computed(() => {
           <!-- Group 2: ATTP Client -->
           <div>
             <div class="flex items-center gap-2 text-[11px] font-semibold text-gray-400 tracking-wider uppercase mb-3 px-1">
-              <Radio class="w-3.5 h-3.5" />
-              <span>ATTP Client</span>
+              <Radio class="w-3.5 h-3.5" /><span>ATTP Client</span>
             </div>
             <div class="bg-white p-5 rounded-xl border border-gray-100 space-y-4">
               <div>
@@ -125,15 +144,10 @@ const toastIcon = computed(() => {
                 <div class="space-y-2">
                   <div v-for="(ad, index) in config.attpClient.nodeAds" :key="index" class="flex items-center gap-2">
                     <input type="text" v-model="config.attpClient.nodeAds[index]" placeholder="http://host:port/agent/ad.json" class="flex-1 text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono">
-                    <button @click="removeNodeAd(index)" class="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors shrink-0">
-                      <Trash2 class="w-4 h-4" />
-                    </button>
+                    <button @click="removeNodeAd(index)" class="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors shrink-0"><Trash2 class="w-4 h-4" /></button>
                   </div>
                 </div>
-                <button @click="addNodeAd" class="mt-2 flex items-center gap-1.5 text-xs text-gray-400 hover:text-gray-600 transition-colors">
-                  <Plus class="w-3.5 h-3.5" />
-                  <span>Add Node AD</span>
-                </button>
+                <button @click="addNodeAd" class="mt-2 flex items-center gap-1.5 text-xs text-gray-400 hover:text-gray-600 transition-colors"><Plus class="w-3.5 h-3.5" /><span>Add Node AD</span></button>
               </div>
             </div>
           </div>
@@ -141,105 +155,116 @@ const toastIcon = computed(() => {
           <!-- Group 3: ATTP Server -->
           <div>
             <div class="flex items-center gap-2 text-[11px] font-semibold text-gray-400 tracking-wider uppercase mb-3 px-1">
-              <Server class="w-3.5 h-3.5" />
-              <span>ATTP Server</span>
+              <Server class="w-3.5 h-3.5" /><span>ATTP Server</span>
             </div>
             <div class="bg-white p-5 rounded-xl border border-gray-100 space-y-4">
               <div class="grid grid-cols-2 gap-4">
-                <div>
-                  <label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">Name</label>
-                  <input type="text" v-model="config.attpServer.name" placeholder="My Agent" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300">
-                </div>
-                <div>
-                  <label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">Prefix</label>
-                  <input type="text" v-model="config.attpServer.prefix" placeholder="/agent" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono">
-                </div>
+                <div><label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">Name</label><input type="text" v-model="config.attpServer.name" placeholder="My Agent" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300"></div>
+                <div><label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">Prefix</label><input type="text" v-model="config.attpServer.prefix" placeholder="/agent" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono"></div>
               </div>
-              <div>
-                <label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">Description</label>
-                <input type="text" v-model="config.attpServer.description" placeholder="Agent description" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300">
-              </div>
+              <div><label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">Description</label><input type="text" v-model="config.attpServer.description" placeholder="Agent description" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300"></div>
               <div class="grid grid-cols-2 gap-4">
-                <div>
-                  <label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">Server Host</label>
-                  <input type="text" v-model="config.attpServer.serverHost" placeholder="127.0.0.1" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono">
-                </div>
-                <div>
-                  <label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">Server Port</label>
-                  <input type="number" v-model.number="config.attpServer.serverPort" placeholder="8000" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono">
-                </div>
+                <div><label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">Server Host</label><input type="text" v-model="config.attpServer.serverHost" placeholder="127.0.0.1" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono"></div>
+                <div><label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">Server Port</label><input type="number" v-model.number="config.attpServer.serverPort" placeholder="8000" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono"></div>
               </div>
-              <div>
-                <label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">Private Key Path</label>
-                <input type="text" v-model="config.attpServer.privateKeyPath" placeholder="~/.attp/agent/nanobot/did/server_private.pem" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono">
-              </div>
-              <div>
-                <label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">Public Key Path</label>
-                <input type="text" v-model="config.attpServer.publicKeyPath" placeholder="~/.attp/agent/nanobot/did/server_public.pem" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono">
-              </div>
+              <div><label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">Private Key Path</label><input type="text" v-model="config.attpServer.privateKeyPath" placeholder="~/.attp/agent/nanobot/did/server_private.pem" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono"></div>
+              <div><label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">Public Key Path</label><input type="text" v-model="config.attpServer.publicKeyPath" placeholder="~/.attp/agent/nanobot/did/server_public.pem" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono"></div>
             </div>
           </div>
 
           <!-- Group 4: Web App -->
           <div>
-            <div class="flex items-center gap-2 text-[11px] font-semibold text-gray-400 tracking-wider uppercase mb-3 px-1">
-              <Globe class="w-3.5 h-3.5" />
-              <span>Web App</span>
-            </div>
+            <div class="flex items-center gap-2 text-[11px] font-semibold text-gray-400 tracking-wider uppercase mb-3 px-1"><Globe class="w-3.5 h-3.5" /><span>Web App</span></div>
             <div class="bg-white p-5 rounded-xl border border-gray-100 space-y-4">
               <div class="grid grid-cols-2 gap-4">
-                <div>
-                  <label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">Host</label>
-                  <input type="text" v-model="config.webApp.host" placeholder="127.0.0.1" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono">
-                </div>
-                <div>
-                  <label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">Port</label>
-                  <input type="number" v-model.number="config.webApp.port" placeholder="8001" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono">
-                </div>
+                <div><label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">Host</label><input type="text" v-model="config.webApp.host" placeholder="127.0.0.1" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono"></div>
+                <div><label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">Port</label><input type="number" v-model.number="config.webApp.port" placeholder="8001" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono"></div>
               </div>
             </div>
           </div>
 
           <!-- Group 5: Tool -->
           <div>
-            <div class="flex items-center gap-2 text-[11px] font-semibold text-gray-400 tracking-wider uppercase mb-3 px-1">
-              <Wrench class="w-3.5 h-3.5" />
-              <span>Tool</span>
-            </div>
+            <div class="flex items-center gap-2 text-[11px] font-semibold text-gray-400 tracking-wider uppercase mb-3 px-1"><Wrench class="w-3.5 h-3.5" /><span>Tool</span></div>
             <div class="bg-white p-5 rounded-xl border border-gray-100 space-y-4">
               <div class="grid grid-cols-2 gap-4">
-                <div>
-                  <label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">Host</label>
-                  <input type="text" v-model="config.tool.host" placeholder="127.0.0.1" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono">
-                </div>
-                <div>
-                  <label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">Port</label>
-                  <input type="number" v-model.number="config.tool.port" placeholder="8002" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono">
-                </div>
+                <div><label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">Host</label><input type="text" v-model="config.tool.host" placeholder="127.0.0.1" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono"></div>
+                <div><label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">Port</label><input type="number" v-model.number="config.tool.port" placeholder="8002" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono"></div>
               </div>
             </div>
           </div>
 
           <!-- Group 6: Heartbeat -->
           <div>
-            <div class="flex items-center gap-2 text-[11px] font-semibold text-gray-400 tracking-wider uppercase mb-3 px-1">
-              <HeartPulse class="w-3.5 h-3.5" />
-              <span>Heartbeat</span>
-            </div>
+            <div class="flex items-center gap-2 text-[11px] font-semibold text-gray-400 tracking-wider uppercase mb-3 px-1"><HeartPulse class="w-3.5 h-3.5" /><span>Heartbeat</span></div>
             <div class="bg-white p-5 rounded-xl border border-gray-100 space-y-4">
               <div class="grid grid-cols-3 gap-4">
-                <div>
-                  <label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">Interval (s)</label>
-                  <input type="number" v-model.number="config.heartbeat.interval" placeholder="30" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono">
+                <div><label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">Interval (s)</label><input type="number" v-model.number="config.heartbeat.interval" placeholder="30" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono"></div>
+                <div><label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">Timeout (s)</label><input type="number" v-model.number="config.heartbeat.timeout" placeholder="90" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono"></div>
+                <div><label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">Max Fail</label><input type="number" v-model.number="config.heartbeat.maxFail" placeholder="3" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Group 7: User ATTP Identity -->
+          <div>
+            <div class="flex items-center gap-2 text-[11px] font-semibold text-gray-400 tracking-wider uppercase mb-3 px-1">
+              <User class="w-3.5 h-3.5" />
+              <span>User ATTP Identity</span>
+              <span v-if="attpInitialized" class="ml-auto px-1.5 py-0.5 rounded text-[9px] font-medium text-emerald-600 bg-emerald-50 border border-emerald-100">已配置</span>
+              <span v-else class="ml-auto px-1.5 py-0.5 rounded text-[9px] font-medium text-amber-600 bg-amber-50 border border-amber-100">未配置</span>
+            </div>
+            <div class="bg-white p-5 rounded-xl border border-gray-100 space-y-4">
+              <div>
+                <label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">User DID</label>
+                <input type="text" v-model="userConfig.did" placeholder="did:wba:..." class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono">
+              </div>
+              <div>
+                <label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">DID Document Path</label>
+                <input type="text" v-model="userConfig.didDocPath" placeholder="~/.attp/user/did/did.json" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono">
+              </div>
+              <div>
+                <label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">Private Key Path</label>
+                <input type="text" v-model="userConfig.didKeyPath" placeholder="~/.attp/user/did/key-1_private.pem" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono">
+                <p v-if="userConfig.didKeyPath && !privateKeyLoaded" class="mt-1 text-[10px] text-amber-500">⚠ 密钥将在下次发送消息时加载</p>
+                <p v-if="userConfig.didKeyPath && privateKeyLoaded" class="mt-1 text-[10px] text-emerald-500">✓ 密钥已加载</p>
+              </div>
+              <div>
+                <label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">Default Target DID</label>
+                <input type="text" v-model="userConfig.defaultTargetDid" placeholder="did:wba:..." class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono">
+              </div>
+              <div class="pt-2 border-t border-gray-50">
+                <div class="flex items-center gap-2 mb-3"><ShieldCheck class="w-3.5 h-3.5 text-gray-400" /><span class="text-[11px] font-medium text-gray-400 uppercase">Protocol Nodes</span></div>
+                <div class="space-y-2">
+                  <div v-for="(url, index) in userConfig.protocolUrls" :key="'proto-'+index" class="flex items-center gap-2">
+                    <input type="text" :value="url" readonly class="flex-1 text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 font-mono text-gray-600">
+                    <button @click="removeProtocolUrl(index)" class="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors shrink-0"><Trash2 class="w-4 h-4" /></button>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <input type="text" v-model="newProtocolUrl" placeholder="http://host:port" class="flex-1 text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono" @keydown.enter="handleAddProtocolUrl">
+                    <button @click="handleAddProtocolUrl" class="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-50 rounded-lg transition-colors shrink-0"><Plus class="w-4 h-4" /></button>
+                  </div>
                 </div>
-                <div>
-                  <label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">Timeout (s)</label>
-                  <input type="number" v-model.number="config.heartbeat.timeout" placeholder="90" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono">
+              </div>
+              <div class="pt-2 border-t border-gray-50">
+                <div class="flex items-center gap-2 mb-3"><Link class="w-3.5 h-3.5 text-gray-400" /><span class="text-[11px] font-medium text-gray-400 uppercase">Known Agents</span></div>
+                <div class="space-y-2">
+                  <div v-for="(agent, index) in userConfig.agents" :key="'agent-'+index" class="flex items-center gap-2">
+                    <span class="text-xs text-gray-500 w-20 shrink-0 truncate">{{ agent.name }}</span>
+                    <input type="text" :value="agent.baseUrl" readonly class="flex-1 text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 font-mono text-gray-600">
+                    <button @click="removeAgent(index)" class="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors shrink-0"><Trash2 class="w-4 h-4" /></button>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <input type="text" v-model="newAgentName" placeholder="Name" class="w-20 shrink-0 text-sm bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300">
+                    <input type="text" v-model="newAgentUrl" placeholder="http://host:port" class="flex-1 text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono" @keydown.enter="handleAddAgent">
+                    <button @click="handleAddAgent" class="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-50 rounded-lg transition-colors shrink-0"><Plus class="w-4 h-4" /></button>
+                  </div>
                 </div>
-                <div>
-                  <label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">Max Fail</label>
-                  <input type="number" v-model.number="config.heartbeat.maxFail" placeholder="3" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono">
-                </div>
+              </div>
+              <div class="flex justify-end pt-2">
+                <button @click="saveAttpConfig()" class="px-4 py-2 text-sm font-medium text-white bg-gray-900 rounded-xl hover:bg-gray-800 transition-colors shadow-sm">
+                  <span class="flex items-center gap-1.5"><Check class="w-3.5 h-3.5" /> Save User Config</span>
+                </button>
               </div>
             </div>
           </div>
@@ -270,12 +295,9 @@ const toastIcon = computed(() => {
           </div>
         </div>
 
-        <!-- Error State -->
         <div v-else-if="configStatus === 'error'">
           <div class="bg-red-50 border border-red-100 rounded-xl p-6 text-center">
-            <div class="w-12 h-12 rounded-xl bg-red-100 flex items-center justify-center mx-auto mb-3">
-              <AlertTriangle class="w-6 h-6 text-red-500" />
-            </div>
+            <div class="w-12 h-12 rounded-xl bg-red-100 flex items-center justify-center mx-auto mb-3"><AlertTriangle class="w-6 h-6 text-red-500" /></div>
             <h3 class="text-sm font-semibold text-red-800 mb-1">Connection Error</h3>
             <p class="text-xs text-red-600">无法连接到 Agent，请检查 Agent 是否在运行。</p>
             <button @click="loadConfig()" class="mt-3 px-4 py-2 text-sm text-red-600 bg-red-100 hover:bg-red-200 rounded-lg transition-colors">重试</button>
@@ -286,10 +308,7 @@ const toastIcon = computed(() => {
     </div>
 
     <!-- Toast -->
-    <div :class="[
-      'fixed top-6 right-6 z-50 transition-all duration-300',
-      toastVisible ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-10 pointer-events-none'
-    ]">
+    <div :class="['fixed top-6 right-6 z-50 transition-all duration-300', toastVisible ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-10 pointer-events-none']">
       <div :class="['flex items-center gap-2.5 px-4 py-3 rounded-xl border shadow-lg text-sm', toastClass]">
         <component :is="toastIcon" class="w-4 h-4" />
         <span>{{ toastMessage }}</span>

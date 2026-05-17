@@ -4,6 +4,29 @@
  * routing all requests through Electron IPC (via window.electronAPI).
  */
 
+// ---- User ATTP Config ----
+
+export interface UserAttpConfig {
+  did: string;
+  didDocPath: string;
+  didKeyPath: string;
+  defaultTargetDid: string;
+  protocolUrls: string[];
+  agents: { name: string; baseUrl: string }[];
+}
+
+interface IpcFileResult {
+  ok: boolean;
+  data?: string;
+  error?: string;
+}
+
+interface IpcUserConfigResult {
+  ok: boolean;
+  data?: UserAttpConfig;
+  error?: string;
+}
+
 declare global {
   interface Window {
     electronAPI: {
@@ -17,6 +40,10 @@ declare global {
       onWsOpen: (cb: (data: WsEventBasic) => void) => void;
       onWsClose: (cb: (data: WsCloseEvent) => void) => void;
       onWsError: (cb: (data: WsErrorEvent) => void) => void;
+      readFile: (filepath: string) => Promise<IpcFileResult>;
+      readUserConfig: () => Promise<IpcUserConfigResult>;
+      saveUserConfig: (config: UserAttpConfig) => Promise<IpcFileResult>;
+      getHomeDir: () => Promise<string>;
     };
   }
 }

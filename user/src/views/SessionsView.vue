@@ -3,7 +3,7 @@ import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useChat } from '../composables/useChat'
 import { getActiveAgent } from '../agent_manager'
-import { Search, X, ListChecks, Pin, PinOff, MessageSquare, MoreHorizontal, Network, Download, Trash2, Clock, Inbox } from 'lucide-vue-next'
+import { Search, X, ListChecks, Pin, PinOff, MessageSquare, MoreHorizontal, Trash2, Clock, Inbox } from 'lucide-vue-next'
 
 const router = useRouter()
 const {
@@ -47,18 +47,6 @@ const handleDelete = (id: string) => {
   closeMenu()
 }
 
-const handleViewTrace = (id: string) => {
-  closeMenu()
-  // Dispatch event for trace modal
-  window.dispatchEvent(new CustomEvent('show-trace-timeline', { detail: { sessionId: id } }))
-}
-
-const handleExport = (event: Event) => {
-  event.stopPropagation()
-  closeMenu()
-  // Dispatch export toast event
-  window.dispatchEvent(new CustomEvent('show-export-toast'))
-}
 </script>
 
 <template>
@@ -140,12 +128,6 @@ const handleExport = (event: Event) => {
                   <button @click="handlePin(session.id)" class="w-full text-left px-3 py-2 text-[13px] text-gray-600 hover:bg-gray-50 hover:text-gray-900 flex items-center gap-2 transition-colors">
                     <Pin class="w-3.5 h-3.5" /> {{ session.isPinned ? '取消置顶' : '置顶' }}
                   </button>
-                  <button @click="handleViewTrace(session.id)" class="w-full text-left px-3 py-2 text-[13px] text-gray-600 hover:bg-gray-50 hover:text-gray-900 flex items-center gap-2 transition-colors">
-                    <Network class="w-3.5 h-3.5" /> 查看通讯日志
-                  </button>
-                  <button @click="handleExport($event)" class="w-full text-left px-3 py-2 text-[13px] text-gray-600 hover:bg-gray-50 hover:text-gray-900 flex items-center gap-2 transition-colors">
-                    <Download class="w-3.5 h-3.5" /> 导出溯源报告
-                  </button>
                   <div class="h-px bg-gray-100 my-1"></div>
                   <button @click="handleDelete(session.id)" class="w-full text-left px-3 py-2 text-[13px] text-red-600 hover:bg-red-50 flex items-center gap-2 transition-colors group">
                     <Trash2 class="w-3.5 h-3.5 group-hover:scale-110 transition-transform" /> 删除
@@ -199,12 +181,6 @@ const handleExport = (event: Event) => {
                 <div v-if="openMenuId === session.id" class="absolute right-0 mt-1 w-44 bg-white border border-gray-100 rounded-xl shadow-[0_10px_30px_-10px_rgba(0,0,0,0.1)] py-1 z-50" @click.stop>
                   <button @click="handlePin(session.id)" class="w-full text-left px-3 py-2 text-[13px] text-gray-600 hover:bg-gray-50 hover:text-gray-900 flex items-center gap-2 transition-colors">
                     <Pin class="w-3.5 h-3.5" /> {{ session.isPinned ? '取消置顶' : '置顶' }}
-                  </button>
-                  <button @click="handleViewTrace(session.id)" class="w-full text-left px-3 py-2 text-[13px] text-gray-600 hover:bg-gray-50 hover:text-gray-900 flex items-center gap-2 transition-colors">
-                    <Network class="w-3.5 h-3.5" /> 查看通讯日志
-                  </button>
-                  <button @click="handleExport($event)" class="w-full text-left px-3 py-2 text-[13px] text-gray-600 hover:bg-gray-50 hover:text-gray-900 flex items-center gap-2 transition-colors">
-                    <Download class="w-3.5 h-3.5" /> 导出溯源报告
                   </button>
                   <div class="h-px bg-gray-100 my-1"></div>
                   <button @click="handleDelete(session.id)" class="w-full text-left px-3 py-2 text-[13px] text-red-600 hover:bg-red-50 flex items-center gap-2 transition-colors group">

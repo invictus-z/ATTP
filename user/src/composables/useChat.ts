@@ -2,6 +2,7 @@ import { ref, reactive, computed } from 'vue'
 import { renderMarkdown } from '../markdown'
 import { getActiveAgent, getActiveAgentId, getAgentById, getAgents, wsUrl, wsUrlForAgent, apiUrl, onAgentSwitch, updateAgentStatus } from '../agent_manager'
 import { createWs, onWsMessage, onWsOpen, onWsClose, onWsError, apiFetch, type WsConnection } from '../transport'
+import { useAttpProtocol } from './useAttpProtocol'
 
 export interface ChatMessage {
   role: 'user' | 'agent'
@@ -33,6 +34,8 @@ const agentCurrentSessionMap = new Map<string, string | null>()
 const agentWsMap = new Map<string, WsConnection>()
 /** WS connected status keyed by agentId */
 const agentWsConnectedMap = new Map<string, boolean>()
+/** Agents currently in the process of connecting (prevents duplicate concurrent connections) */
+const connectingAgents = new Set<string>()
 
 // ---- Shared Reactive State (for active agent) ----
 
@@ -419,6 +422,9 @@ export function useChat() {
           } else {
             if (targetSessionId) addMessageToAgentSession(agentId, targetSessionId, 'agent', data.content, senderName)
           }
+
+          // ATTP: 异步检测收到的 NodeMessage 并回传 BackMessage（fire-and-forget，不阻塞渲染）
+          handleReceivedNodeMessage(data)
         }
       } catch (e) { console.error(`[WS] Message error for agent ${agentId}:`, e) }
     }
@@ -426,11 +432,15 @@ export function useChat() {
 
   /** Connect WebSocket for a specific agent */
   const connectAgentWs = async (agentId: string) => {
-    // Skip if already connected
+    // Skip if already connected or currently connecting
+    if (connectingAgents.has(agentId)) return
     if (agentWsMap.has(agentId) && agentWsConnectedMap.get(agentId)) return
 
     const agent = getAgentById(agentId)
     if (!agent) return
+
+    // Mark as connecting to prevent duplicate concurrent connections
+    connectingAgents.add(agentId)
 
     // Close existing connection if any
     const existing = agentWsMap.get(agentId)
@@ -481,6 +491,8 @@ export function useChat() {
       console.error(`[WS] Failed to connect to ${agent.name}:`, e)
       updateAgentStatus(agent.id, 'offline')
       if (agentId === getActiveAgentId()) updateAgentStatusBadge('offline')
+    } finally {
+      connectingAgents.delete(agentId)
     }
   }
 
@@ -539,7 +551,9 @@ export function useChat() {
     }
   }
 
-  const sendMessage = () => {
+  const { initialized: attpInitialized, sendMessageWithAttp, handleReceivedNodeMessage } = useAttpProtocol()
+
+  const sendMessage = async () => {
     const text = chatInput.value.trim()
     if (!text || !currentSessionId.value) return
     const agentId = getActiveAgentId()
@@ -548,7 +562,24 @@ export function useChat() {
       const conn = agentWsMap.get(agentId)
       const connected = agentWsConnectedMap.get(agentId)
       if (conn && connected) {
-        conn.send(JSON.stringify({ type: 'chat', content: text, session_id: currentSessionId.value }))
+        if (attpInitialized.value) {
+          const agent = getAgentById(agentId)
+          const targetDid = (agent as any)?.did || ''
+          const attpResult = await sendMessageWithAttp(text, currentSessionId.value, targetDid)
+          if (attpResult.success && attpResult.nodeMessageDict) {
+            conn.send(JSON.stringify({
+              type: 'chat',
+              content: text,
+              session_id: currentSessionId.value,
+              NodeMessage: attpResult.nodeMessageDict,
+            }))
+          } else {
+            console.warn('[ATTP] sendMessageWithAttp failed, sending plain:', attpResult.error)
+            conn.send(JSON.stringify({ type: 'chat', content: text, session_id: currentSessionId.value }))
+          }
+        } else {
+          conn.send(JSON.stringify({ type: 'chat', content: text, session_id: currentSessionId.value }))
+        }
       } else {
         console.warn('WebSocket not open for active agent')
       }

@@ -317,18 +317,83 @@ class ATTPClient:
         current_session_id: str,
         content: str,
     ) -> str:
-        """Send message to user via websocket.
+        """Send message to user via websocket with ATTP protocol wrapping.
+
+        Constructs a NodeMessage (A2U) with signed RecordedHop and includes
+        it in the WS push metadata, then sends BackMessage Phase 2 to the
+        protocol node.
 
         Args:
-            channel: Channel name (e.g., "web_ui")
             current_session_id: Current session ID
             content: Message content
 
         Returns:
             Status message
         """
+        metadata: dict[str, Any] = {"Session_ID": current_session_id}
+
+        # Try to build ATTP NodeMessage for A2U
+        node_msg_dict = None
+        try:
+            session = self._session_manager.get_or_create(current_session_id)
+            trace = session.get_trace_metadata() if session else None
+
+            if trace and self._tracer:
+                protocol_url = trace.get("Protocol_Node_Address", "")
+                prev_hop = trace.get("Hop", {})
+                # User DID from the previous U2A hop
+                user_did = prev_hop.get("node_did", "")
+
+                private_key_path = str(self.auth.private_key_path) if getattr(self.auth, "private_key_path", None) else None
+
+                if protocol_url and user_did and private_key_path:
+                    # Use append_hop to construct signed RecordedHop (auto-increments hop_count)
+                    hop_metadata = self._tracer.append_hop(
+                        metadata=dict(trace),  # copy to avoid mutation
+                        content=content,
+                        node_did=self.agent_did,   # sender = Agent
+                        target_did=user_did,        # target = User
+                        private_key_path=private_key_path,
+                    )
+
+                    hop = hop_metadata.get("Hop")
+                    if hop:
+                        nonce = uuid.uuid4().hex
+                        recorded = RecordedHop(
+                            session_id=current_session_id,
+                            sender_did=hop["node_did"],
+                            target_did=hop["target_did"],
+                            content=hop["Content"],
+                            timestamp=hop["Timestamp"],
+                            hop_count=hop["Hop_Count"],
+                            sig_content=hop["Signature"],
+                        )
+                        node_msg = NodeMessage(
+                            protocol_url=protocol_url,
+                            nonce=nonce,
+                            recorded_hop=recorded,
+                        )
+                        node_msg_dict = node_msg.to_dict()
+
+                        # Phase 2: Send BackMessage to protocol node (async, non-blocking)
+                        private_key = self._tracer.load_private_key(private_key_path)
+                        await send_back_message(
+                            protocol_url=protocol_url,
+                            node_did=self.agent_did,
+                            nonce=nonce,
+                            recorded_hop=recorded,
+                            private_key=private_key,
+                        )
+
+                        logger.debug("A2U NodeMessage constructed for session {}", current_session_id)
+        except Exception as e:
+            logger.warning("Failed to build A2U NodeMessage, sending plain: {}", e)
+
+        if node_msg_dict:
+            metadata["NodeMessage"] = node_msg_dict
+
         if self._web_callback:
-            await self._web_callback(content, {"Session_ID": current_session_id})
+            await self._web_callback(content, metadata)
         return "Message sent to user"
 
     # ------------------------------------------------------------------
