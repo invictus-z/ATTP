@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +11,22 @@ import aiosqlite
 from attp.app.logging import get_logger
 
 logger = get_logger("Tracing")
+
+# 累计违规次数 → severity_level 映射
+_SEVERITY_THRESHOLDS = [
+    (0, "clean"),
+    (1, "warning"),
+    (4, "dangerous"),
+]  # 4+ → banned
+
+
+def _severity_for_count(count: int) -> str:
+    if count >= 4:
+        return "banned"
+    for threshold, level in reversed(_SEVERITY_THRESHOLDS):
+        if count >= threshold:
+            return level
+    return "clean"
 
 
 class SqliteStore:
@@ -80,6 +97,23 @@ class SqliteStore:
                     updated_at      REAL
                 )
             ''')
+
+            # Per-DID 恶意节点档案
+            await db.execute('''
+                CREATE TABLE IF NOT EXISTS node_dossiers (
+                    did                 TEXT PRIMARY KEY,
+                    total_violations    INTEGER DEFAULT 0,
+                    severity_level      TEXT DEFAULT 'clean',
+                    first_seen_at       REAL,
+                    last_seen_at        REAL,
+                    evidence_breakdown  TEXT DEFAULT '{}',
+                    last_evidence_type  TEXT DEFAULT '',
+                    last_session_id     TEXT DEFAULT '',
+                    last_evidence_desc  TEXT DEFAULT '',
+                    updated_at          REAL
+                )
+            ''')
+
             await db.commit()
         logger.info("Database initialized at {}", self.db_path)
 
@@ -279,7 +313,7 @@ class SqliteStore:
         timestamp: float = 0.0,
         raw_evidence: dict | None = None,
     ) -> None:
-        """Save a malicious node detection report."""
+        """Save a malicious node detection report and update the per-DID dossier."""
         await self._ensure_malicious_table()
         raw_json = json.dumps(raw_evidence or {}, ensure_ascii=False)
         async with aiosqlite.connect(self.db_path) as db:
@@ -295,6 +329,10 @@ class SqliteStore:
         logger.info(
             "Saved malicious report: session={}, did={}, type={}, severity={}",
             session_id, malicious_did, evidence_type, severity,
+        )
+        # 自动更新 per-DID 档案
+        await self.upsert_dossier(
+            malicious_did, evidence_type, session_id, evidence_description,
         )
 
     async def query_malicious_nodes(
@@ -320,5 +358,94 @@ class SqliteStore:
                     ORDER BY timestamp DESC""",
                 params,
             )
+            rows = await cursor.fetchall()
+            return [dict(r) for r in rows]
+
+    # -- node dossiers (per-DID 恶意节点档案) --
+
+    async def upsert_dossier(
+        self,
+        malicious_did: str,
+        evidence_type: str,
+        session_id: str,
+        description: str,
+    ) -> None:
+        """插入或更新节点档案。在 save_malicious_report 内部自动调用。"""
+        now = time.time()
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                "SELECT total_violations, evidence_breakdown, first_seen_at FROM node_dossiers WHERE did = ?",
+                (malicious_did,),
+            )
+            row = await cursor.fetchone()
+
+            if row is None:
+                breakdown = {evidence_type: 1}
+                await db.execute(
+                    """INSERT INTO node_dossiers
+                       (did, total_violations, severity_level, first_seen_at, last_seen_at,
+                        evidence_breakdown, last_evidence_type, last_session_id,
+                        last_evidence_desc, updated_at)
+                       VALUES (?, 1, 'warning', ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        malicious_did, now, now,
+                        json.dumps(breakdown, ensure_ascii=False),
+                        evidence_type, session_id, description, now,
+                    ),
+                )
+            else:
+                total = row["total_violations"] + 1
+                breakdown = json.loads(row["evidence_breakdown"])
+                breakdown[evidence_type] = breakdown.get(evidence_type, 0) + 1
+                severity = _severity_for_count(total)
+                await db.execute(
+                    """UPDATE node_dossiers
+                       SET total_violations=?, severity_level=?, last_seen_at=?,
+                           evidence_breakdown=?, last_evidence_type=?,
+                           last_session_id=?, last_evidence_desc=?, updated_at=?
+                       WHERE did=?""",
+                    (
+                        total, severity, now,
+                        json.dumps(breakdown, ensure_ascii=False),
+                        evidence_type, session_id, description, now,
+                        malicious_did,
+                    ),
+                )
+            await db.commit()
+        logger.info(
+            "Upserted dossier: did={}, evidence={}, total={}",
+            malicious_did, evidence_type,
+            1 if row is None else row["total_violations"] + 1,
+        )
+
+    async def query_dossier(self, did: str) -> dict | None:
+        """查询单个 DID 的档案。"""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                "SELECT * FROM node_dossiers WHERE did = ?", (did,),
+            )
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+
+    async def query_all_dossiers(
+        self,
+        severity_level: str | None = None,
+        limit: int = 100,
+    ) -> list[dict]:
+        """查询所有档案，可按 severity_level 筛选。"""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            if severity_level:
+                cursor = await db.execute(
+                    "SELECT * FROM node_dossiers WHERE severity_level = ? ORDER BY updated_at DESC LIMIT ?",
+                    (severity_level, limit),
+                )
+            else:
+                cursor = await db.execute(
+                    "SELECT * FROM node_dossiers ORDER BY updated_at DESC LIMIT ?",
+                    (limit,),
+                )
             rows = await cursor.fetchall()
             return [dict(r) for r in rows]

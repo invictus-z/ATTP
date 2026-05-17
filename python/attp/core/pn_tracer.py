@@ -115,6 +115,20 @@ class ProtocolTracer:
     ) -> list:
         return await self._storage.query_malicious_nodes(session_id, malicious_did)
 
+    # -- node dossiers --
+
+    async def query_dossier(self, did: str) -> dict | None:
+        """查询单个 DID 的恶意节点档案。"""
+        return await self._storage.query_dossier(did)
+
+    async def query_all_dossiers(
+        self,
+        severity_level: str | None = None,
+        limit: int = 100,
+    ) -> list:
+        """查询所有档案，可按 severity_level 筛选。"""
+        return await self._storage.query_all_dossiers(severity_level, limit)
+
 
 # Backward-compatible alias
 MessageTracer = ProtocolTracer
