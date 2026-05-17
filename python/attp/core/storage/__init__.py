@@ -1,3 +1,5 @@
 """存储后端。"""
 
-from .sqlite_store import SqliteStore
+from .store import SqliteStore
+
+__all__ = ["SqliteStore"]
