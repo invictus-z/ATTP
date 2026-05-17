@@ -6,7 +6,12 @@ from .session import ProtocolSession
 
 
 class ProtocolSessionManager:
-    """In-memory session store keyed by session_id — protocol node layer only."""
+    """In-memory session store keyed by session_id — protocol node layer only.
+
+    NOTE: ``save()`` currently re-assigns the same in-memory reference and is
+    therefore a no-op (mutations on the returned object are immediately visible).
+    It is retained as a hook for future persistence backends (Redis, DB, etc.).
+    """
 
     def __init__(self):
         self._sessions: dict[str, ProtocolSession] = {}
