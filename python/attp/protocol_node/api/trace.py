@@ -58,6 +58,7 @@ def get_behavior_router(
                 parts = ft.split(":")
                 if base_ft in nodes[hc]:
                     entry = {
+                        "node_did": row["node_did"],
                         "content": row.get("content", ""),
                         "target": row.get("target", ""),
                         "timestamp": row.get("timestamp"),
@@ -186,6 +187,7 @@ def get_behavior_router(
             if base_ft in nodes[hc]:
                 entry = {
                     "id": row.get("id"),
+                    "node_did": row["node_did"],
                     "content": row.get("content", ""),
                     "target": row.get("target", ""),
                     "timestamp": row.get("timestamp"),
