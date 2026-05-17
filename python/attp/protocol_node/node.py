@@ -12,7 +12,10 @@ from typing import TYPE_CHECKING
 from attp.app.logging import get_logger
 from attp.core.sessions.protocol_node import ProtocolSessionManager
 from attp.core.pn_tracer import ProtocolTracer
+from attp.core.authentication import DIDResolver
 from attp.protocol_node.config.config import ProtocolNodeConfigFile
+from attp.protocol_node.behavior_controller import BehaviorController
+from attp.protocol_node.malicious_detector import MaliciousNodeDetector
 
 if TYPE_CHECKING:
     from attp.core.analysis.orchestrator import AnalysisOrchestrator
@@ -25,7 +28,7 @@ class ProtocolNode:
 
     使用方式::
 
-        node = ProtocolNode(config_path="~/.attp/protocol_node/config.json", agent_did="did:...")
+        node = ProtocolNode(config_path="~/.attp/protocol_node/config.json")
         await node.start()
         ...
         await node.stop()
@@ -69,18 +72,12 @@ class ProtocolNode:
         # 2. 创建 SessionManager
         self._session_manager = ProtocolSessionManager()
 
-        # 3. 创建 DIDResolver + BehaviorController
-        did_resolver = None
-        behavior_controller = None
-        if self._agent_did:
-            from attp.core.authentication import DIDResolver
-            from attp.protocol_node.behavior_controller import BehaviorController
-
-            did_resolver = DIDResolver(
-                agent_did="", # 协议节点无DUD
-                key_store=self._tracer.key_store,
-            )
-            behavior_controller = BehaviorController()
+        # 3. 创建 DIDResolver + BehaviorController + MaliciousNodeDetector
+        did_resolver = DIDResolver(
+            key_store=self._tracer.key_store,
+        )
+        behavior_controller = BehaviorController()
+        malicious_detector = MaliciousNodeDetector(did_resolver)
 
         # 4. 创建 DataPort + ApiPort
         from attp.protocol_node.data_port import DataPort
@@ -90,11 +87,11 @@ class ProtocolNode:
         self._data_port = DataPort(
             tracer=self._tracer,
             session_manager=self._session_manager,
-            agent_did=self._agent_did,
             host=web.data_port_host,
             port=web.data_port_port,
             did_resolver=did_resolver,
             behavior_controller=behavior_controller,
+            malicious_detector=malicious_detector,
         )
         self._api_port = ApiPort(
             tracer=self._tracer,

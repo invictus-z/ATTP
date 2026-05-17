@@ -89,6 +89,33 @@ class ProtocolTracer:
     async def load_analysis_session(self, session_id: str) -> dict | None:
         return await self._storage.load_analysis_session(session_id)
 
+    # -- malicious node reports --
+
+    async def save_malicious_report(self, report) -> None:
+        """保存恶意节点报告。
+
+        Args:
+            report: MaliciousNodeReport 实例
+        """
+        for did in report.malicious_dids:
+            await self._storage.save_malicious_report(
+                session_id=report.session_id,
+                malicious_did=did,
+                evidence_type=report.evidence_type.value,
+                evidence_description=report.evidence_description,
+                severity="high",
+                nonce=report.nonce,
+                timestamp=report.timestamp,
+                raw_evidence=report.raw_evidence,
+            )
+
+    async def query_malicious_nodes(
+        self,
+        session_id: str | None = None,
+        malicious_did: str | None = None,
+    ) -> list:
+        return await self._storage.query_malicious_nodes(session_id, malicious_did)
+
 
 # Backward-compatible alias
 MessageTracer = ProtocolTracer

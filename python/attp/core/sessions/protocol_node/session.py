@@ -48,6 +48,60 @@ class ProtocolSession:
         self.metadata["LastCompletedHopCount"] = hc
         self.updated_at = time.time()
 
+    # -- trusted target_did (可信名单) --
+
+    def get_trusted_target_did(self) -> str | None:
+        """获取上一组验证通过的 target_did（可信名单）。"""
+        return self.metadata.get("TrustedTargetDID")
+
+    def set_trusted_target_did(self, did: str) -> None:
+        """设置可信名单为本次验证通过的 target_did。"""
+        self.metadata["TrustedTargetDID"] = did
+        self.updated_at = time.time()
+
+    def clear_trusted_target_did(self) -> None:
+        """清除可信名单。"""
+        self.metadata.pop("TrustedTargetDID", None)
+
+    # -- nonce completion tracking --
+
+    def mark_nonce_completed(self, nonce: str) -> None:
+        """标记一个 nonce 已完成双回传验证。"""
+        completed: list[str] = self.metadata.get("CompletedNonces", [])
+        if nonce not in completed:
+            completed.append(nonce)
+        self.metadata["CompletedNonces"] = completed
+        self.updated_at = time.time()
+
+    def has_subsequent_activity_after(self, nonce: str) -> bool:
+        """检查指定 nonce 之后是否还有其他 pending 或已完成的消息。
+
+        用于单回传场景判断：如果有后续活动，说明该 nonce 对应的节点
+        「接收了但未回传」；否则为「未发送却发了回传」。
+        """
+        # 检查是否有其他未过期的 PendingMessage
+        prefix = "_pending:"
+        for key, value in self.metadata.items():
+            if not key.startswith(prefix):
+                continue
+            if not isinstance(value, dict):
+                continue
+            other_nonce = key[len(prefix):]
+            if other_nonce == nonce:
+                continue
+            # 只要有其他 pending message 就算有后续活动
+            other_msg = PendingMessage.from_dict(value)
+            if not other_msg.is_expired():
+                return True
+
+        # 检查已完成列表中是否有更晚的 nonce（按时间无法精确判断，
+        # 但如果 completed nonces 存在且包含不同的 nonce，说明有后续）
+        completed: list[str] = self.metadata.get("CompletedNonces", [])
+        if len(completed) > 0 and nonce not in completed:
+            return True
+
+        return False
+
     # -- generic metadata (for _pending_intent_content, _intent_retry_count, etc.) --
 
     def set_metadata(self, key: str, value: Any) -> None:

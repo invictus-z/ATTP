@@ -30,6 +30,7 @@ class DataPort:
         port: int,
         did_resolver=None,
         behavior_controller=None,
+        malicious_detector=None,
     ):
         self._tracer = tracer
         self._session_manager = session_manager
@@ -37,6 +38,7 @@ class DataPort:
         self.port = port
         self._did_resolver = did_resolver
         self._behavior_controller = behavior_controller
+        self._malicious_detector = malicious_detector
         self._app = FastAPI(title="ATTP Protocol Node — Data Port")
         self._orchestrator = None
         self._uvicorn_server = None
@@ -47,6 +49,7 @@ class DataPort:
         session_mgr = self._session_manager
         did_resolver_ref = self._did_resolver
         behavior_controller_ref = self._behavior_controller
+        malicious_detector_ref = self._malicious_detector
         _orch_holder = [None]  # mutable list for late-binding
 
         @self._app.post("/record")
@@ -73,6 +76,7 @@ class DataPort:
                 result = await intercept_record(
                     back_msg, did_resolver_ref, tracer_ref,
                     session_manager=session_mgr,
+                    malicious_detector=malicious_detector_ref,
                 )
 
                 if result.status == "error":
@@ -93,6 +97,7 @@ class DataPort:
                         "hop_count_violation_non_a2a": (400, "Hop count violation (non-A2A must stay)"),
                         "hop_zero_must_be_u2a": (400, "hop_count=0 must be U2A (user intent)"),
                         "content_signature_invalid": (403, "Content signature invalid"),
+                        "trusted_list_violation": (403, "Trusted list violation"),
                     }
                     error_key = result.error.split(":")[0] if result.error else ""
                     code, msg = ERROR_MAP.get(
@@ -101,7 +106,25 @@ class DataPort:
                     return JSONResponse({"error": msg}, status_code=code)
 
                 if result.status == "stored":
-                    return JSONResponse({"status": "Pending record stored"})
+                    return JSONResponse({"status": "stored"})
+
+                if result.status == "malicious":
+                    report = result.malicious_report
+                    logger.warning(
+                        "Malicious node detected: session={}, dids={}, type={}",
+                        session_id,
+                        report.malicious_dids if report else [],
+                        report.evidence_type.value if report else "unknown",
+                    )
+                    return JSONResponse(
+                        {
+                            "status": "malicious_detected",
+                            "malicious_dids": report.malicious_dids if report else [],
+                            "evidence_type": report.evidence_type.value if report else "",
+                            "description": report.evidence_description if report else "",
+                        },
+                        status_code=403,
+                    )
 
                 if result.status == "verified":
                     behavior_type = result.behavior_type

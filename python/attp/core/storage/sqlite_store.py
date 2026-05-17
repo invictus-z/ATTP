@@ -83,6 +83,32 @@ class SqliteStore:
             await db.commit()
         logger.info("Database initialized at {}", self.db_path)
 
+    async def _ensure_malicious_table(self) -> None:
+        """Ensure the malicious_nodes table exists (idempotent)."""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute('''
+                CREATE TABLE IF NOT EXISTS malicious_nodes (
+                    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id              TEXT NOT NULL,
+                    malicious_did           TEXT NOT NULL,
+                    evidence_type           TEXT NOT NULL,
+                    evidence_description    TEXT,
+                    severity                TEXT DEFAULT 'medium',
+                    nonce                   TEXT,
+                    timestamp               REAL,
+                    raw_evidence            TEXT DEFAULT '{}'
+                )
+            ''')
+            await db.execute('''
+                CREATE INDEX IF NOT EXISTS idx_mn_session
+                    ON malicious_nodes(session_id)
+            ''')
+            await db.execute('''
+                CREATE INDEX IF NOT EXISTS idx_mn_did
+                    ON malicious_nodes(malicious_did)
+            ''')
+            await db.commit()
+
     # -- behavior_traces (a/b/c/d) --
 
     async def save_behavior_entry(
@@ -239,3 +265,60 @@ class SqliteStore:
             )
             row = await cursor.fetchone()
             return dict(row) if row else None
+
+    # -- malicious node reports --
+
+    async def save_malicious_report(
+        self,
+        session_id: str,
+        malicious_did: str,
+        evidence_type: str,
+        evidence_description: str = "",
+        severity: str = "medium",
+        nonce: str = "",
+        timestamp: float = 0.0,
+        raw_evidence: dict | None = None,
+    ) -> None:
+        """Save a malicious node detection report."""
+        await self._ensure_malicious_table()
+        raw_json = json.dumps(raw_evidence or {}, ensure_ascii=False)
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                """INSERT INTO malicious_nodes
+                   (session_id, malicious_did, evidence_type, evidence_description,
+                    severity, nonce, timestamp, raw_evidence)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (session_id, malicious_did, evidence_type, evidence_description,
+                 severity, nonce, timestamp, raw_json),
+            )
+            await db.commit()
+        logger.info(
+            "Saved malicious report: session={}, did={}, type={}, severity={}",
+            session_id, malicious_did, evidence_type, severity,
+        )
+
+    async def query_malicious_nodes(
+        self,
+        session_id: str | None = None,
+        malicious_did: str | None = None,
+    ) -> list[dict]:
+        """Query malicious node reports by session_id and/or did."""
+        await self._ensure_malicious_table()
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            conditions: list[str] = []
+            params: list[Any] = []
+            if session_id:
+                conditions.append("session_id = ?")
+                params.append(session_id)
+            if malicious_did:
+                conditions.append("malicious_did = ?")
+                params.append(malicious_did)
+            where = " AND ".join(conditions) if conditions else "1=1"
+            cursor = await db.execute(
+                f"""SELECT * FROM malicious_nodes WHERE {where}
+                    ORDER BY timestamp DESC""",
+                params,
+            )
+            rows = await cursor.fetchall()
+            return [dict(r) for r in rows]

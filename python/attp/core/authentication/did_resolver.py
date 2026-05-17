@@ -240,14 +240,12 @@ class DIDResolver:
 
     def __init__(
         self,
-        agent_did: str,
         key_store: KeyStore,
         ttl_seconds: float = 300.0,
         max_retries: int = 2,
         retry_delay: float = 1.0,
         request_timeout: float = 10.0,
     ):
-        self._agent_did = agent_did
         self._key_store = key_store
         self._ttl = ttl_seconds
         self._max_retries = max_retries
@@ -264,9 +262,6 @@ class DIDResolver:
 
     async def resolve_did_document(self, did: str) -> dict | None:
         """解析 DID 文档，带 TTL 缓存和指数退避重试。"""
-        # 本地 agent 快捷路径
-        if did == self._agent_did:
-            return None
 
         # 缓存命中
         entry = self._cache.get(did)
@@ -342,15 +337,6 @@ class DIDResolver:
         self, did: str, key_fragment: str = "key-1"
     ) -> DIDResolutionResult:
         """一次调用获取 public_key + node_type + did_document。"""
-        # 本地 agent 快捷路径
-        if did == self._agent_did:
-            public_key = self._key_store.get(did)
-            return DIDResolutionResult(
-                public_key=public_key,
-                node_type="agent",
-                did_document=None,
-                from_cache=True,
-            )
 
         # 尝试缓存
         entry = self._cache.get(did)
