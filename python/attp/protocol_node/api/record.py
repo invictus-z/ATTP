@@ -129,7 +129,7 @@ def get_record_router(
             )
 
             _orch = orchestrator_holder[0]
-            if behavior_type == "U2A" and _orch and session_id:
+            if behavior_type == "U2A" and _orch and session_id and stored.hop.get("Hop_Count", [0, 0]) == [0, 0]:
                 content = stored.hop.get("Content", "")
                 await _orch.on_field_U2A_recorded(session_id, content)
 

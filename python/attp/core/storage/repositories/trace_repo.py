@@ -80,5 +80,7 @@ class TraceRepository(BaseRepository):
                ORDER BY id""",
             (session_id, since_id),
         )
+        for row in result:
+            row["hop_count"] = [row.pop("hop_count_a2a", 0), row.pop("hop_count_intra", 0)]
         max_id = result[-1]["id"] if result else since_id
         return result, max_id

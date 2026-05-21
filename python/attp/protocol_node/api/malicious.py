@@ -1,6 +1,7 @@
 """恶意节点查询 API 路由。"""
 
 import json
+import urllib.parse
 
 from fastapi import APIRouter, Query
 
@@ -8,6 +9,33 @@ from attp.app.logging import get_logger
 from attp.core.pn_tracer import ProtocolTracer
 
 logger = get_logger("MaliciousAPI")
+
+
+def _normalise_did(did: str) -> str:
+    """将路径参数中的 DID 还原为 canonical form（%3A 编码端口）。
+
+    FastAPI 会自动 URL-decode 路径参数，导致 ``localhost%3A8000`` 变为
+    ``localhost:8000``，与数据库中存储的 canonical DID 不匹配。
+
+    策略：将 ``did:wba:`` 之后、路径段之前的所有纯数字段视为端口号，
+    将其重新编码为 ``domain%3Aport`` 格式。
+    """
+    # 已经包含 %3A，无需转换
+    if "%3A" in did or "%3a" in did:
+        return did
+
+    parts = did.split(":")
+    if len(parts) < 3 or parts[0] != "did":
+        return did
+
+    # did:wba:domain[:port]:segment:...
+    # 如果 parts[3] 是纯数字，说明是端口号，需要合并到 domain 并 %3A 编码
+    if parts[1] in ("wba", "web") and len(parts) >= 4 and parts[3].isdigit():
+        domain = f"{parts[2]}%3A{parts[3]}"
+        rest = parts[4:]
+        return ":".join([parts[0], parts[1], domain] + rest)
+
+    return did
 
 
 def get_malicious_router(tracer: ProtocolTracer) -> APIRouter:
@@ -42,7 +70,7 @@ def get_malicious_router(tracer: ProtocolTracer) -> APIRouter:
     async def query_by_did(did: str):
         """查询指定 DID 的所有恶意节点报告。"""
         try:
-            reports = await tracer.query_malicious_nodes(malicious_did=did)
+            reports = await tracer.query_malicious_nodes(malicious_did=_normalise_did(did))
             return {
                 "malicious_did": did,
                 "reports": [
@@ -68,13 +96,14 @@ def get_malicious_router(tracer: ProtocolTracer) -> APIRouter:
     @router.get("/dossier/{did}")
     async def query_dossier(did: str):
         """查询指定 DID 的恶意节点档案（含违规明细）。"""
+        canonical = _normalise_did(did)
         try:
-            dossier = await tracer.query_dossier(did)
+            dossier = await tracer.query_dossier(canonical)
             if dossier is None:
                 return {"did": did, "found": False}
 
             # 附带该 DID 的所有违规明细
-            incidents = await tracer.query_malicious_nodes(malicious_did=did)
+            incidents = await tracer.query_malicious_nodes(malicious_did=canonical)
             return {
                 "found": True,
                 "did": dossier["did"],

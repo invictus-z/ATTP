@@ -43,5 +43,6 @@ class BehaviorController:
 
     async def _handle_unknown(self, body: dict, result, stored_msg=None) -> dict:
         """未知类型行为记录。"""
-        logger.warning("Unknown node_type in behavior controller: {}", result.node_type)
+        node_type = getattr(result, "node_type", None) if result else None
+        logger.warning("Unknown node_type in behavior controller: {}", node_type)
         return {"status": "ok", "routed_to": "unknown"}

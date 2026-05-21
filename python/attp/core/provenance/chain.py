@@ -124,6 +124,11 @@ class ChainManager:
 
         对比 Branch A 暂存的 hop 与 Branch B 到达的 hop，检测篡改。
 
+        注意：Step 2 要求两条 BackMessage 的 Signature 字段**字节级相同**，
+        即发送方和接收方的 BackMessage 必须携带同一条 recorded_hop.sig_content。
+        由于 ECDSA 每次签名产生不同输出，客户端不能分别调用 sign_content()，
+        而必须在构造原始消息时签名一次，两条 BackMessage 共享同一个签名。
+
         Args:
             stored_hop: Branch A 暂存的 hop dict。
             prev_hop: Branch B 到达的 hop dict（从 BackMessage.recorded_hop 构造）。
