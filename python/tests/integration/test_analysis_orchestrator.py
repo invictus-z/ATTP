@@ -199,7 +199,7 @@ class TestIntentExtraction:
         self, real_orchestrator, real_session_manager, real_tracer,
     ):
         sid = make_session_id()
-        real_session_manager.get_or_create(sid)
+        await real_session_manager.get_or_create(sid)
 
         await real_orchestrator.on_field_U2A_recorded(
             sid, "帮我预订明天从北京到上海的机票"
@@ -215,7 +215,7 @@ class TestIntentExtraction:
         self, real_orchestrator, real_session_manager, real_tracer,
     ):
         sid = make_session_id()
-        real_session_manager.get_or_create(sid)
+        await real_session_manager.get_or_create(sid)
 
         await real_orchestrator.on_field_U2A_recorded(sid, "查询天气")
         session1 = real_session_manager.get(sid)
@@ -386,7 +386,7 @@ class TestStatePersistence:
         self, real_orchestrator, real_session_manager, real_tracer,
     ):
         sid = make_session_id()
-        real_session_manager.get_or_create(sid)
+        await real_session_manager.get_or_create(sid)
 
         await real_orchestrator.on_field_U2A_recorded(sid, "帮我订一张火车票")
         await asyncio.sleep(3)
@@ -403,7 +403,7 @@ class TestStatePersistence:
         self, real_orchestrator, real_session_manager, real_tracer,
     ):
         sid = make_session_id()
-        real_session_manager.get_or_create(sid)
+        await real_session_manager.get_or_create(sid)
 
         await real_orchestrator.on_field_U2A_recorded(sid, "搜索新闻")
         await asyncio.sleep(3)

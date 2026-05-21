@@ -84,7 +84,7 @@ class AnalysisOrchestrator:
         """Restore analysis state from SQLite into Session (only if Session has no state)."""
         if session_id in self._restored_sessions:
             return
-        session = self._session_manager.get_or_create(session_id)
+        session = await self._session_manager.get_or_create(session_id)
         if session.get_analysis_state()["last_trace_id"] != 0:
             return
         saved = await self._tracer.load_analysis_session(session_id)
@@ -99,7 +99,7 @@ class AnalysisOrchestrator:
         )
         for _ in range(saved["report_count"]):
             session.increment_report_count()
-        self._session_manager.save(session)
+        await self._session_manager.save(session)
         self._restored_sessions.add(session_id)
         logger.info("Restored analysis state for session={} from SQLite", session_id)
 
@@ -114,7 +114,7 @@ class AnalysisOrchestrator:
         Caches content for retry on subsequent triggers if extraction fails.
         """
         await self._restore_state(session_id)
-        session = self._session_manager.get_or_create(session_id)
+        session = await self._session_manager.get_or_create(session_id)
 
         session.set_metadata("_pending_intent_content", content)
 
@@ -125,7 +125,7 @@ class AnalysisOrchestrator:
         if intent:
             session.set_intent(intent.to_dict())
             session.set_metadata("_intent_retry_count", None)
-            self._session_manager.save(session)
+            await self._session_manager.save(session)
             await self._persist_state(session_id)
             logger.info("Intent extracted for session={}", session_id)
         else:
@@ -141,9 +141,9 @@ class AnalysisOrchestrator:
         """
         async with self._get_lock(session_id):
             await self._restore_state(session_id)
-            session = self._session_manager.get_or_create(session_id)
+            session = await self._session_manager.get_or_create(session_id)
             count = session.increment_report_count()
-            self._session_manager.save(session)
+            await self._session_manager.save(session)
             await self._persist_state(session_id)
 
             if count >= self._batch_size:
@@ -164,7 +164,7 @@ class AnalysisOrchestrator:
 
         Recovers unchecked traces, calls LLM, and updates state.
         """
-        session = self._session_manager.get_or_create(session_id)
+        session = await self._session_manager.get_or_create(session_id)
         state = session.get_analysis_state()
         intent_data = state.get("intent")
 
@@ -173,7 +173,7 @@ class AnalysisOrchestrator:
             pending_content = session.get_metadata("_pending_intent_content")
             if pending_content and retry_count < 3:
                 session.set_metadata("_intent_retry_count", retry_count + 1)
-                self._session_manager.save(session)
+                await self._session_manager.save(session)
                 logger.info(
                     "Retrying intent extraction ({}/3) for session={}",
                     retry_count + 1, session_id,
@@ -182,7 +182,7 @@ class AnalysisOrchestrator:
                 if intent:
                     session.set_intent(intent.to_dict())
                     session.set_metadata("_intent_retry_count", None)
-                    self._session_manager.save(session)
+                    await self._session_manager.save(session)
                     await self._persist_state(session_id)
                     intent_data = session.get_intent()
                 else:
@@ -203,7 +203,7 @@ class AnalysisOrchestrator:
 
         if not traces:
             session.reset_report_count()
-            self._session_manager.save(session)
+            await self._session_manager.save(session)
             await self._persist_state(session_id)
             return AnalysisResult(triggered=False, reason="no_unanalyzed_traces")
 
@@ -238,7 +238,7 @@ class AnalysisOrchestrator:
             last_trace_id=max_id,
             context=report.context_summary,
         )
-        self._session_manager.save(session)
+        await self._session_manager.save(session)
         await self._persist_state(session_id)
 
         # Notify user if suspicious or malicious

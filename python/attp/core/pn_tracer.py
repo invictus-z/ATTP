@@ -43,6 +43,11 @@ class ProtocolTracer:
         """Public read-only access to the internal ChainManager."""
         return self._chain
 
+    @property
+    def storage(self) -> SqliteStore:
+        """Public read-only access to the internal SqliteStore."""
+        return self._storage
+
     # -- chain verification (delegated to ChainManager) --
 
     def verify_back_propagation(

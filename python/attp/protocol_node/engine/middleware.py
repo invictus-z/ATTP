@@ -150,7 +150,7 @@ async def intercept_record(
     tracer.key_store.cache_public_key(node_did, result.public_key)
 
     # ==================== Step 3: Nonce 会话分支 ====================
-    session = session_manager.get_or_create(session_id)
+    session = await session_manager.get_or_create(session_id)
 
     # 在 nonce 查找前扫描过期消息（避免 get_pending_message 静默丢弃过期消息）
     await _sweep_expired_pending(session, malicious_detector, tracer)
@@ -191,7 +191,7 @@ async def intercept_record(
         )
         session.store_pending_message(nonce, pending)
 
-        session_manager.save(session)
+        await session_manager.save(session)
 
         return InterceptResult(
             status="stored", node_type=node_type,
@@ -210,7 +210,7 @@ async def intercept_record(
         if report:
             # 恶意节点检测到
             session.remove_pending_message(nonce)
-            session_manager.save(session)
+            await session_manager.save(session)
             await tracer.save_malicious_report(report)
             return InterceptResult(
                 status="malicious", node_type=node_type,
@@ -226,7 +226,7 @@ async def intercept_record(
         )
         if not ok:
             session.remove_pending_message(nonce)
-            session_manager.save(session)
+            await session_manager.save(session)
             return InterceptResult(
                 status="error", node_type=node_type,
                 error=f"back_propagation:{error_msg}", sender_did=node_did,
@@ -238,7 +238,7 @@ async def intercept_record(
         behavior_type = BEHAVIOR_TYPE_MAP.get((sender_type, receiver_type))
         if behavior_type is None:
             session.remove_pending_message(nonce)
-            session_manager.save(session)
+            await session_manager.save(session)
             return InterceptResult(
                 status="error", node_type=node_type,
                 error="invalid_type_combination", sender_did=node_did,
@@ -248,7 +248,7 @@ async def intercept_record(
         current_hc = recorded.hop_count
         if current_hc == [0, 0] and behavior_type != "U2A":
             session.remove_pending_message(nonce)
-            session_manager.save(session)
+            await session_manager.save(session)
             return InterceptResult(
                 status="error", node_type=node_type,
                 error="hop_zero_must_be_u2a", sender_did=node_did,
@@ -260,7 +260,7 @@ async def intercept_record(
             if behavior_type == "A2A":
                 if current_hc[0] != prev_completed_hc[0] + 1 or current_hc[1] != 0:
                     session.remove_pending_message(nonce)
-                    session_manager.save(session)
+                    await session_manager.save(session)
                     return InterceptResult(
                         status="error", node_type=node_type,
                         error="hop_count_violation_a2a", sender_did=node_did,
@@ -268,7 +268,7 @@ async def intercept_record(
             else:
                 if current_hc[0] != prev_completed_hc[0] or current_hc[1] != prev_completed_hc[1] + 1:
                     session.remove_pending_message(nonce)
-                    session_manager.save(session)
+                    await session_manager.save(session)
                     return InterceptResult(
                         status="error", node_type=node_type,
                         error="hop_count_violation_non_a2a", sender_did=node_did,
@@ -278,7 +278,7 @@ async def intercept_record(
         session.complete_verification(
             nonce, hop_count=current_hc, trusted_did=recorded.target_did,
         )
-        session_manager.save(session)
+        await session_manager.save(session)
 
         return InterceptResult(
             status="verified",

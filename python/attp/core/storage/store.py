@@ -9,6 +9,7 @@ from attp.core.storage.database import Database
 from attp.core.storage.repositories import (
     AnalysisRepository,
     MaliciousRepository,
+    ProtocolSessionRepository,
     TraceRepository,
 )
 
@@ -24,6 +25,7 @@ class SqliteStore:
         self._trace = TraceRepository(self._db)
         self._analysis = AnalysisRepository(self._db)
         self._malicious = MaliciousRepository(self._db)
+        self._session_state = ProtocolSessionRepository(self._db)
 
     @classmethod
     async def create(cls, db_path: str | Path) -> SqliteStore:
@@ -125,3 +127,11 @@ class SqliteStore:
         limit: int = 100,
     ) -> list[dict]:
         return await self._malicious.query_all_dossiers(severity_level, limit)
+
+    # -- protocol session state --
+
+    async def save_verification_state(self, session_id: str, state: dict) -> None:
+        await self._session_state.save_verification_state(session_id, state)
+
+    async def load_verification_state(self, session_id: str) -> dict | None:
+        return await self._session_state.load_verification_state(session_id)

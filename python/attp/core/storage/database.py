@@ -130,6 +130,17 @@ class Database:
                     ON malicious_nodes(malicious_did)
             ''')
 
+            # protocol_session_state — 验证状态持久化
+            await db.execute('''
+                CREATE TABLE IF NOT EXISTS protocol_session_state (
+                    session_id              TEXT PRIMARY KEY,
+                    completed_nonces_json   TEXT NOT NULL DEFAULT '[]',
+                    last_hop_count_json     TEXT DEFAULT NULL,
+                    trusted_dids_json       TEXT NOT NULL DEFAULT '[]',
+                    updated_at              REAL NOT NULL
+                )
+            ''')
+
             await db.commit()
         logger.info("Database initialized at {}", self.db_path)
 

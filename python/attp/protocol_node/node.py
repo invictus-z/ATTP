@@ -70,8 +70,8 @@ class ProtocolNode:
         db_path = cfg.get_db_path()
         self._tracer = await ProtocolTracer.create(db_path=db_path)
 
-        # 2. 创建 SessionManager
-        self._session_manager = ProtocolSessionManager()
+        # 2. 创建 SessionManager（注入 storage 以启用验证状态持久化）
+        self._session_manager = ProtocolSessionManager(storage=self._tracer.storage)
 
         # 3. 创建 DIDResolver + BehaviorController + MaliciousNodeDetector
         did_resolver = DIDResolver(
@@ -144,7 +144,7 @@ class ProtocolNode:
                         if report:
                             await self._tracer.save_malicious_report(report)
                     if expired:
-                        self._session_manager.save(session)
+                        await self._session_manager.save(session)
         except asyncio.CancelledError:
             pass
 
