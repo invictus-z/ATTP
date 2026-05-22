@@ -40,17 +40,17 @@ class SqliteStore:
         self,
         session_id: str,
         protocol_node_address: str,
-        node_did: str,
-        hop_count: list[int],
-        field_type: str,
-        content: str,
-        target: str = "",
+        sender_did: str,
+        target_did: str = "",
+        hop_count: list[int] | None = None,
+        field_type: str = "",
+        content: str = "",
         timestamp: float = 0.0,
         extra: dict[str, Any] | None = None,
     ) -> None:
         await self._trace.save_behavior_entry(
-            session_id, protocol_node_address, node_did, hop_count,
-            field_type, content, target, timestamp, extra,
+            session_id, protocol_node_address, sender_did, target_did,
+            hop_count, field_type, content, timestamp, extra,
         )
 
     async def recover_behavior_trace(

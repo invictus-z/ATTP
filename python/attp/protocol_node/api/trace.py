@@ -14,6 +14,8 @@ from attp.core.pn_tracer import ProtocolTracer
 
 logger = get_logger("Tracing")
 
+_SENDER_TYPE_MAP = {"A": "agent", "U": "user", "T": "tool"}
+
 
 def get_behavior_router(
     tracer: ProtocolTracer,
@@ -39,51 +41,34 @@ def get_behavior_router(
 
     @router.get("/behavior/{session_id}")
     async def get_behavior_trace(session_id: str, protocol_node_address: str | None = None):
-        """Return full behavior trace: entries grouped by hop_count and field_type."""
+        """Return full behavior trace as a flat chain ordered by hop_count."""
         try:
             entries = await tracer.recover_behavior_trace(session_id, protocol_node_address)
 
-            nodes: dict[tuple, dict] = {}
+            chain = []
             for row in entries:
-                hc = row["hop_count"]
-                hc_key = (hc[0], hc[1])
-                if hc_key not in nodes:
-                    nodes[hc_key] = {
-                        "hop_count": hc,
-                        "node_did": row["node_did"],
-                        "A2T": [],
-                        "A2U": [],
-                        "U2A": [],
-                        "A2A": [],
-                        "T2A": [],
-                    }
                 ft = row["field_type"]
-                base_ft = ft.split(":")[0]
-                parts = ft.split(":")
-                if base_ft in nodes[hc_key]:
-                    entry = {
-                        "node_did": row["node_did"],
-                        "content": row.get("content", ""),
-                        "target": row.get("target", ""),
-                        "timestamp": row.get("timestamp"),
-                    }
-                    if len(parts) >= 2:
-                        entry["verification_status"] = parts[1]
-                    if len(parts) >= 3:
-                        entry["node_type"] = parts[2]
-                    nodes[hc_key][base_ft].append(entry)
+                chain.append({
+                    "hop_count": row["hop_count"],
+                    "field_type": ft,
+                    "sender_type": _SENDER_TYPE_MAP.get(ft[0], "unknown"),
+                    "sender_did": row["sender_did"],
+                    "target_did": row.get("target_did", ""),
+                    "content": row.get("content", ""),
+                    "timestamp": row.get("timestamp"),
+                })
 
             return {
                 "session_id": session_id,
                 "protocol_node_address": protocol_node_address,
-                "nodes": sorted(nodes.values(), key=lambda n: (n["hop_count"][0], n["hop_count"][1])),
+                "chain": chain,
             }
         except Exception as e:
             logger.error("Error recovering behavior trace for {}: {}", session_id, e)
             return {
                 "session_id": session_id,
                 "protocol_node_address": protocol_node_address,
-                "nodes": [],
+                "chain": [],
             }
 
     @router.get("/analysis/{session_id}")
@@ -171,38 +156,20 @@ def get_behavior_router(
             logger.error("Error recovering reports for aggregate {}: {}", session_id, e)
             report_rows = []
 
-        # 3. Group traces by hop_count (include DB id for evidence linking)
-        nodes: dict[tuple, dict] = {}
+        # 3. Build flat trace chain (include DB id for evidence linking)
+        chain = []
         for row in trace_entries:
-            hc = row["hop_count"]
-            hc_key = (hc[0], hc[1])
-            if hc_key not in nodes:
-                nodes[hc_key] = {
-                    "hop_count": hc,
-                    "node_did": row["node_did"],
-                    "A2T": [],
-                    "A2U": [],
-                    "U2A": [],
-                    "A2A": [],
-                    "T2A": [],
-                }
             ft = row["field_type"]
-            base_ft = ft.split(":")[0]
-            parts = ft.split(":")
-            if base_ft in nodes[hc_key]:
-                entry = {
-                    "id": row.get("id"),
-                    "node_did": row["node_did"],
-                    "content": row.get("content", ""),
-                    "target": row.get("target", ""),
-                    "timestamp": row.get("timestamp"),
-                }
-                if len(parts) >= 2:
-                    entry["verification_status"] = parts[1]
-                if len(parts) >= 3:
-                    entry["node_type"] = parts[2]
-                nodes[hc_key][base_ft].append(entry)
-        grouped_traces = sorted(nodes.values(), key=lambda n: (n["hop_count"][0], n["hop_count"][1]))
+            chain.append({
+                "id": row.get("id"),
+                "hop_count": row["hop_count"],
+                "field_type": ft,
+                "sender_type": _SENDER_TYPE_MAP.get(ft[0], "unknown"),
+                "sender_did": row["sender_did"],
+                "target_did": row.get("target_did", ""),
+                "content": row.get("content", ""),
+                "timestamp": row.get("timestamp"),
+            })
 
         # 4. Parse reports and extract alerts
         parsed_reports = []
@@ -250,7 +217,7 @@ def get_behavior_router(
             "session_id": session_id,
             "intent": intent,
             "traces": {
-                "nodes": grouped_traces,
+                "chain": chain,
                 "total_entries": len(trace_entries),
             },
             "reports": parsed_reports,

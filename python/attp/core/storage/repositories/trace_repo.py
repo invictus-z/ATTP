@@ -18,11 +18,11 @@ class TraceRepository(BaseRepository):
         self,
         session_id: str,
         protocol_node_address: str,
-        node_did: str,
-        hop_count: list[int],
-        field_type: str,
-        content: str,
-        target: str = "",
+        sender_did: str,
+        target_did: str = "",
+        hop_count: list[int] | None = None,
+        field_type: str = "",
+        content: str = "",
         timestamp: float = 0.0,
         extra: dict[str, Any] | None = None,
     ) -> None:
@@ -32,12 +32,12 @@ class TraceRepository(BaseRepository):
                (session_id, protocol_node_address, node_did, hop_count_a2a,
                 hop_count_intra, field_type, content, target, timestamp, extra)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (session_id, protocol_node_address, node_did, hop_count[0],
-             hop_count[1], field_type, content, target, timestamp, extra_json),
+            (session_id, protocol_node_address, sender_did, hop_count[0],
+             hop_count[1], field_type, content, target_did, timestamp, extra_json),
         )
         logger.debug(
-            "Saved behavior entry: session={}, node={}, hop={}, field={}, target={}",
-            session_id, node_did, hop_count, field_type, target,
+            "Saved behavior entry: session={}, sender={}, hop={}, field={}, target={}",
+            session_id, sender_did, hop_count, field_type, target_did,
         )
 
     async def recover_behavior_trace(
@@ -62,6 +62,8 @@ class TraceRepository(BaseRepository):
         result = []
         for row in rows:
             row["hop_count"] = [row.pop("hop_count_a2a", 0), row.pop("hop_count_intra", 0)]
+            row["sender_did"] = row.pop("node_did", "")
+            row["target_did"] = row.pop("target", "")
             result.append(row)
         logger.debug(
             "Recovered behavior trace: session={}, pna={}, count={}",
@@ -82,5 +84,7 @@ class TraceRepository(BaseRepository):
         )
         for row in result:
             row["hop_count"] = [row.pop("hop_count_a2a", 0), row.pop("hop_count_intra", 0)]
+            row["sender_did"] = row.pop("node_did", "")
+            row["target_did"] = row.pop("target", "")
         max_id = result[-1]["id"] if result else since_id
         return result, max_id

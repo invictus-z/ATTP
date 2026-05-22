@@ -112,11 +112,11 @@ def get_record_router(
             await tracer.save_behavior_entry(
                 session_id=session_id,
                 protocol_node_address=pna,
-                node_did=stored.sender_did,
+                sender_did=stored.sender_did,
+                target_did=stored.hop.get("target_did", ""),
                 hop_count=stored.hop.get("Hop_Count", [0, 0]),
                 field_type=behavior_type,
                 content=stored.hop.get("Content", ""),
-                target=stored.hop.get("target_did", ""),
                 timestamp=stored.hop.get("Timestamp", 0),
             )
             logger.info(
