@@ -24,7 +24,7 @@ export class RecordedHop {
   targetDid: string;
   content: string;
   timestamp: number;
-  hopCount: number;
+  hopCount: number[];
   sigContent: string;
 
   constructor(data: {
@@ -33,7 +33,7 @@ export class RecordedHop {
     targetDid: string;
     content: string;
     timestamp: number;
-    hopCount: number;
+    hopCount: number[];
     sigContent?: string;
   }) {
     this.sessionId = data.sessionId;
@@ -86,7 +86,7 @@ export class RecordedHop {
       targetDid: data['target_did'] as string,
       content: data['content'] as string,
       timestamp: data['timestamp'] as number,
-      hopCount: data['hop_count'] as number,
+      hopCount: data['hop_count'] as number[],
       sigContent: (data['sig_content'] as string) ?? '',
     });
   }

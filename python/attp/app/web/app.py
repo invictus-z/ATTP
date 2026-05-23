@@ -76,61 +76,48 @@ class WebApp():
                     try:
                         message_data = json.loads(data)
 
-                        
-                        # -----------------都是待删除的遗留代码，需要保证和nodemessage格式一致
-                        content = message_data.get("content", "")
-                        msg_type = message_data.get("type", "chat")
-                        # 兼容前端可能使用的小写，但内部统一使用大写 Session_ID
-                        session_id = message_data.get("Session_ID") or message_data.get("session_id", "home")
+                        # === 统一 NodeMessage 格式 ===
+                        # 前端直接发送 NodeMessage.to_dict() 的 JSON
+                        try:
+                            node_msg = NodeMessage.from_dict(message_data)
+                        except (KeyError, TypeError):
+                            logger.warning("Received non-NodeMessage JSON over WebSocket")
+                            continue
 
-                        # 提取 Protocol_Node_Address 并写入 Session
-                        protocol_node_addr = message_data.get("Protocol_Node_Address")
+                        session_id = node_msg.recorded_hop.session_id
+                        content = node_msg.recorded_hop.content
 
-                        # Detect session transition
-                        if msg_type == "chat" and self._active_session_id and session_id != self._active_session_id:
-                            pass  # session lifecycle managed by protocol node
+                        self._active_session_id = session_id
 
-                        if msg_type == "chat" and content:
-                            self._active_session_id = session_id
-
-                            
-                            if protocol_node_addr and self._session_manager:
-                                session = self._session_manager.get_or_create(session_id)
-                                session.set_metadata("Protocol_Node_Address", protocol_node_addr)
-                                self._session_manager.save(session)
-                        # 待删除-------------------------------------
-                            # === U2A 回传：提取 NodeMessage，回传协议节点 ===
-                            node_msg_data = message_data.get("NodeMessage")
-                            if node_msg_data and self._tracer and self._private_key_path and self._agent_did:
-                                try:
-                                    node_msg = NodeMessage.from_dict(node_msg_data)
-                                    # Store trace metadata into session
-                                    if self._session_manager:
-                                        session = self._session_manager.get_or_create(session_id)
-                                        session.set_trace_metadata({
-                                            "recorded_hop": node_msg.recorded_hop.to_dict(),
-                                            "protocol_url": node_msg.protocol_url,
-                                        })
-                                        self._session_manager.save(session)
-                                    # 回传
-                                    private_key = self._tracer.load_private_key(self._private_key_path)
-                                    await send_back_message(
-                                        protocol_url=node_msg.protocol_url,
-                                        node_did=self._agent_did,
-                                        nonce=node_msg.nonce,
-                                        recorded_hop=node_msg.recorded_hop,
-                                        private_key=private_key,
-                                    )
-                                except Exception as e:
-                                    logger.warning("U2A Phase 1 callback failed: {}", e)
-
-                            if self._channel_callback:
-                                await self._channel_callback(
-                                    sender="user",
-                                    chat_id=session_id,
-                                    content=content,
-                                    media=[],
+                        # === U2A Phase 1 回传：回传协议节点 ===
+                        if self._tracer and self._private_key_path and self._agent_did:
+                            try:
+                                if self._session_manager:
+                                    session = self._session_manager.get_or_create(session_id)
+                                    session.set_trace_metadata({
+                                        "recorded_hop": node_msg.recorded_hop.to_dict(),
+                                        "protocol_url": node_msg.protocol_url,
+                                    })
+                                    self._session_manager.save(session)
+                                private_key = self._tracer.load_private_key(self._private_key_path)
+                                await send_back_message(
+                                    protocol_url=node_msg.protocol_url,
+                                    node_did=self._agent_did,
+                                    nonce=node_msg.nonce,
+                                    recorded_hop=node_msg.recorded_hop,
+                                    private_key=private_key,
                                 )
+                            except Exception as e:
+                                logger.warning("U2A Phase 1 callback failed: {}", e)
+
+                        # 路由到 nanobot 处理
+                        if self._channel_callback:
+                            await self._channel_callback(
+                                sender="user",
+                                chat_id=session_id,
+                                content=content,
+                                media=[],
+                            )
                     except json.JSONDecodeError:
                         logger.warning("Received invalid JSON over WebSocket")
             except WebSocketDisconnect:
@@ -205,6 +192,84 @@ class WebApp():
 
             logger.info("Frontend static files mounted from {}", static_dir)
 
+    async def send_message_to_user(self, content: str, session_id: str) -> None:
+        """构建 A2U NodeMessage 并发送给 User。
+
+        完整流程：
+          1. 从 session trace 获取协议节点 URL 和上一跳信息
+          2. 构建 A2U RecordedHop（Agent → User）
+          3. 回传协议节点（BackMessage）
+          4. 更新 session trace
+          5. 通过 WS 发送 NodeMessage 给 User
+        """
+        logger.warning("[DEBUG-DUP] send_message_to_user called: session={}, content_len={}, ws_clients={}",
+                       session_id, len(content), len(self._clients))
+        try:
+            session = self._session_manager.get(session_id) if self._session_manager else None
+            trace = session.get_trace_metadata() if session else None
+
+            if trace and self._tracer and self._private_key_path and self._agent_did:
+                protocol_url = trace.get("protocol_url", "")
+                prev_hop_dict = trace.get("recorded_hop", {})
+                user_did = prev_hop_dict.get("sender_did", "")
+
+                if protocol_url and user_did:
+                    hop_metadata = self._tracer.append_hop(
+                        metadata=dict(trace),
+                        content=content,
+                        node_did=self._agent_did,
+                        target_did=user_did,
+                        private_key_path=self._private_key_path,
+                        behavior_type="A2U",
+                    )
+                    hop = hop_metadata.get("recorded_hop")
+                    if hop:
+                        recorded = RecordedHop.from_dict(hop)
+                        nonce = uuid.uuid4().hex
+                        node_msg = NodeMessage(
+                            protocol_url=protocol_url,
+                            nonce=nonce,
+                            recorded_hop=recorded,
+                        )
+                        # 时序规则：先回传协议节点
+                        private_key = self._tracer.load_private_key(self._private_key_path)
+                        await send_back_message(
+                            protocol_url=protocol_url,
+                            node_did=self._agent_did,
+                            nonce=nonce,
+                            recorded_hop=recorded,
+                            private_key=private_key,
+                        )
+                        # 更新 session trace
+                        if session:
+                            session.set_trace_metadata({
+                                "recorded_hop": hop,
+                                "protocol_url": protocol_url,
+                            })
+                            self._session_manager.save(session)
+
+                        # 序列化 NodeMessage 并 WS 发送
+                        data_str = json.dumps(node_msg.to_dict())
+                        disconnected = []
+                        for client in self._clients:
+                            try:
+                                await client.send_text(data_str)
+                            except Exception as e:
+                                logger.error("Failed to send to client: {}", e)
+                                disconnected.append(client)
+                        for client in disconnected:
+                            if client in self._clients:
+                                self._clients.remove(client)
+                        return
+
+            # 无 trace 信息时降级
+            logger.warning("send_message_to_user: no trace metadata for session={}", session_id)
+        except Exception as e:
+            logger.error("send_message_to_user: A2U NodeMessage 构建失败: {}", e)
+
+        # 降级：无法构建 NodeMessage，消息被丢弃
+        logger.warning("send_message_to_user: fallback — message dropped for session={}", session_id)
+
     async def record_message(self, content: str, metadata: dict | None = None) -> None:
         """Directly send message to UI via WebSocket.
 
@@ -212,6 +277,7 @@ class WebApp():
         metadata), performs A2U back-propagation: builds RecordedHop, sends
         BackMessage to protocol node, and includes NodeMessage in the payload.
         """
+        return  # 已被 send_message_to_user 替代
         metadata = metadata or {}
         session_id = metadata.get("Session_ID")
 

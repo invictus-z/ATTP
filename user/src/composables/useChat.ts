@@ -3,6 +3,7 @@ import { renderMarkdown } from '../markdown'
 import { getActiveAgent, getActiveAgentId, getAgentById, getAgents, wsUrl, wsUrlForAgent, apiUrl, onAgentSwitch, updateAgentStatus } from '../agent_manager'
 import { createWs, onWsMessage, onWsOpen, onWsClose, onWsError, apiFetch, type WsConnection } from '../transport'
 import { useAttpProtocol, bindSessionProtocolUrl } from './useAttpProtocol'
+import { NodeMessage } from '@attp/core'
 
 export interface ChatMessage {
   role: 'user' | 'agent'
@@ -360,82 +361,75 @@ export function useChat() {
 
   /** Build the WS message handler for a specific agent */
   const createMessageHandler = (agentId: string) => {
-    return (data: any) => {
+    return (rawData: any) => {
       try {
+        // 解析 WS 数据
+        let data = rawData
         if (typeof data === 'string') {
-          try { data = JSON.parse(data) } catch {}
+          try { data = JSON.parse(data) } catch { return }
         }
+
         const agent = getAgentById(agentId)
         if (!agent) return
 
-        if (data && data.type === 'chat' && data.content) {
-          const isNodeMsg = data.metadata && data.metadata.is_node_message
-          let senderName = agent.name
-          let rtLogSenderName = agent.name
-          if (data.metadata && data.metadata.is_node_message) {
-            let nodeName = data.metadata.other_did || 'Node'
-            if (nodeName !== 'Node') { const parts = nodeName.split(':'); nodeName = parts[parts.length - 1] || nodeName }
-            senderName = nodeName
-            rtLogSenderName = data.metadata.direction === 'in'
-              ? `${nodeName} -> ${agent.name}`
-              : `${agent.name} -> ${nodeName}`
-          }
-
-          const activeAgentId = getActiveAgentId()
-          let targetSessionId: string | null = null
-
-          // Get the current session for this specific agent
-          if (agentId === activeAgentId) {
-            targetSessionId = currentSessionId.value
-          } else {
-            targetSessionId = agentCurrentSessionMap.get(agentId) || null
-          }
-
-          if (data.metadata && data.metadata.Session_ID) targetSessionId = data.metadata.Session_ID
-          else if (data.Session_ID || data.session_id) targetSessionId = data.Session_ID || data.session_id
-
-          if (targetSessionId) {
-            // Handle rtLogs for the correct agent
-            if (agentId === activeAgentId) {
-              let sess = sessions.value.find(s => s.id === targetSessionId)
-              if (!sess) {
-                sess = { id: targetSessionId, title: `Message from ${senderName}`, messages: [], rtLogs: [], nodeHistories: {}, updatedAt: Date.now(), isUnread: false, unreadCount: 0, senderName }
-                sessions.value.unshift(sess)
-              }
-              if (!sess.senderName && senderName) {
-                if (senderName !== agent.name) sess.senderName = senderName
-              }
-              if (!sess.rtLogs) sess.rtLogs = []
-              const safeText = data.content.slice(0, 50).replace(/\n/g, ' ')
-              sess.rtLogs.push({ senderName: rtLogSenderName, text: safeText })
-              saveSessions()
-            } else {
-              const agentSessions = getSessionsForAgent(agentId)
-              let sess = agentSessions.find(s => s.id === targetSessionId)
-              if (!sess) {
-                sess = { id: targetSessionId, title: `Message from ${senderName}`, messages: [], rtLogs: [], nodeHistories: {}, updatedAt: Date.now(), isUnread: false, unreadCount: 0, senderName }
-                agentSessions.unshift(sess)
-              }
-              if (!sess.rtLogs) sess.rtLogs = []
-              const safeText = data.content.slice(0, 50).replace(/\n/g, ' ')
-              sess.rtLogs.push({ senderName: rtLogSenderName, text: safeText })
-              saveSessionsForAgent(agentId, agentSessions)
+        // === 统一 NodeMessage 格式 ===
+        // WS 收到的消息直接是 NodeMessage dict
+        let nodeMsg: NodeMessage | null = null
+        try {
+          nodeMsg = NodeMessage.fromDict(data)
+        } catch {
+          // 兼容旧格式（type: chat）
+          if (data && data.type === 'chat' && data.content) {
+            const sessionId = data.metadata?.Session_ID || data.Session_ID || data.session_id || null
+            if (sessionId) {
+              addMessageToAgentSession(agentId, sessionId, 'agent', data.content, agent.name)
             }
+            handleReceivedNodeMessage(data)
           }
-
-          if (isNodeMsg) {
-            let targetNode = data.metadata.other_did || data.session_id
-            if (targetNode && targetNode.startsWith('LocalBroker:')) targetNode = targetNode.substring(12)
-            const direction = data.metadata ? data.metadata.direction : 'in'
-            const nodeRole = direction === 'out' ? 'user' : 'agent'
-            addNodeMessageForAgent(agentId, targetSessionId || '', targetNode, nodeRole, data.content)
-          } else {
-            if (targetSessionId) addMessageToAgentSession(agentId, targetSessionId, 'agent', data.content, senderName)
-          }
-
-          // ATTP: 异步检测收到的 NodeMessage 并回传 BackMessage（fire-and-forget，不阻塞渲染）
-          handleReceivedNodeMessage(data)
+          return
         }
+
+        // 从 NodeMessage 中提取信息
+        const hop = nodeMsg.recordedHop
+        const content = hop.content
+        const sessionId = hop.sessionId
+        const senderDid = hop.senderDid
+
+        // 假设收到的都是 A2U 消息（Agent → User 回复）
+        const activeAgentId = getActiveAgentId()
+
+        // 添加到聊天会话
+        addMessageToAgentSession(agentId, sessionId, 'agent', content, agent.name)
+
+        // rtLog
+        const rtLogSenderName = senderDid
+          ? `${senderDid.split(':').pop()} → User`
+          : agent.name
+        const safeText = content.slice(0, 50).replace(/\n/g, ' ')
+
+        if (agentId === activeAgentId) {
+          let sess = sessions.value.find(s => s.id === sessionId)
+          if (!sess) {
+            sess = { id: sessionId, title: `Message from ${agent.name}`, messages: [], rtLogs: [], nodeHistories: {}, updatedAt: Date.now(), isUnread: false, unreadCount: 0, senderName: agent.name }
+            sessions.value.unshift(sess)
+          }
+          if (!sess.rtLogs) sess.rtLogs = []
+          sess.rtLogs.push({ senderName: rtLogSenderName, text: safeText })
+          saveSessions()
+        } else {
+          const agentSessions = getSessionsForAgent(agentId)
+          let sess = agentSessions.find(s => s.id === sessionId)
+          if (!sess) {
+            sess = { id: sessionId, title: `Message from ${agent.name}`, messages: [], rtLogs: [], nodeHistories: {}, updatedAt: Date.now(), isUnread: false, unreadCount: 0, senderName: agent.name }
+            agentSessions.unshift(sess)
+          }
+          if (!sess.rtLogs) sess.rtLogs = []
+          sess.rtLogs.push({ senderName: rtLogSenderName, text: safeText })
+          saveSessionsForAgent(agentId, agentSessions)
+        }
+
+        // ATTP: 异步回传 BackMessage（fire-and-forget，不阻塞渲染）
+        handleReceivedNodeMessage(data)
       } catch (e) { console.error(`[WS] Message error for agent ${agentId}:`, e) }
     }
   }
@@ -618,17 +612,11 @@ export function useChat() {
 
     const attpResult = await sendMessageWithAttp(text, currentSessionId.value, targetDid)
     if (attpResult.success && attpResult.nodeMessageDict) {
-      const payload = JSON.stringify({
-        type: 'chat',
-        content: text,
-        session_id: currentSessionId.value,
-        NodeMessage: attpResult.nodeMessageDict,
-      })
-      console.log('[ATTP] sendMessage: WS 发送带 NodeMessage 的消息 ✓')
-      conn.send(payload)
+      // 直接发送纯 NodeMessage dict（不再包装 type/content/session_id）
+      conn.send(JSON.stringify(attpResult.nodeMessageDict))
+      console.log('[ATTP] sendMessage: WS 发送 NodeMessage ✓')
     } else {
       console.error('[ATTP] sendMessage BLOCKED: NodeMessage 构造失败 —', attpResult.error)
-      // 不发送！ATTP-only 模式下拒绝裸 JSON
     }
 
     chatInput.value = ''

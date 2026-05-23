@@ -158,26 +158,27 @@ async function loadPrivateKey(): Promise<SignableKey | null> {
 // ---- ATTP Received Message Handling ----
 
 /**
- * 处理收到的包含 NodeMessage 的 Agent 响应。
+ * 处理收到的 NodeMessage（Agent → User 回复）。
  *
- * 收到 Agent 消息时的 ATTP 回传流程：
- *   1. 解析 Agent 返回的 NodeMessage（含 nonce, protocolUrl, recordedHop）
+ * WS 消息现在直接是 NodeMessage dict，无需额外解析。
+ * ATTP 回传流程：
+ *   1. 从 NodeMessage 提取 nonce, protocolUrl, recordedHop
  *   2. 构造 BackMessage（userDid + nonce + recordedHop）
  *   3. 签名 identityHash(nodeDid, nonce) → sigIdentity
  *   4. HTTP POST 到 {protocolUrl}/record
  *
- * @param incomingData WS 收到的原始数据（可能含 NodeMessage 字段）
- * @returns 是否检测到 NodeMessage 并触发了回传
+ * @param incomingData WS 收到的原始数据（直接是 NodeMessage dict）
+ * @returns 是否成功解析 NodeMessage 并触发了回传
  */
 async function handleReceivedNodeMessage(incomingData: any): Promise<boolean> {
-  console.log('[ATTP] handleReceivedNodeMessage: 收到 WS 消息，检测 NodeMessage...')
+  console.log('[ATTP] handleReceivedNodeMessage: 解析收到的 NodeMessage...')
   const nodeMessage = parseIncomingNodeMessage(incomingData)
   if (!nodeMessage) {
-    console.log('[ATTP] handleReceivedNodeMessage: 未检测到 NodeMessage，跳过（非 ATTP 消息或 Agent 未包裹）')
+    console.log('[ATTP] handleReceivedNodeMessage: 解析 NodeMessage 失败，跳过')
     return false
   }
 
-  console.log(`[ATTP] handleReceivedNodeMessage: 检测到 NodeMessage ✓ protocolUrl=${nodeMessage.protocolUrl}, nonce=${nodeMessage.nonce}`)
+  console.log(`[ATTP] handleReceivedNodeMessage: 解析成功 ✓ protocolUrl=${nodeMessage.protocolUrl}, nonce=${nodeMessage.nonce}`)
 
   if (!userConfig.did) {
     console.warn('[ATTP] handleReceivedNodeMessage: User DID 未配置，跳过回传')

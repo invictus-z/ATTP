@@ -92,7 +92,7 @@ export async function buildNodeMessage(
     targetDid,
     content,
     timestamp: Date.now(),
-    hopCount: 0,
+    hopCount: [0, 0],
   });
 
   // 签名 content hash（支持 CryptoKey 和 secp256k1）
@@ -183,29 +183,14 @@ export async function sendBackMessage(params: SendBackMessageParams): Promise<bo
 // ---- 解析收到的 ATTP 消息 ----
 
 /**
- * 从 WS 收到的消息中解析 NodeMessage（如果存在）。
+ * 从 WS 收到的消息中解析 NodeMessage。
  *
- * Agent 返回的消息中可能在 metadata 字段包含 NodeMessage。
+ * Agent 返回的消息现在直接是 NodeMessage dict（不再有外层包装）。
  */
 export function parseIncomingNodeMessage(data: any): NodeMessage | null {
   try {
-    let nodeMsgData: any = null;
-
-    // 尝试多种可能的字段位置
-    if (data?.NodeMessage) {
-      nodeMsgData = data.NodeMessage;
-    } else if (data?.metadata?.NodeMessage) {
-      nodeMsgData = data.metadata.NodeMessage;
-    } else if (data?.node_message) {
-      nodeMsgData = data.node_message;
-    }
-
-    if (!nodeMsgData || typeof nodeMsgData !== 'object') {
-      return null;
-    }
-
-    return NodeMessage.fromDict(nodeMsgData);
+    return NodeMessage.fromDict(data)
   } catch {
-    return null;
+    return null
   }
 }
