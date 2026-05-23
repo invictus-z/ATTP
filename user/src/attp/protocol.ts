@@ -9,27 +9,34 @@
 
 import { RecordedHop, NodeMessage, BackMessage, signHash as coreSignHash } from '@attp/core';
 import { apiFetch } from '../transport';
-import { isSecp256k1Key, type SignableKey } from './key_helper';
-import { hashes as secpHashes, signAsync as secpSignAsync } from '@noble/secp256k1';
-import { sha256 } from '@noble/hashes/sha2.js';
+import { isSecp256k1Key, isEd25519Key, type SignableKey } from './key_helper';
+import { signAsync as secpSignAsync } from '@noble/secp256k1';
+import { secp256k1 } from '@noble/curves/secp256k1.js';
+import { ed25519 as ed25519Curve } from '@noble/curves/ed25519.js';
 
-// @noble/secp256k1 v3 不内置 SHA-256，注入到 hashes.sha256
-secpHashes.sha256 = sha256;
-
-// ---- 统一签名函数（支持 CryptoKey + secp256k1） ----
+// ---- 统一签名函数（支持 CryptoKey + secp256k1 + Ed25519） ----
 
 /**
  * 使用 SignableKey 签名。
  *
  * CryptoKey → 走 Web Crypto API（@attp/core signHash）
- * Secp256k1PrivateKey → 走 @noble/secp256k1
+ * Secp256k1PrivateKey → 走 @noble/secp256k1，输出 DER 格式（兼容 Python cryptography 库）
+ * Ed25519PrivateKey → 走 @noble/ed25519，输出原始 64 字节（兼容 Python cryptography 库）
  */
 async function signWithKey(hash: string, privateKey: SignableKey): Promise<string> {
   if (isSecp256k1Key(privateKey)) {
-    // secp256k1 签名（v3）：signAsync 返回 Uint8Array（64 bytes compact）
+    // secp256k1 签名：signAsync 返回 compact (r||s, 64 bytes)
+    // Python cryptography 库期望 DER 编码，需转换
     const msgBytes = new TextEncoder().encode(hash);
     const msgHash = await crypto.subtle.digest('SHA-256', msgBytes);
     const sigBytes: Uint8Array = await secpSignAsync(new Uint8Array(msgHash), privateKey.rawBytes);
+    const derSig = secp256k1.Signature.fromBytes(sigBytes).toBytes('der');
+    return arrayBufferToBase64(derSig.buffer as ArrayBuffer);
+  }
+  if (isEd25519Key(privateKey)) {
+    // Ed25519 签名：直接对 hash 字符串的字节签名（与 Python sign_hash 一致）
+    const msgBytes = new TextEncoder().encode(hash);
+    const sigBytes = ed25519Curve.sign(msgBytes, privateKey.rawBytes);
     return arrayBufferToBase64(sigBytes.buffer as ArrayBuffer);
   }
   // 标准 CryptoKey → 走 core signHash

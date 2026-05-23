@@ -5,6 +5,7 @@
  *   - RSA (RSA-PSS)
  *   - ECDSA (P-256 / P-384 / P-521) — Web Crypto API 原生
  *   - ECDSA secp256k1 — 通过 @noble/secp256k1
+ *   - Ed25519 — 通过 @noble/ed25519
  */
 
 import * as secp from '@noble/secp256k1'
@@ -22,12 +23,27 @@ export class Secp256k1PrivateKey {
   }
 }
 
+/** Ed25519 私钥包装 */
+export class Ed25519PrivateKey {
+  readonly keyType = 'ed25519' as const
+  /** 原始私钥字节（32 bytes） */
+  readonly rawBytes: Uint8Array
+
+  constructor(bytes: Uint8Array) {
+    this.rawBytes = bytes
+  }
+}
+
 /** 所有可签名密钥的联合类型 */
-export type SignableKey = CryptoKey | Secp256k1PrivateKey
+export type SignableKey = CryptoKey | Secp256k1PrivateKey | Ed25519PrivateKey
 
 /** 类型守卫 */
 export function isSecp256k1Key(key: SignableKey): key is Secp256k1PrivateKey {
   return key instanceof Secp256k1PrivateKey
+}
+
+export function isEd25519Key(key: SignableKey): key is Ed25519PrivateKey {
+  return key instanceof Ed25519PrivateKey
 }
 
 // ---- PEM 解析 ----
@@ -45,10 +61,20 @@ function pemToBuffer(pem: string): ArrayBuffer {
   return bytes.buffer;
 }
 
-type KeyType = 'RSA' | 'EC';
+type KeyType = 'RSA' | 'EC' | 'Ed25519';
 
 function detectKeyType(pem: string): KeyType {
   if (pem.includes('RSA')) return 'RSA';
+  // Ed25519 OID: 1.3.101.112 → DER: 06 03 2B 65 70
+  const buffer = pemToBuffer(pem);
+  const bytes = new Uint8Array(buffer);
+  const ed25519Oid = [0x06, 0x03, 0x2b, 0x65, 0x70];
+  outer: for (let i = 0; i <= bytes.length - ed25519Oid.length; i++) {
+    for (let j = 0; j < ed25519Oid.length; j++) {
+      if (bytes[i + j] !== ed25519Oid[j]) continue outer;
+    }
+    return 'Ed25519';
+  }
   return 'EC';
 }
 
@@ -75,6 +101,26 @@ async function isSecp256k1(buffer: ArrayBuffer): Promise<boolean> {
     }
   }
   return true; // 所有标准曲线都失败 = 可能是 secp256k1
+}
+
+/**
+ * 从 PKCS#8 DER buffer 提取 Ed25519 私钥原始字节。
+ *
+ * PKCS#8 Ed25519 结构：
+ *   SEQUENCE {
+ *     INTEGER 0
+ *     SEQUENCE { OID 1.3.101.112 }   ← Ed25519
+ *     OCTET STRING (34 bytes) {       ← 04 20 + 32字节私钥
+ *       04 20 <32 bytes raw key>
+ *     }
+ *   }
+ * 简单策略：取最后 32 字节。
+ */
+function extractEd25519RawBytes(buffer: ArrayBuffer): Uint8Array {
+  const bytes = new Uint8Array(buffer);
+  const raw = bytes.slice(-32);
+  if (raw.length === 32) return raw;
+  throw new Error('无法从 PKCS#8 提取 Ed25519 私钥字节');
 }
 
 /**
@@ -125,6 +171,12 @@ export async function importPrivateKeyFromPem(pem: string): Promise<SignableKey>
       false,
       ['sign'],
     );
+  }
+
+  if (keyType === 'Ed25519') {
+    const rawBytes = extractEd25519RawBytes(buffer);
+    console.log('[key_helper] 检测到 Ed25519 密钥，使用 @noble/ed25519');
+    return new Ed25519PrivateKey(rawBytes);
   }
 
   // EC key — try P-256, P-384, P-521 in order
