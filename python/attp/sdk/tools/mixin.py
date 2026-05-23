@@ -119,7 +119,7 @@ class ToolNodeMixin(abc.ABC):
 
         self._uvicorn_server = None
         self._serve_task = None
-        self._ad_output_path = Path(ad_output_path) if ad_output_path else Path("ad.json")
+        self._ad_output_path = Path(ad_output_path) if ad_output_path else Path.home() / ".attp" / "tools" / name / "ad.json"
 
     # ------------------------------------------------------------------
     # FastAPI 路由注册
