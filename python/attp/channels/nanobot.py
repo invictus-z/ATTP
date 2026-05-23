@@ -163,9 +163,6 @@ class ATTPChannel(BaseChannel):
 
         所有 A2U NodeMessage 构建和回传逻辑由 WebApp.send_message_to_user 内部处理。
         """
-        import traceback
-        logger.warning("[DEBUG-DUP] send() called: chat_id={}, content_len={}, stack:\n{}",
-                       msg.chat_id, len(msg.content), ''.join(traceback.format_stack()))
         await self._web_app.send_message_to_user(msg.content, msg.chat_id)
 
     async def _receive(self, sender: str, chat_id: str, content: str, media: list[str]) -> str:

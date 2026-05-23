@@ -52,7 +52,8 @@ async def send_back_message(
             ) as resp:
                 if resp.status == 200:
                     resp_data = await resp.json()
-                    if resp_data.get("status") not in ("stored", "ok"):
+                    status = resp_data.get("status", "")
+                    if "error" in resp_data or status in ("error", "rejected"):
                         logger.warning(
                             "Protocol node rejected back-propagation: {}",
                             resp_data,
@@ -60,7 +61,7 @@ async def send_back_message(
                         raise BackPropagationError(
                             f"Protocol node rejected - {resp_data.get('error', 'unknown')}"
                         )
-                    logger.debug("Back-propagation confirmed by protocol node")
+                    logger.debug("Back-propagation confirmed by protocol node: {}", status)
                 else:
                     logger.warning("Protocol node returned HTTP {}", resp.status)
                     raise BackPropagationError(

@@ -37,6 +37,8 @@ const agentWsMap = new Map<string, WsConnection>()
 const agentWsConnectedMap = new Map<string, boolean>()
 /** Agents currently in the process of connecting (prevents duplicate concurrent connections) */
 const connectingAgents = new Set<string>()
+/** WS URL → agentId mapping (prevents duplicate WS to same backend) */
+const wsUrlToAgentId = new Map<string, string>()
 
 // ---- Shared Reactive State (for active agent) ----
 
@@ -466,6 +468,27 @@ export function useChat() {
     agentWsConnectedMap.set(agentId, false)
 
     const targetUrl = wsUrlForAgent(agent, '/ws')
+
+    // === URL 去重：如果已有 agent 连接到相同 URL，复用其 WS 连接 ===
+    const existingAgentForUrl = wsUrlToAgentId.get(targetUrl)
+    if (existingAgentForUrl && existingAgentForUrl !== agentId) {
+      const existingConn = agentWsMap.get(existingAgentForUrl)
+      const existingConnected = agentWsConnectedMap.get(existingAgentForUrl)
+      if (existingConn && existingConnected) {
+        console.log(`[DEBUG-CONN][connectAgentWs] Reusing WS from agent "${existingAgentForUrl}" for same URL: ${targetUrl}`)
+        // 复用已有连接
+        agentWsMap.set(agentId, existingConn)
+        agentWsConnectedMap.set(agentId, true)
+        wsUrlToAgentId.set(targetUrl, agentId)
+        // 注册消息处理器
+        onWsMessage(existingConn, createMessageHandler(agentId))
+        updateAgentStatus(agent.id, 'active')
+        if (agentId === getActiveAgentId()) updateAgentStatusBadge('active')
+        connectingAgents.delete(agentId)
+        return
+      }
+    }
+
     updateAgentStatus(agent.id, 'connecting')
 
     // Update badge if this is the active agent
@@ -476,6 +499,7 @@ export function useChat() {
       const conn = await createWs(targetUrl)
       agentWsMap.set(agentId, conn)
       agentWsConnectedMap.set(agentId, true)
+      wsUrlToAgentId.set(targetUrl, agentId)
       updateAgentStatus(agent.id, 'active')
       if (agentId === getActiveAgentId()) updateAgentStatusBadge('active')
       console.log(`[WS] Connected to ${agent.name} (${agentId})`)
@@ -512,12 +536,41 @@ export function useChat() {
     }
   }
 
-  /** Connect all registered agents concurrently */
-  const connectAllAgents = () => {
+  /** Connect all registered agents concurrently (URL 去重) */
+  const connectAllAgents = async () => {
     const allAgents = getAgents()
+    if (allAgents.length === 0) return
+
+    // 按 WS URL 分组，每个唯一 URL 只创建一条连接
+    const urlGroups = new Map<string, string[]>() // url → agentId[]
     allAgents.forEach(agent => {
-      connectAgentWs(agent.id)
+      const url = wsUrlForAgent(agent, '/ws')
+      if (!urlGroups.has(url)) urlGroups.set(url, [])
+      urlGroups.get(url)!.push(agent.id)
     })
+
+    // 并发连接每个唯一 URL（第一个 agent 创建连接，其余复用）
+    const tasks = Array.from(urlGroups.entries()).map(async ([url, agentIds]) => {
+      // 第一个 agent 实际创建 WS 连接
+      await connectAgentWs(agentIds[0])
+
+      // 其余 agent 复用同一连接
+      const primaryConn = agentWsMap.get(agentIds[0])
+      const primaryConnected = agentWsConnectedMap.get(agentIds[0])
+      if (primaryConn && primaryConnected) {
+        for (let i = 1; i < agentIds.length; i++) {
+          const aid = agentIds[i]
+          agentWsMap.set(aid, primaryConn)
+          agentWsConnectedMap.set(aid, true)
+          onWsMessage(primaryConn, createMessageHandler(aid))
+          const agent = getAgentById(aid)
+          if (agent) updateAgentStatus(agent.id, 'active')
+          console.log(`[WS] Reusing WS for agent "${aid}" → same URL: ${url}`)
+        }
+      }
+    })
+
+    await Promise.all(tasks)
   }
 
   const connectWebSocket = async () => {
