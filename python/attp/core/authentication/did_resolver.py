@@ -209,10 +209,24 @@ def _find_verification_method(
     return None
 
 
+def _did_base_id(did: str) -> str:
+    """返回 DID 的基础标识（前4段），去除末尾的 key identifier。
+
+    did:wba:host:path:key_id → did:wba:host:path
+    did:wba:host:path        → did:wba:host:path（无变化）
+    """
+    parts = did.split(":")
+    return ":".join(parts[:4])
+
+
 def build_did_resolution_url(
     did: str, base_url_override: Optional[str] = None
 ) -> str:
-    """构建 DID 文档的 HTTP 解析 URL。"""
+    """构建 DID 文档的 HTTP 解析 URL。
+
+    DID 格式: did:wba:<domain>:<path>[:<key_identifier>]
+    第5段（key identifier）不参与 URL 路径构建。
+    """
     parts = did.split(":")
     if len(parts) < 3 or parts[0] != "did":
         raise ValueError("Invalid DID format")
@@ -222,7 +236,7 @@ def build_did_resolution_url(
         raise ValueError(f"Unsupported DID method: {method}")
 
     domain = urllib.parse.unquote(parts[2])
-    path_segments = parts[3:]
+    path_segments = parts[3:4]  # 只取第4段，忽略第5段起（key identifier）
     base_url = (base_url_override or f"http://{domain}").rstrip("/")
     if path_segments:
         encoded_path = "/".join(
@@ -270,6 +284,7 @@ class DIDResolver:
 
         # 网络解析 + 重试
         url = build_did_resolution_url(did)
+        logger.info("Resolving DID %s → %s", did, url)
         timeout = aiohttp.ClientTimeout(total=self._request_timeout)
         headers = {"Accept": "application/json"}
 
@@ -278,15 +293,21 @@ class DIDResolver:
             try:
                 async with aiohttp.ClientSession(timeout=timeout) as session:
                     async with session.get(
-                        url, headers=headers, ssl=True
+                        url, headers=headers, ssl=False
                     ) as response:
                         response.raise_for_status()
                         did_document = await response.json()
 
-                if did_document.get("id") != did:
+                doc_id = did_document.get("id", "")
+                logger.info(
+                    "DID resolved: did=%s, doc_id=%s, services=%s",
+                    did, doc_id,
+                    [s.get("type") for s in did_document.get("service", [])],
+                )
+                if doc_id != did and doc_id != _did_base_id(did) and _did_base_id(doc_id) != _did_base_id(did):
                     raise ValueError(
                         f"DID document ID mismatch. "
-                        f"Expected: {did}, got: {did_document.get('id')}"
+                        f"Expected: {did} (or base {_did_base_id(did)}), got: {doc_id}"
                     )
 
                 self._cache[did] = _CacheEntry(
@@ -367,6 +388,11 @@ class DIDResolver:
 
         # 提取节点类型
         node_type = self.extract_node_type(did_doc)
+        logger.debug(
+            "resolve_full: did=%s, public_key=%s, node_type=%s, services=%s",
+            did, type(public_key).__name__ if public_key else None,
+            node_type, [s.get("type") for s in did_doc.get("service", [])],
+        )
 
         return DIDResolutionResult(
             public_key=public_key,
