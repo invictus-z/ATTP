@@ -2,7 +2,7 @@ import { ref, reactive, computed } from 'vue'
 import { renderMarkdown } from '../markdown'
 import { getActiveAgent, getActiveAgentId, getAgentById, getAgents, wsUrl, wsUrlForAgent, apiUrl, onAgentSwitch, updateAgentStatus } from '../agent_manager'
 import { createWs, onWsMessage, onWsOpen, onWsClose, onWsError, apiFetch, type WsConnection } from '../transport'
-import { useAttpProtocol, bindSessionProtocolUrl } from './useAttpProtocol'
+import { useAttpProtocol, bindSessionProtocolUrl, getSessionProtocolUrl } from './useAttpProtocol'
 
 export interface ChatMessage {
   role: 'user' | 'agent'
@@ -42,6 +42,8 @@ const connectingAgents = new Set<string>()
 const sessions = ref<ChatSession[]>([])
 const currentSessionId = ref<string | null>(null)
 const agentStatus = ref<'active' | 'offline' | 'connecting'>('offline')
+/** 标记当前 session 需要绑定溯源节点（UI 层可 watch 此值自动弹出选择弹窗） */
+export const needsProtocolBinding = ref(false)
 let agentSwitchRegistered = false
 
 // ---- Per-Agent Session Helpers ----
@@ -108,7 +110,8 @@ export function useChat() {
 
   const { userConfig: attpUserConfig } = useAttpProtocol()
 
-  const createSession = (initialTitle: string) => {
+  /** 创建新会话，可选传入溯源节点 URL 进行绑定（不传则留空，等待用户选择） */
+  const createSession = (initialTitle: string, protocolUrl?: string) => {
     const newSession: ChatSession = {
       id: 'sess_' + Date.now().toString(),
       title: initialTitle,
@@ -120,11 +123,13 @@ export function useChat() {
     sessions.value.unshift(newSession)
     currentSessionId.value = newSession.id
 
-    // 自动绑定当前全局 protocol URL 到新 session
-    if (attpUserConfig.protocolNodes.length > 0) {
-      bindSessionProtocolUrl(newSession.id, attpUserConfig.protocolNodes[0].url)
+    // 仅在调用方显式传入 protocolUrl 时绑定，否则留空等待用户选择
+    if (protocolUrl) {
+      bindSessionProtocolUrl(newSession.id, protocolUrl)
+      needsProtocolBinding.value = false
     } else {
-      console.warn('[ATTP] createSession: 无可用的 Protocol Node URL，session 未绑定协议节点')
+      console.log('[ATTP] createSession: 未传入 protocolUrl，session 等待用户选择溯源节点')
+      needsProtocolBinding.value = true
     }
 
     saveSessions()
@@ -581,8 +586,15 @@ export function useChat() {
       if (!currentSessionId.value || !sessions.value.find(s => s.id === currentSessionId.value)) {
         currentSessionId.value = sessions.value[0].id
       }
+      // 检查当前 session 是否已绑定溯源节点
+      if (currentSessionId.value && !getSessionProtocolUrl(currentSessionId.value)) {
+        needsProtocolBinding.value = true
+      } else {
+        needsProtocolBinding.value = false
+      }
     } else {
-      createSession('New Chat')
+      // 不自动创建 session，由 UI 层引导用户选择溯源节点后再创建
+      needsProtocolBinding.value = false
     }
   }
 
@@ -591,6 +603,15 @@ export function useChat() {
   const sendMessage = async () => {
     const text = chatInput.value.trim()
     if (!text || !currentSessionId.value) return
+
+    // 校验：当前 session 必须已绑定溯源节点
+    const boundProtocol = getSessionProtocolUrl(currentSessionId.value)
+    if (!boundProtocol) {
+      console.warn('[ATTP] sendMessage BLOCKED: 当前会话未绑定溯源节点')
+      needsProtocolBinding.value = true
+      return
+    }
+
     const agentId = getActiveAgentId()
     addMessageToSession(currentSessionId.value, 'user', text)
 
@@ -717,6 +738,7 @@ export function useChat() {
     searchQuery,
     totalUnread,
     filteredSessions,
+    needsProtocolBinding,
     initAgentContext,
     createSession,
     loadSession,

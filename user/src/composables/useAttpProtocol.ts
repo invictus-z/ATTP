@@ -49,11 +49,10 @@ export function bindSessionProtocolUrl(sessionId: string, protocolUrl: string) {
   attpSessionManager.saveToStorage()
 }
 
-/** 获取 session 绑定的 protocol URL，若无则 fallback 到全局配置的第一个 */
+/** 获取 session 绑定的 protocol URL，仅返回 session 级别绑定 */
 export function getSessionProtocolUrl(sessionId: string): string | null {
   const session = attpSessionManager.get(sessionId)
-  if (session?.protocolNodeAddress) return session.protocolNodeAddress
-  return userConfig.protocolNodes.length > 0 ? userConfig.protocolNodes[0].url : null
+  return session?.protocolNodeAddress || null
 }
 
 /** 清除 session 的 protocol 绑定 */
