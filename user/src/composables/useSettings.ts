@@ -25,11 +25,16 @@ export interface AttpConfig {
   tool: {
     host: string
     port: number
+    toolNodeAds: string[]
   }
   heartbeat: {
     interval: number
     timeout: number
     maxFail: number
+  }
+  protocolNode: {
+    enabled: boolean
+    configPath: string
   }
 }
 
@@ -40,8 +45,9 @@ const config = reactive<AttpConfig>({
   attpClient: { didDocPath: '', didKeyPath: '', nodeAds: [] },
   attpServer: { name: '', prefix: '', description: '', serverHost: '', serverPort: 0, privateKeyPath: '', publicKeyPath: '' },
   webApp: { host: '', port: 0 },
-  tool: { host: '', port: 0 },
+  tool: { host: '', port: 0, toolNodeAds: [] },
   heartbeat: { interval: 0, timeout: 0, maxFail: 0 },
+  protocolNode: { enabled: false, configPath: '' },
 })
 
 const configStatus = ref<ConfigStatus>('loading')
@@ -79,9 +85,12 @@ function fillConfig(cfg: any) {
   config.webApp.port = cfg.webApp?.port || 0
   config.tool.host = cfg.tool?.host || ''
   config.tool.port = cfg.tool?.port || 0
+  config.tool.toolNodeAds = cfg.tool?.toolNodeAds || []
   config.heartbeat.interval = cfg.heartbeat?.interval || 0
   config.heartbeat.timeout = cfg.heartbeat?.timeout || 0
   config.heartbeat.maxFail = cfg.heartbeat?.maxFail || 0
+  config.protocolNode.enabled = cfg.protocolNode?.enabled ?? false
+  config.protocolNode.configPath = cfg.protocolNode?.configPath || ''
 }
 
 export function useSettings() {
@@ -118,6 +127,7 @@ export function useSettings() {
       webApp: { ...config.webApp },
       tool: { ...config.tool },
       heartbeat: { ...config.heartbeat },
+      protocolNode: { ...config.protocolNode },
     }
 
     try {
@@ -199,6 +209,14 @@ export function useSettings() {
     config.attpClient.nodeAds.splice(index, 1)
   }
 
+  const addToolNodeAd = () => {
+    config.tool.toolNodeAds.push('')
+  }
+
+  const removeToolNodeAd = (index: number) => {
+    config.tool.toolNodeAds.splice(index, 1)
+  }
+
   return {
     config,
     configStatus,
@@ -213,5 +231,7 @@ export function useSettings() {
     reloadConfig,
     addNodeAd,
     removeNodeAd,
+    addToolNodeAd,
+    removeToolNodeAd,
   }
 }

@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
 import { useSettings } from '../composables/useSettings'
-import { Loader2, AlertTriangle, CheckCircle, XCircle, AlertCircle, Info, Fingerprint, Radio, Server, Trash2, Plus, Globe, Wrench, HeartPulse, RotateCcw, Check, RefreshCw } from 'lucide-vue-next'
+import { Loader2, AlertTriangle, CheckCircle, XCircle, AlertCircle, Info, Fingerprint, Radio, Server, Trash2, Plus, Globe, Wrench, HeartPulse, RotateCcw, Check, RefreshCw, Network } from 'lucide-vue-next'
 
 const {
   config, configStatus, configSaving, configReloading,
   toastVisible, toastMessage, toastType,
   loadConfig, saveConfig, refreshConfig, reloadConfig,
   addNodeAd, removeNodeAd,
+  addToolNodeAd, removeToolNodeAd,
 } = useSettings()
 
 onMounted(() => { loadConfig() })
@@ -164,6 +165,16 @@ const toastIcon = computed(() => {
                 <div><label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">Host</label><input type="text" v-model="config.tool.host" placeholder="127.0.0.1" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono"></div>
                 <div><label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">Port</label><input type="number" v-model.number="config.tool.port" placeholder="8002" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono"></div>
               </div>
+              <div>
+                <label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">Tool Node Ads</label>
+                <div class="space-y-2">
+                  <div v-for="(ad, index) in config.tool.toolNodeAds" :key="index" class="flex items-center gap-2">
+                    <input type="text" v-model="config.tool.toolNodeAds[index]" placeholder="http://tool-node:8080/ad.json" class="flex-1 text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono">
+                    <button @click="removeToolNodeAd(index)" class="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors shrink-0"><Trash2 class="w-4 h-4" /></button>
+                  </div>
+                </div>
+                <button @click="addToolNodeAd" class="mt-2 flex items-center gap-1.5 text-xs text-gray-400 hover:text-gray-600 transition-colors"><Plus class="w-3.5 h-3.5" /><span>Add Tool Node AD</span></button>
+              </div>
             </div>
           </div>
 
@@ -176,6 +187,20 @@ const toastIcon = computed(() => {
                 <div><label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">Timeout (s)</label><input type="number" v-model.number="config.heartbeat.timeout" placeholder="90" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono"></div>
                 <div><label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">Max Fail</label><input type="number" v-model.number="config.heartbeat.maxFail" placeholder="3" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono"></div>
               </div>
+            </div>
+          </div>
+
+          <!-- Group 7: Protocol Node -->
+          <div>
+            <div class="flex items-center gap-2 text-[11px] font-semibold text-gray-400 tracking-wider uppercase mb-3 px-1"><Network class="w-3.5 h-3.5" /><span>Protocol Node</span></div>
+            <div class="bg-white p-5 rounded-xl border border-gray-100 space-y-4">
+              <div class="flex items-center gap-3">
+                <label class="block text-[11px] font-medium text-gray-400 uppercase">Enabled</label>
+                <button type="button" @click="config.protocolNode.enabled = !config.protocolNode.enabled" :class="['relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none', config.protocolNode.enabled ? 'bg-emerald-500' : 'bg-gray-200']">
+                  <span :class="['inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform shadow-sm', config.protocolNode.enabled ? 'translate-x-4.5' : 'translate-x-0.5']" />
+                </button>
+              </div>
+              <div><label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">Config Path</label><input type="text" v-model="config.protocolNode.configPath" placeholder="~/.attp/protocol_node/config.json" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono"></div>
             </div>
           </div>
 

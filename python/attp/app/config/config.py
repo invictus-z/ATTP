@@ -156,7 +156,7 @@ class ConfigManager:
         else:
             current_data = {}
 
-        merged = _deep_merge(current_data, partial)
+        merged = _deep_merge(current_data, partial, list_strategy="replace")
         self.attp_config = ATTPConfigFile.model_validate(merged)
         self._attp_path.parent.mkdir(parents=True, exist_ok=True)
         with open(self._attp_path, "w", encoding="utf-8") as f:
