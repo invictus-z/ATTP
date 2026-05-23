@@ -135,6 +135,8 @@ class ATTPChannel(BaseChannel):
                 reload_callback=self.reload,
                 session_manager=self._app_session_manager,
                 agent_did=self._attp_cfg.did,
+                tracer=self._agent_tracer,
+                private_key_path=str(self._attp_client.auth.private_key_path),
             ))
             if self._protocol_node:
                 tg.create_task(self._protocol_node.start())
@@ -159,6 +161,7 @@ class ATTPChannel(BaseChannel):
     async def send(self, msg: OutboundMessage) -> None:
         """Send message back to UI via WebSocket (called by ChannelManager)."""
         msg.metadata["Session_ID"] = msg.chat_id
+        msg.metadata["is_A2A_message"] = False  # 标记为非 NodeMessage,用于区分回传
         await self._web_app.record_message(msg.content, msg.metadata)
 
     async def _receive(self, sender: str, chat_id: str, content: str, media: list[str]) -> str:

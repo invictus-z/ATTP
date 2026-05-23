@@ -112,8 +112,8 @@ def get_record_router(
             await tracer.save_behavior_entry(
                 session_id=session_id,
                 protocol_node_address=pna,
-                sender_did=stored.sender_did,
-                target_did=stored.hop.get("target_did", ""),
+                sender_did=stored.node_did, #验证过的真实的发送方DID
+                target_did=result.sender_did, #验证过的真实的接收方DID
                 hop_count=stored.hop.get("Hop_Count", [0, 0]),
                 field_type=behavior_type,
                 content=stored.hop.get("Content", ""),
@@ -121,7 +121,7 @@ def get_record_router(
             )
             logger.info(
                 "BehaviorEntry saved: sender={}, receiver={}, type={}",
-                stored.sender_did, result.sender_did, behavior_type,
+                stored.node_did, result.sender_did, behavior_type,
             )
 
             await behavior_controller.handle(

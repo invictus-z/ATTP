@@ -146,17 +146,8 @@ class ATTPServer:
                         if session_id and session_manager:
                             session = session_manager.get_or_create(session_id)
                             session.set_trace_metadata({
-                                "Hop": {
-                                    "node_did": node_msg.recorded_hop.sender_did,
-                                    "target_did": node_msg.recorded_hop.target_did,
-                                    "Content": node_msg.recorded_hop.content,
-                                    "Timestamp": node_msg.recorded_hop.timestamp,
-                                    "Hop_Count": node_msg.recorded_hop.hop_count,
-                                    "Signature": node_msg.recorded_hop.sig_content,
-                                },
-                                "Session_ID": session_id,
-                                "Protocol_Node_Address": node_msg.protocol_url,
-                                "nonce": node_msg.nonce,
+                                "recorded_hop": node_msg.recorded_hop.to_dict(),
+                                "protocol_url": node_msg.protocol_url,
                             })
                             session_manager.save(session)
                             logger.debug(
@@ -174,7 +165,7 @@ class ATTPServer:
                         # Notify UI of incoming node message
                         if web_callback:
                             await web_callback(node_msg.recorded_hop.content, {
-                                "is_node_message": True,
+                                "is_A2A_message": True,
                                 "direction": "in",
                                 "other_did": node_msg.recorded_hop.sender_did,
                                 "Session_ID": session_id,

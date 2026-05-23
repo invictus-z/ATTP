@@ -157,11 +157,11 @@ class ATTPClient:
     async def send_message(self, target: str, content: str, chat_id: str) -> str:
         """Unified entry-point for sending messages.
 
-        Routes to user or agent based on target prefix, manages session
+        Routes agent based on target prefix, manages session
         and trace metadata internally.
 
         Args:
-            target: "user:web_ui" or agent DID ("did:wba:...").
+            target: agent DID ("did:wba:...").
             content: Message body.
             chat_id: Session identifier for routing and trace tracking.
 
@@ -172,13 +172,6 @@ class ATTPClient:
             return "Error: target, content and chat_id are all required."
 
         session = self._session_manager.get_or_create(chat_id)
-
-        # ----- send to user -----
-        if target.startswith("user:"):
-            return await self.send_to_user(
-                current_session_id=chat_id,
-                content=content,
-            )
 
         # ----- send to agent -----
         if target.startswith("did:"):
@@ -196,17 +189,16 @@ class ATTPClient:
             )
 
             # Persist updated trace back to session
-            if "Hop" in metadata:
+            if "recorded_hop" in metadata:
                 session.set_trace_metadata({
-                    "Hop": metadata["Hop"],
-                    "Session_ID": metadata["Session_ID"],
-                    "Protocol_Node_Address": metadata.get("Protocol_Node_Address"),
+                    "recorded_hop": metadata["recorded_hop"],
+                    "protocol_url": metadata.get("protocol_url"),
                 })
                 self._session_manager.save(session)
 
             return result if isinstance(result, str) else str(result)
 
-        return "Error: Invalid target format. Use 'user:web_ui' or 'did:wba:...'"
+        return "Error: Invalid target format. Use 'did:wba:...'"
 
     # ------------------------------------------------------------------
     # Sending messages
@@ -259,22 +251,14 @@ class ATTPClient:
             return f"Error: Tracing hook failed - {str(e)}"
 
         # 从 append_hop 返回的 hop dict 构造 RecordedHop
-        hop = metadata.get("Hop")
+        hop = metadata.get("recorded_hop")
         if not hop:
             return "Error: Hop metadata not generated"
 
-        recorded = RecordedHop(
-            session_id=metadata["Session_ID"],
-            sender_did=hop["node_did"],
-            target_did=hop["target_did"],
-            content=hop["Content"],
-            timestamp=hop["Timestamp"],
-            hop_count=hop["Hop_Count"],
-            sig_content=hop["Signature"],
-        )
+        recorded = RecordedHop.from_dict(hop)
 
         # 构造 NodeMessage 发给 B
-        protocol_url = metadata.get("Protocol_Node_Address", "")
+        protocol_url = metadata.get("protocol_url", "")
         node_msg = NodeMessage(
             protocol_url=protocol_url,
             nonce=nonce,
@@ -306,7 +290,7 @@ class ATTPClient:
 
             if self._web_callback:
                 await self._web_callback(content, {
-                    "is_node_message": True,
+                    "is_A2A_message": True,
                     "direction": "out",
                     "other_did": target_did,
                     "Session_ID": metadata.get("Session_ID"),
@@ -317,96 +301,6 @@ class ATTPClient:
             logger.error("Error sending to agent {}: {}", target_did, e)
             return f"Error: {str(e)}"
 
-    async def send_to_user(
-        self,
-        current_session_id: str,
-        content: str,
-    ) -> str:
-        """Send message to user via websocket with ATTP protocol wrapping.
-
-        Constructs a NodeMessage (A2U) with signed RecordedHop and includes
-        it in the WS push metadata, then sends BackMessage to the protocol
-        node.
-
-        Args:
-            current_session_id: Current session ID
-            content: Message content
-
-        Returns:
-            Status message
-        """
-        # 1. 构建 ATTP NodeMessage (A2U)
-        node_msg_dict = None
-        nonce = None
-        recorded = None
-        protocol_url = ""
-        private_key_path = None
-
-        try:
-            session = self._session_manager.get_or_create(current_session_id)
-            trace = session.get_trace_metadata() if session else None
-
-            if trace and self._tracer:
-                protocol_url = trace.get("Protocol_Node_Address", "")
-                prev_hop = trace.get("Hop", {})
-                user_did = prev_hop.get("node_did", "")
-                private_key_path = str(self.auth.private_key_path) if getattr(self.auth, "private_key_path", None) else None
-
-                if protocol_url and user_did and private_key_path:
-                    hop_metadata = self._tracer.append_hop(
-                        metadata=dict(trace),
-                        content=content,
-                        node_did=self.agent_did,
-                        target_did=user_did,
-                        private_key_path=private_key_path,
-                        behavior_type="A2U",
-                    )
-
-                    hop = hop_metadata.get("Hop")
-                    if hop:
-                        nonce = uuid.uuid4().hex
-                        recorded = RecordedHop(
-                            session_id=current_session_id,
-                            sender_did=hop["node_did"],
-                            target_did=hop["target_did"],
-                            content=hop["Content"],
-                            timestamp=hop["Timestamp"],
-                            hop_count=hop["Hop_Count"],
-                            sig_content=hop["Signature"],
-                        )
-                        node_msg = NodeMessage(
-                            protocol_url=protocol_url,
-                            nonce=nonce,
-                            recorded_hop=recorded,
-                        )
-                        node_msg_dict = node_msg.to_dict()
-                        logger.debug("A2U NodeMessage constructed for session {}", current_session_id)
-        except Exception as e:
-            logger.warning("Failed to build A2U NodeMessage: {}", e)
-            return f"Error: Failed to build A2U NodeMessage - {str(e)}"
-
-        # ========== 时序规则：先回传协议节点，再发给用户 ==========
-        if protocol_url and private_key_path and recorded:
-            try:
-                private_key = self._tracer.load_private_key(private_key_path)
-                await send_back_message(
-                    protocol_url=protocol_url,
-                    node_did=self.agent_did,
-                    nonce=nonce,
-                    recorded_hop=recorded,
-                    private_key=private_key,
-                )
-            except BackPropagationError as e:
-                return f"Error: {e}"
-
-        # 3. 回传确认后，发送给用户
-        metadata: dict[str, Any] = {"Session_ID": current_session_id}
-        if node_msg_dict:
-            metadata["NodeMessage"] = node_msg_dict
-
-        if self._web_callback:
-            await self._web_callback(content, metadata)
-        return "Message sent to user"
 
     # ------------------------------------------------------------------
     # Retry failed URLs

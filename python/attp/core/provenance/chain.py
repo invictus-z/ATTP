@@ -10,12 +10,12 @@ from attp.core.provenance import calculate_genesis_hash, calculate_hop_hash
 logger = get_logger("Tracing")
 
 _HOP_REQUIRED_FIELDS: dict[str, type | tuple[type, ...]] = {
-    "node_did": str,
+    "sender_did": str,
     "target_did": str,
-    "Hop_Count": list,
-    "Timestamp": (float, int),
-    "Signature": str,
-    "Content": str,
+    "hop_count": list,
+    "timestamp": (float, int),
+    "sig_content": str,
+    "content": str,
 }
 
 
@@ -29,15 +29,16 @@ class ChainManager:
                    target_did: str, private_key_path: str,
                    behavior_type: str | None = None) -> dict:
         metadata = metadata.copy()
-        session_id = metadata.get("Session_ID")
-        hop = metadata.get("Hop")
-        if hop:
-            prev = hop["Hop_Count"]
+        prev_hop = metadata.get("recorded_hop")
+        if prev_hop:
+            session_id = prev_hop.get("session_id")
+            prev = prev_hop["hop_count"]
             if behavior_type == "A2A":
                 hop_count = [prev[0] + 1, 0]
             else:
                 hop_count = [prev[0], prev[1] + 1]
         else:
+            session_id = metadata.get("Session_ID")
             hop_count = [0, 0]
 
         timestamp = time.time()
@@ -54,15 +55,16 @@ class ChainManager:
         signature = sign_hash(hop_hash, private_key)
 
         new_log_entry = {
-            "node_did": node_did,
+            "sender_did": node_did,
             "target_did": target_did,
-            "Hop_Count": hop_count,
-            "Timestamp": timestamp,
-            "Signature": signature,
-            "Content": content,
+            "hop_count": hop_count,
+            "timestamp": timestamp,
+            "sig_content": signature,
+            "content": content,
+            "session_id": session_id,
         }
 
-        metadata["Hop"] = new_log_entry
+        metadata["recorded_hop"] = new_log_entry
         logger.debug("append_hop called with metadata={}", metadata)
         return metadata
 
@@ -88,28 +90,28 @@ class ChainManager:
                 return False, f"[FIELD_TYPE] '{field}' expected {expected_type}, got {actual}"
 
         # Step 1b: 值约束
-        if not hop["node_did"]:
-            return False, "[FIELD_VALUE] 'node_did' must be non-empty"
+        if not hop["sender_did"]:
+            return False, "[FIELD_VALUE] 'sender_did' must be non-empty"
         if not hop["target_did"]:
             return False, "[FIELD_VALUE] 'target_did' must be non-empty"
-        if len(hop["Hop_Count"]) != 2:
-            return False, f"[HOP_COUNT] Hop_Count must be [a2a_count, intra_count], got {hop['Hop_Count']}"
-        if hop["Hop_Count"][0] < 0 or hop["Hop_Count"][1] < 0:
-            return False, f"[HOP_COUNT] Hop_Count elements must be >= 0, got {hop['Hop_Count']}"
-        if not hop["Signature"]:
-            return False, "[FIELD_VALUE] 'Signature' must be non-empty"
+        if len(hop["hop_count"]) != 2:
+            return False, f"[HOP_COUNT] hop_count must be [a2a_count, intra_count], got {hop['hop_count']}"
+        if hop["hop_count"][0] < 0 or hop["hop_count"][1] < 0:
+            return False, f"[HOP_COUNT] hop_count elements must be >= 0, got {hop['hop_count']}"
+        if not hop["sig_content"]:
+            return False, "[FIELD_VALUE] 'sig_content' must be non-empty"
 
         now = time.time()
-        if hop["Timestamp"] <= 0:
-            return False, f"[FIELD_VALUE] 'Timestamp' must be positive, got {hop['Timestamp']}"
-        if hop["Timestamp"] > now:
+        if hop["timestamp"] <= 0:
+            return False, f"[FIELD_VALUE] 'timestamp' must be positive, got {hop['timestamp']}"
+        if hop["timestamp"] > now:
             return False, f"[FIELD_VALUE] 'Timestamp' is in the future ({hop['Timestamp']} > now {now})"
 
         # Step 2: timestamp 超时
         if timeout > 0:
-            elapsed = now - hop["Timestamp"]
+            elapsed = now - hop["timestamp"]
             if elapsed > timeout:
-                return False, (f"[TIMESTAMP_EXPIRED] Hop timestamp {hop['Timestamp']} "
+                return False, (f"[TIMESTAMP_EXPIRED] Hop timestamp {hop['timestamp']} "
                                f"exceeded timeout {timeout}s (elapsed: {elapsed:.1f}s)")
 
         return True, ""
@@ -143,34 +145,34 @@ class ChainManager:
             logger.warning("Back-prop: prev_hop present but no stored record")
             return False, "No stored record to verify against"
 
-        prev_sign = prev_hop.get("Signature", "")
-        prev_node_did = prev_hop.get("node_did", "")
+        prev_sign = prev_hop.get("sig_content", "")
+        prev_sender_did = prev_hop.get("sender_did", "")
 
         store_hop_hash = calculate_hop_hash(
-            content=stored_hop.get("Content", ""),
-            sender_did=stored_hop.get("node_did", ""),
+            content=stored_hop.get("content", ""),
+            sender_did=stored_hop.get("sender_did", ""),
             target_did=stored_hop.get("target_did", ""),
-            hop_count=stored_hop.get("Hop_Count", [0, 0]),
-            timestamp=stored_hop.get("Timestamp", 0.0),
+            hop_count=stored_hop.get("hop_count", [0, 0]),
+            timestamp=stored_hop.get("timestamp", 0.0),
             session_id=stored_hop.get("session_id"),
         )
 
         prev_hop_hash = calculate_hop_hash(
-            content=prev_hop.get("Content", ""),
-            sender_did=prev_node_did,
+            content=prev_hop.get("content", ""),
+            sender_did=prev_sender_did,
             target_did=prev_hop.get("target_did", ""),
-            hop_count=prev_hop.get("Hop_Count", [0, 0]),
-            timestamp=prev_hop.get("Timestamp", 0.0),
+            hop_count=prev_hop.get("hop_count", [0, 0]),
+            timestamp=prev_hop.get("timestamp", 0.0),
             session_id=session_id,
         )
 
-        prev_public_key = self._key_store.get(prev_node_did)
+        prev_public_key = self._key_store.get(prev_sender_did)
         if prev_public_key is None:
-            logger.error("Back-prop: No public key for previous node {}", prev_node_did)
-            return False, f"No public key for previous node {prev_node_did}"
+            logger.error("Back-prop: No public key for previous node {}", prev_sender_did)
+            return False, f"No public key for previous node {prev_sender_did}"
 
         step1_ok = verify_signature(prev_hop_hash, prev_sign, prev_public_key)
-        step2_ok = stored_hop.get("Signature") == prev_sign
+        step2_ok = stored_hop.get("sig_content") == prev_sign
         step3_ok = store_hop_hash == prev_hop_hash
 
         if step1_ok and step2_ok and step3_ok:

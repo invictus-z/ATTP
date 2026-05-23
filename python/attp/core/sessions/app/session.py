@@ -9,7 +9,7 @@ from typing import Any
 
 @dataclass
 class AppSession:
-    """App 层 session：追踪消息路由元数据（Hop / Session_ID / Protocol_Node_Address）。"""
+    """App 层 session：追踪消息路由元数据（recorded_hop / protocol_url）。"""
 
     key: str
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -19,12 +19,12 @@ class AppSession:
 
     def get_trace_metadata(self) -> dict[str, Any]:
         """Extract trace-related keys from metadata."""
-        keys = ("Hop", "Session_ID", "Protocol_Node_Address")
+        keys = ("recorded_hop", "protocol_url")
         return {k: self.metadata[k] for k in keys if k in self.metadata}
 
     def set_trace_metadata(self, trace_data: dict[str, Any]) -> None:
         """Merge trace keys into metadata."""
-        for k in ("Hop", "Session_ID", "Protocol_Node_Address"):
+        for k in ("recorded_hop", "protocol_url"):
             if k in trace_data:
                 self.metadata[k] = trace_data[k]
         self.updated_at = time.time()

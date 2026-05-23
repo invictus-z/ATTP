@@ -366,21 +366,13 @@ class MCPToolBridge:
                 logger.error("Failed to append tracing hop: {}", e)
                 return f"Error: Tracing hook failed - {e}"
 
-        hop = metadata.get("Hop")
+        hop = metadata.get("recorded_hop")
         if not hop:
             return "Error: Hop metadata not generated"
 
-        protocol_node_address = metadata.get("Protocol_Node_Address", "")
+        protocol_node_address = metadata.get("protocol_url", "")
 
-        recorded_hop_a2t = RecordedHop(
-            session_id=metadata["Session_ID"],
-            sender_did=hop["node_did"],
-            target_did=hop["target_did"],
-            content=hop["Content"],
-            timestamp=hop["Timestamp"],
-            hop_count=hop["Hop_Count"],
-            sig_content=hop["Signature"],
-        )
+        recorded_hop_a2t = RecordedHop.from_dict(hop)
 
         # -- 构建 NodeMessage(A2T) --
         node_message_a2t = NodeMessage(
@@ -448,12 +440,11 @@ class MCPToolBridge:
                 logger.warning("Failed to process T2A NodeMessage: {}", e)
 
         # 更新 session 的 trace metadata
-        if self._session_manager and chat_id and "Hop" in metadata:
+        if self._session_manager and chat_id and "recorded_hop" in metadata:
             session = self._session_manager.get_or_create(chat_id)
             session.set_trace_metadata({
-                "Hop": metadata["Hop"],
-                "Session_ID": metadata["Session_ID"],
-                "Protocol_Node_Address": metadata.get("Protocol_Node_Address"),
+                "recorded_hop": metadata["recorded_hop"],
+                "protocol_url": metadata.get("protocol_url"),
             })
             self._session_manager.save(session)
 
