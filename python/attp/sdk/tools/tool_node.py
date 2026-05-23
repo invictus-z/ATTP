@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any, Callable, Awaitable
 
 from attp.sdk.tools.mixin import ToolNodeMixin
@@ -38,7 +39,7 @@ class ATTPToolNode(ToolNodeMixin):
         self,
         did: str,
         name: str,
-        private_key_path: str,
+        private_key_path: str | None = None,
         host: str = "0.0.0.0",
         port: int = 9000,
         description: str = "",
@@ -46,6 +47,9 @@ class ATTPToolNode(ToolNodeMixin):
         ad_output_path: str | None = None,
         attp_prefix: str = "/attp",
     ):
+        if private_key_path is None:
+            private_key_path = str(Path.home() / ".attp" / "tools" / name / "did" / "key-1_private.pem")
+
         self._handlers: dict[str, ToolHandler] = {}
 
         self._init_common(

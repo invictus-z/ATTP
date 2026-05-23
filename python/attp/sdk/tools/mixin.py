@@ -32,7 +32,6 @@ from attp.core.authentication.signatures import sign_hash
 from attp.core.message.event import NodeMessage, RecordedHop
 from attp.core.message.back_sender import send_back_message, BackPropagationError
 from attp.core.provenance.chain import ChainManager
-from attp.core.sessions.node_message import NodeMessage as BehaviorNodeMessage
 from attp.core.storage import SqliteStore
 from attp.core.pn_tracer import ProtocolTracer
 
@@ -296,7 +295,7 @@ class ToolNodeMixin(abc.ABC):
         node_msg_data = metadata.get("NodeMessage")
         if node_msg_data:
             try:
-                BehaviorNodeMessage.from_dict(node_msg_data)
+                NodeMessage.from_dict(node_msg_data)
                 logger.info("Record saved for node=%s", node_msg_data.get("node_did", "unknown"))
             except Exception as e:
                 logger.warning("Failed to save NodeMessage: %s", e)

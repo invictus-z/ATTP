@@ -34,6 +34,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 import aiohttp
@@ -60,8 +61,8 @@ class MCPProxyToolNode(ToolNodeMixin):
         self,
         did: str,
         name: str,
-        private_key_path: str,
         config: dict[str, Any],
+        private_key_path: str | None = None,
         host: str = "0.0.0.0",
         port: int = 9000,
         description: str = "",
@@ -69,6 +70,9 @@ class MCPProxyToolNode(ToolNodeMixin):
         ad_output_path: str | None = None,
         attp_prefix: str = "/attp",
     ):
+        if private_key_path is None:
+            private_key_path = str(Path.home() / ".attp" / "tools" / name / "did" / "key-1_private.pem")
+
         self._config = config
 
         # 远程工具缓存: server_name -> list of tool dicts

@@ -24,6 +24,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
@@ -44,7 +45,7 @@ class MCPToATTPAdapter(ToolNodeMixin):
         did: str,
         name: str,
         mcp_server: FastMCP,
-        private_key_path: str,
+        private_key_path: str | None = None,
         host: str = "0.0.0.0",
         port: int = 9000,
         description: str = "",
@@ -52,6 +53,9 @@ class MCPToATTPAdapter(ToolNodeMixin):
         ad_output_path: str | None = None,
         attp_prefix: str = "/attp",
     ):
+        if private_key_path is None:
+            private_key_path = str(Path.home() / ".attp" / "tools" / name / "did" / "key-1_private.pem")
+
         self.mcp_server = mcp_server
 
         self._init_common(
