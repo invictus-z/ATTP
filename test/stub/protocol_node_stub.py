@@ -22,13 +22,17 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import time
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+
+logger = logging.getLogger("stub")
 
 
 # ---------------------------------------------------------------------------
@@ -113,6 +117,23 @@ def create_stub_app(config: StubConfig | None = None) -> FastAPI:
     state = StubState()
     app = FastAPI(title="ATTP Protocol Node (Stub)")
 
+    # ------------------------------------------------------------------
+    # 日志中间件 — 每个请求记录时间戳、方法、路径、耗时、状态码
+    # ------------------------------------------------------------------
+    @app.middleware("http")
+    async def log_requests(request: Request, call_next):
+        start = time.time()
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+        response = await call_next(request)
+        elapsed_ms = (time.time() - start) * 1000
+        logger.info(
+            "[%s] %s %s → %d (%.1fms) client=%s",
+            ts, request.method, request.url.path,
+            response.status_code, elapsed_ms,
+            request.client.host if request.client else "?",
+        )
+        return response
+
     @app.get("/api/status")
     async def get_status():
         """健康检查。"""
@@ -130,15 +151,27 @@ def create_stub_app(config: StubConfig | None = None) -> FastAPI:
         try:
             body = await request.json()
         except Exception:
+            logger.warning("Invalid JSON body from %s", request.client.host if request.client else "?")
             return JSONResponse({"error": "Invalid JSON body"}, status_code=400)
 
         # 基本结构校验：检查 recorded_hop 是否存在
         recorded_hop = body.get("recorded_hop")
         if not recorded_hop:
+            logger.warning("Missing recorded_hop in request body")
             return JSONResponse({"error": "Missing Record_Log"}, status_code=400)
 
         session_id = recorded_hop.get("session_id", "unknown")
         nonce = body.get("nonce", "")
+        node_did = body.get("node_did", "")
+        sender_did = recorded_hop.get("sender_did", "")
+        target_did = recorded_hop.get("target_did", "")
+        hop_count = recorded_hop.get("hop_count", [])
+        content_preview = recorded_hop.get("content", "")[:80]
+
+        logger.info(
+            "Record received: session=%s nonce=%s node_did=%s sender=%s target=%s hop_count=%s content=\"%s\"",
+            session_id, nonce, node_did, sender_did, target_did, hop_count, content_preview,
+        )
 
         # 记录历史
         if config.record_history:
@@ -165,6 +198,12 @@ def create_stub_app(config: StubConfig | None = None) -> FastAPI:
         else:
             resolved_status = status
 
+        logger.info(
+            "Record resolved: session=%s nonce=%s → status=%s (mode=%s, nonce_count=%d)",
+            session_id, nonce, resolved_status, status,
+            state.nonce_counts.get(nonce, 0),
+        )
+
         if resolved_status == "stored":
             return JSONResponse({"status": "stored"})
 
@@ -172,6 +211,10 @@ def create_stub_app(config: StubConfig | None = None) -> FastAPI:
             return JSONResponse({"status": "Record verified and saved"})
 
         if resolved_status == "malicious":
+            logger.warning(
+                "Malicious detected (stub): session=%s node_did=%s",
+                session_id, node_did,
+            )
             return JSONResponse(
                 {
                     "status": "malicious_detected",
@@ -224,12 +267,21 @@ def main():
     port = int(os.environ.get("STUB_PORT", "9999"))
     force = os.environ.get("STUB_FORCE_STATUS", "auto")
 
+    # 配置日志格式：时间戳 + logger名 + 级别 + 消息
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s.%(msecs)03d | %(name)-12s | %(levelname)-7s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+    # 降低 uvicorn 默认 access log 级别，避免与中间件重复
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+
     config = StubConfig(force_status=force)
     app = create_stub_app(config)
 
-    print(f"[stub] Protocol Node Record Stub starting at {host}:{port}")
-    print(f"[stub] force_status={force}")
-    uvicorn.run(app, host=host, port=port)
+    logger.info("Protocol Node Record Stub starting at %s:%s", host, port)
+    logger.info("force_status=%s", force)
+    uvicorn.run(app, host=host, port=port, log_level="warning")
 
 
 if __name__ == "__main__":
