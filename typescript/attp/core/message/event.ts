@@ -22,9 +22,9 @@ export class RecordedHop {
   sessionId: string;
   senderDid: string;
   targetDid: string;
-  content: string;
+  content: string;  // 结构化 JSON 字符串
   timestamp: number;
-  hopCount: number[];
+  hopCount: number[];  // [大跳数, 小跳数]
   sigContent: string;
 
   constructor(data: {

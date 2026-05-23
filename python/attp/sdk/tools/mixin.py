@@ -126,25 +126,18 @@ class ToolNodeMixin(abc.ABC):
     # ------------------------------------------------------------------
 
     def _setup_routes(self) -> None:
-        """设置 FastAPI 路由（tool_request / record / ad.json / health）。"""
+        """设置 FastAPI 路由（tool / ad.json / health）。"""
 
         @self._app.post(self.attp_prefix)
         async def handle_attp_request(request: Request) -> JSONResponse:
+            """处理工具调用请求（纯 NodeMessage 格式）。"""
             try:
                 body = await request.json()
             except Exception:
                 return JSONResponse({"error": "Invalid JSON body"}, status_code=400)
-
-            message_type = body.get("message_type", "")
-            if message_type == "tool_request":
-                return await self._handle_tool_request(body)
-            elif message_type == "record":
-                return await self._handle_record(body)
-            else:
-                return JSONResponse(
-                    {"error": f"Unknown message_type: {message_type}"},
-                    status_code=400,
-                )
+            
+            # 直接解析 NodeMessage
+            return await self._handle_tool_request(body)
 
         @self._app.get(f"{self.attp_prefix}/ad.json")
         async def get_ad(request: Request) -> JSONResponse:
@@ -162,17 +155,14 @@ class ToolNodeMixin(abc.ABC):
     def _parse_node_message(body: dict) -> tuple[
         NodeMessage | None, RecordedHop | None, str, str, str
     ]:
-        """从 request body 解析 node_message 字段。
+        """从 request body 解析 NodeMessage（消息体本身是 NodeMessage）。
 
         Returns:
             (NodeMessage, RecordedHop, session_id, protocol_node_address, nonce)
             解析失败时前两项为 None。
         """
-        data = body.get("node_message")
-        if not data:
-            return None, None, "", "", ""
         try:
-            nm = NodeMessage.from_dict(data)
+            nm = NodeMessage.from_dict(body)
             rh = nm.recorded_hop
             return nm, rh, rh.session_id, nm.protocol_url, nm.nonce
         except Exception as e:
@@ -184,34 +174,41 @@ class ToolNodeMixin(abc.ABC):
     # ------------------------------------------------------------------
 
     async def _handle_tool_request(self, body: dict) -> JSONResponse:
-        """处理 tool_request 消息（完整 2 次回传模板）。
+        """处理工具调用请求（纯 NodeMessage 格式，内容在 content 中）。
 
         === 第一跳 A2T 确认 ===
         1. 解析 NodeMessage(A2T)
-        2. 执行工具（子类 _execute_tool）
-        3. BackMessage #2 (Phase 1, Tool 确认 A2T) → Protocol Node（严格门控）
+        2. 从 content 解析 tool_name 和 arguments
+        3. 执行工具（子类 _execute_tool）
+        4. BackMessage #2 (Phase 1, Tool 确认 A2T) → Protocol Node（严格门控）
 
         === 第二跳 T2A (Tool → Agent) ===
-        4. 构建 RecordedHop_T2A（Tool 签名）
-        5. BackMessage #3 (Phase 2, Tool 报告 T2A) → Protocol Node（严格门控）
-        6. 确认后返回 tool_response（含 NodeMessage(T2A)）
+        5. 构建 RecordedHop_T2A（Tool 签名，递增 hop_count）
+        6. BackMessage #3 (Phase 2, Tool 报告 T2A) → Protocol Node（严格门控）
+        7. 确认后返回 NodeMessage(T2A)（内容在 content 中）
         """
-        sender_did = body.get("sender_did", "")
-        tool_name = body.get("tool_name", "")
-        arguments_str = body.get("arguments", "{}")
-
         # 1. 解析 NodeMessage(A2T)
-        _, recorded_hop_a2t, session_id, protocol_url, nonce = \
+        node_message_a2t, recorded_hop_a2t, session_id, protocol_url, nonce = \
             self._parse_node_message(body)
-
-        # 2. 解析参数
-        try:
-            arguments = json.loads(arguments_str) if isinstance(arguments_str, str) else arguments_str
-        except json.JSONDecodeError:
+        
+        if not node_message_a2t or not recorded_hop_a2t:
             return JSONResponse(
-                {"error": f"Invalid arguments JSON: {arguments_str}"},
+                {"error": "Invalid NodeMessage format"},
                 status_code=400,
             )
+        
+        # 2. 从 content 解析 tool_name 和 arguments
+        try:
+            content_data = json.loads(recorded_hop_a2t.content)
+            tool_name = content_data.get("tool_name", "")
+            arguments = content_data.get("arguments", {})
+        except (json.JSONDecodeError, AttributeError) as e:
+            return JSONResponse(
+                {"error": f"Failed to parse content: {e}"},
+                status_code=400,
+            )
+        
+        sender_did = recorded_hop_a2t.sender_did
 
         # 3. 执行工具（子类实现）
         result_str, status_code = await self._execute_tool(tool_name, arguments)
@@ -240,13 +237,27 @@ class ToolNodeMixin(abc.ABC):
 
         # === 第二跳 T2A: 构建 RecordedHop_T2A ===
         t2a_nonce = f"{nonce}_t2a" if nonce else f"{tool_name}_{time.time()}"
+        
+        # 递增 hop_count 的小跳（T2A 是小跳）
+        if recorded_hop_a2t:
+            hop_count = [recorded_hop_a2t.hop_count[0], recorded_hop_a2t.hop_count[1] + 1]
+        else:
+            hop_count = [0, 1]
+        
+        # 构建结构化 content
+        content_data = {
+            "tool_name": tool_name,
+            "result": result_str,
+        }
+        content = json.dumps(content_data, ensure_ascii=False)
+        
         recorded_hop_t2a = RecordedHop(
             session_id=session_id,
             sender_did=self.did,
             target_did=sender_did,
-            content=f"tool_response({tool_name}): {result_str[:200]}",
+            content=content,
             timestamp=time.time(),
-            hop_count=list(recorded_hop_a2t.hop_count) if recorded_hop_a2t else [0, 0],
+            hop_count=hop_count,
         )
 
         if private_key:
@@ -276,30 +287,8 @@ class ToolNodeMixin(abc.ABC):
             except BackPropagationError as e:
                 return JSONResponse({"error": f"BackMessage #3 failed: {e}"}, status_code=502)
 
-        # 返回 tool_response（含 NodeMessage(T2A)）
-        return JSONResponse({
-            "result": result_str,
-            "tool_name": tool_name,
-            "tool_did": self.did,
-            "message_type": "tool_response",
-            "node_message": node_message_t2a.to_dict(),
-        })
-
-    # ------------------------------------------------------------------
-    # _handle_record
-    # ------------------------------------------------------------------
-
-    async def _handle_record(self, body: dict) -> JSONResponse:
-        """处理 record 消息 — 保存远端 NodeMessage。"""
-        metadata = body.get("metadata", {})
-        node_msg_data = metadata.get("NodeMessage")
-        if node_msg_data:
-            try:
-                NodeMessage.from_dict(node_msg_data)
-                logger.info("Record saved for node=%s", node_msg_data.get("node_did", "unknown"))
-            except Exception as e:
-                logger.warning("Failed to save NodeMessage: %s", e)
-        return JSONResponse({"status": "Record saved"})
+        # 返回纯 NodeMessage(T2A) 格式
+        return JSONResponse(node_message_t2a.to_dict())
 
     # ------------------------------------------------------------------
     # ad.json

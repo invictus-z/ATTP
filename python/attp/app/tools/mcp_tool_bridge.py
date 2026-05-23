@@ -354,9 +354,16 @@ class MCPToolBridge:
 
         if private_key_path and self._tracer:
             try:
+                # 构建结构化 content
+                content_data = {
+                    "tool_name": tool_name,
+                    "arguments": json.loads(arguments) if isinstance(arguments, str) else arguments,
+                }
+                content = json.dumps(content_data, ensure_ascii=False)
+                
                 metadata = self._tracer.append_hop(
                     metadata=metadata,
-                    content=f"tool_call:{tool_name} args={arguments}",
+                    content=content,
                     node_did=self._agent_did,
                     target_did=tool_did,
                     private_key_path=private_key_path,
@@ -396,18 +403,12 @@ class MCPToolBridge:
             except BackPropagationError as e:
                 return f"Error: BackMessage #1 failed: {e}"
 
-        # === 第一跳 A2T: 发送 tool_request 到 Tool Node ===
+        # === 第一跳 A2T: 发送纯 NodeMessage 到 Tool Node ===
         try:
             async with aiohttp.ClientSession() as http_session:
                 async with http_session.post(
                     endpoint,
-                    json={
-                        "sender_did": self._agent_did,
-                        "tool_name": tool_name,
-                        "arguments": arguments,
-                        "message_type": "tool_request",
-                        "node_message": node_message_a2t.to_dict(),
-                    },
+                    json=node_message_a2t.to_dict(),  # 纯 NodeMessage 格式
                     timeout=aiohttp.ClientTimeout(total=60),
                 ) as resp:
                     if resp.status != 200:
@@ -418,13 +419,15 @@ class MCPToolBridge:
             logger.error("Failed to call tool node {}: {}", tool_did, e)
             return f"Error: Failed to reach tool node {tool_did}: {e}"
 
-        # === 第二跳 T2A: 解析 tool_response 中的 NodeMessage(T2A) ===
-        # T2A 的 hop_count 保持工具节点返回的值不变（不递增）
-        node_message_t2a_data = result_body.get("node_message")
-        if node_message_t2a_data and protocol_node_address and private_key:
+        # === 第二跳 T2A: 解析返回的 NodeMessage(T2A) ===
+        if protocol_node_address and private_key:
             try:
-                node_message_t2a = NodeMessage.from_dict(node_message_t2a_data)
+                node_message_t2a = NodeMessage.from_dict(result_body)
                 recorded_hop_t2a = node_message_t2a.recorded_hop
+
+                # 从 content 中提取 result
+                content_data = json.loads(recorded_hop_t2a.content)
+                result = content_data.get("result", str(result_body))
 
                 # BackMessage #4 (Phase 1, Agent 确认 T2A)
                 await send_back_message(
@@ -436,8 +439,11 @@ class MCPToolBridge:
                 )
             except BackPropagationError as e:
                 return f"Error: BackMessage #4 failed: {e}"
-            except Exception as e:
+            except (json.JSONDecodeError, Exception) as e:
                 logger.warning("Failed to process T2A NodeMessage: {}", e)
+                return str(result_body)  # 降级处理
+        else:
+            return str(result_body)
 
         # 更新 session 的 trace metadata
         if self._session_manager and chat_id and "recorded_hop" in metadata:
@@ -448,7 +454,7 @@ class MCPToolBridge:
             })
             self._session_manager.save(session)
 
-        return result_body.get("result", str(result_body))
+        return result
 
     # ------------------------------------------------------------------
     # 工具节点发现

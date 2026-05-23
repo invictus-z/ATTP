@@ -21,9 +21,9 @@ ATTP 通信层使用三个结构化类规范所有消息格式，定义在 `attp
 | `session_id` | str | 会话标识 |
 | `sender_did` | str | 发送方 DID |
 | `target_did` | str | 接收方 DID |
-| `content` | str | 消息内容 |
+| `content` | str | 消息内容（结构化 JSON 字符串） |
 | `timestamp` | float | Unix 时间戳 |
-| `hop_count` | int | 跳数（从 0 开始） |
+| `hop_count` | list[int] | 跳数计数 [大跳数, 小跳数]，从 [0, 0] 开始 |
 | `sig_content` | str | 发送方对其余字段的签名 |
 
 `sig_content` 的签名输入为 SHA-256(`session_id` + `sender_did` + `target_did` + `content` + `timestamp` + `hop_count`)，由**发送方私钥**签署。
