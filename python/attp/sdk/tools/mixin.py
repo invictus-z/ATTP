@@ -27,13 +27,10 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from attp.core.authentication.keys import KeyStore, load_private_key
+from attp.core.authentication.keys import load_private_key
 from attp.core.authentication.signatures import sign_hash
 from attp.core.message.event import NodeMessage, RecordedHop
 from attp.core.message.back_sender import send_back_message, BackPropagationError
-from attp.core.provenance.chain import ChainManager
-from attp.core.storage import SqliteStore
-from attp.core.pn_tracer import ProtocolTracer
 
 logger = logging.getLogger("attp.sdk.tools.mixin")
 
@@ -49,10 +46,6 @@ class ToolNodeMixin(abc.ABC):
         port: int
         private_key_path: Path
         attp_prefix: str
-        _key_store: KeyStore
-        _chain: ChainManager
-        _storage: SqliteStore
-        _tracer: ProtocolTracer
         _ad_output_path: Path
         _app: FastAPI
         _uvicorn_server: uvicorn.Server | None
@@ -96,7 +89,6 @@ class ToolNodeMixin(abc.ABC):
         port: int,
         private_key_path: str,
         attp_prefix: str,
-        db_path: str,
         ad_output_path: str | None,
         app_title: str,
     ) -> None:
@@ -108,11 +100,6 @@ class ToolNodeMixin(abc.ABC):
         self.port = port
         self.private_key_path = Path(private_key_path).expanduser()
         self.attp_prefix = attp_prefix
-
-        self._key_store = KeyStore()
-        self._chain = ChainManager(self._key_store)
-        self._storage = SqliteStore(db_path)
-        self._tracer = ProtocolTracer(db_path)
 
         self._app = FastAPI(title=app_title)
         self._setup_routes()

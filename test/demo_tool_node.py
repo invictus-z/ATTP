@@ -32,7 +32,7 @@ from attp.sdk.tools import ATTPToolNode
 
 # ── 固定配置 ──────────────────────────────────────────────────────────
 
-DID = "did:wba:did-server.test:demo-tool"
+DID = "did:wba:did-server.test:demo-tool:e1_T_6Vqfl0tgFr0SDndYUTwucnrvxsOM_RDRMkU-oi_Ec"
 NAME = "demo-tool"
 HOST = "0.0.0.0"
 PORT = 9999
@@ -44,7 +44,6 @@ async def main():
         name=NAME,
         host=HOST,
         port=PORT,
-        db_path=":memory:",
     )
 
     @node.tool(
