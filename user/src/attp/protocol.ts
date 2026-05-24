@@ -94,11 +94,19 @@ export async function buildNodeMessage(
 
   const nonce = generateNonce();
 
-  // 从 session 获取当前 hop_count 并递增
+  // 从 session 获取当前 hop_count
   let hopCount = [0, 0];  // 默认值
   if (sessionManager) {
     const session = sessionManager.getOrCreate(sessionId);
-    hopCount = session.incrementHopCount();  // 递增并保存到 session
+    const current = session.currentHopCount;
+    
+    // 如果是初始状态 [0,0]，直接使用（第一条 U2A 消息必须为 [0,0]）
+    if (current[0] === 0 && current[1] === 0) {
+      hopCount = current;
+    } else {
+      // 后续消息递增
+      hopCount = session.incrementHopCount();
+    }
     sessionManager.save(session);
   }
 
