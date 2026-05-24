@@ -66,11 +66,15 @@ def get_record_router(
         # === Nonce 验证管道 ===
         from attp.protocol_node.engine.middleware import intercept_record
 
-        result = await intercept_record(
-            back_msg, did_resolver, tracer,
-            session_manager=session_manager,
-            malicious_detector=malicious_detector,
-        )
+        try:
+            result = await intercept_record(
+                back_msg, did_resolver, tracer,
+                session_manager=session_manager,
+                malicious_detector=malicious_detector,
+            )
+        except Exception as e:
+            logger.error("intercept_record unhandled exception: session={}, error={}", session_id, e)
+            return JSONResponse({"error": f"Internal error: {e}"}, status_code=500)
 
         if result.status == "error":
             error_key = result.error.split(":")[0] if result.error else ""
@@ -125,7 +129,7 @@ def get_record_router(
             )
 
             await behavior_controller.handle(
-                behavior_type, body, result,
+                result.node_type, body, result,
             )
 
             _orch = orchestrator_holder[0]
