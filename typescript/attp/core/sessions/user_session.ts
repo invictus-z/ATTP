@@ -107,6 +107,34 @@ export class UserSession {
     if (value !== undefined) this.metadata['key_id'] = value;
   }
 
+  // -- hop_count 管理 --
+
+  /** 当前 hop_count */
+  get currentHopCount(): number[] {
+    const stored = this.metadata['current_hop_count'] as number[];
+    if (Array.isArray(stored) && stored.length === 2) {
+      return stored;
+    }
+    return [0, 0];  // 默认值
+  }
+  
+  /** 递增 hop_count 并返回新值 */
+  incrementHopCount(): number[] {
+    const current = this.currentHopCount;
+    const newHopCount = [current[0], current[1] + 1];  // 只递增小跳
+    this.metadata['current_hop_count'] = newHopCount;
+    this.updatedAt = Date.now() / 1000;
+    return newHopCount;
+  }
+  
+  /** 设置 hop_count（从 Agent 回复中获取） */
+  setHopCount(hopCount: number[]): void {
+    if (Array.isArray(hopCount) && hopCount.length === 2) {
+      this.metadata['current_hop_count'] = hopCount;
+      this.updatedAt = Date.now() / 1000;
+    }
+  }
+
   // -- 通用元数据 --
 
   setMetadata(key: string, value: unknown): void {

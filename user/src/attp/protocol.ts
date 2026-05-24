@@ -7,7 +7,7 @@
  *   - 解析收到的 ATTP 格式消息
  */
 
-import { RecordedHop, NodeMessage, BackMessage, signHash as coreSignHash } from '@attp/core';
+import { RecordedHop, NodeMessage, BackMessage, signHash as coreSignHash, UserSessionManager } from '@attp/core';
 import { apiFetch } from '../transport';
 import { isSecp256k1Key, isEd25519Key, type SignableKey } from './key_helper';
 import { signAsync as secpSignAsync } from '@noble/secp256k1';
@@ -68,6 +68,7 @@ export interface BuildNodeMessageParams {
   content: string;
   protocolUrl: string;
   privateKey: SignableKey;
+  sessionManager?: UserSessionManager;
 }
 
 export interface BuildNodeMessageResult {
@@ -80,7 +81,7 @@ export interface BuildNodeMessageResult {
  * 构造签名后的 NodeMessage。
  *
  * 流程：
- *   1. 创建 RecordedHop
+ *   1. 创建 RecordedHop（从 session 获取并递增 hop_count）
  *   2. 使用私钥签名 contentHash → sigContent
  *   3. 组装 NodeMessage（protocolUrl + nonce + recordedHop）
  *
@@ -89,9 +90,17 @@ export interface BuildNodeMessageResult {
 export async function buildNodeMessage(
   params: BuildNodeMessageParams,
 ): Promise<BuildNodeMessageResult> {
-  const { sessionId, userDid, targetDid, content, protocolUrl, privateKey } = params;
+  const { sessionId, userDid, targetDid, content, protocolUrl, privateKey, sessionManager } = params;
 
   const nonce = generateNonce();
+
+  // 从 session 获取当前 hop_count 并递增
+  let hopCount = [0, 0];  // 默认值
+  if (sessionManager) {
+    const session = sessionManager.getOrCreate(sessionId);
+    hopCount = session.incrementHopCount();  // 递增并保存到 session
+    sessionManager.save(session);
+  }
 
   const recordedHop = new RecordedHop({
     sessionId,
@@ -99,7 +108,7 @@ export async function buildNodeMessage(
     targetDid,
     content,
     timestamp: Date.now(),
-    hopCount: [0, 0],
+    hopCount,  // 使用 session 维护的 hop_count
   });
 
   // 签名 content hash（支持 CryptoKey 和 secp256k1）

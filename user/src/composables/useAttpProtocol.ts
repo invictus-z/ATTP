@@ -179,6 +179,12 @@ async function handleReceivedNodeMessage(incomingData: any): Promise<boolean> {
 
   console.log(`[ATTP] handleReceivedNodeMessage: 解析成功 ✓ protocolUrl=${nodeMessage.protocolUrl}, nonce=${nodeMessage.nonce}`)
 
+  // 保存 Agent 回复中的 hop_count
+  const session = attpSessionManager.getOrCreate(nodeMessage.recordedHop.sessionId)
+  session.setHopCount(nodeMessage.recordedHop.hopCount)
+  attpSessionManager.save(session)
+  attpSessionManager.saveToStorage()
+
   if (!userConfig.did) {
     console.warn('[ATTP] handleReceivedNodeMessage: User DID 未配置，跳过回传')
     return false
@@ -263,6 +269,7 @@ async function sendMessageWithAttp(
       content,
       protocolUrl,
       privateKey,
+      sessionManager: attpSessionManager,  // 传递 sessionManager
     })
     nodeMessageDict = built.nodeMessage.toDict()
     nonce = built.nonce
