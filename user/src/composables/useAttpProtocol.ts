@@ -190,20 +190,21 @@ async function handleReceivedNodeMessage(incomingData: any): Promise<boolean> {
     return false
   }
 
-  // 异步发送 BackMessage（不阻塞 UI / 消息渲染）
-  sendBackMessage({
+  // 发送 BackMessage，等待协议节点确认收到
+  const backOk = await sendBackMessage({
     protocolUrl: nodeMessage.protocolUrl,
     userDid: userConfig.did,
     nonce: nodeMessage.nonce,
     recordedHop: nodeMessage.recordedHop,
     privateKey,
-  }).then(ok => {
-    if (ok) console.log('[ATTP] BackMessage for received message sent successfully')
-    else console.warn('[ATTP] BackMessage for received message failed')
-  }).catch(e => {
-    console.warn('[ATTP] BackMessage for received message error:', e)
   })
 
+  if (!backOk) {
+    console.warn('[ATTP] BackMessage for received message failed — 协议节点未确认')
+    return false
+  }
+
+  console.log('[ATTP] BackMessage for received message confirmed by protocol node')
   return true
 }
 
