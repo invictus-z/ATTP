@@ -49,7 +49,6 @@ class MCPToATTPAdapter(ToolNodeMixin):
         host: str = "0.0.0.0",
         port: int = 9000,
         description: str = "",
-        db_path: str = "tool_node_traces.db",
         ad_output_path: str | None = None,
         attp_prefix: str = "/attp",
     ):
@@ -61,7 +60,7 @@ class MCPToATTPAdapter(ToolNodeMixin):
         self._init_common(
             did=did, name=name, description=description,
             host=host, port=port, private_key_path=private_key_path,
-            attp_prefix=attp_prefix, db_path=db_path,
+            attp_prefix=attp_prefix,
             ad_output_path=ad_output_path,
             app_title=f"ATTP Tool Node (MCP Adapter): {name}",
         )

@@ -83,6 +83,7 @@ const activeNav = computed(() => {
   if (route.path.startsWith('/sessions')) return 'sessions'
   if (route.path.startsWith('/settings')) return 'settings'
   if (route.path.startsWith('/trace')) return 'trace'
+  if (route.path.startsWith('/tools')) return 'tools'
   if (route.path.startsWith('/user-config')) return 'user-config'
   return 'home'
 })
@@ -167,13 +168,15 @@ onAgentSwitch(() => {
             <span>溯源模块</span>
           </button>
           <button
-            disabled
-            class="nav-btn w-full flex items-center px-2.5 py-2 text-[13px] rounded-lg transition-colors text-gray-300 cursor-not-allowed"
-            title="工具管理 — 即将推出"
+            @click="navigate('/tools')"
+            :class="[
+              'nav-btn w-full flex items-center px-2.5 py-2 text-[13px] rounded-lg transition-colors',
+              activeNav === 'tools' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800'
+            ]"
+            title="工具管理（工具节点）"
           >
-            <Wrench class="w-4 h-4 mr-2.5 opacity-50" />
+            <Wrench class="w-4 h-4 mr-2.5 opacity-70" />
             <span>工具管理</span>
-            <span class="ml-auto text-[9px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-400 font-medium">Soon</span>
           </button>
         </div>
 
@@ -306,7 +309,7 @@ onAgentSwitch(() => {
 
       <!-- Bottom spacer -->
       <div class="p-3">
-        <div class="text-[10px] text-gray-300 text-center">v0.4.0</div>
+        <div class="text-[10px] text-gray-300 text-center">v0.2.0-alpha</div>
       </div>
     </aside>
 
@@ -367,7 +370,7 @@ onAgentSwitch(() => {
             <input v-model="newAgentUrl" placeholder="http://localhost:18080" class="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-200 font-mono" />
           </div>
           <div>
-            <label class="block text-xs font-medium text-gray-500 mb-1.5">Agent DID <span class="text-gray-300 font-normal">(可选，ATTP 签名目标)</span></label>
+            <label class="block text-xs font-medium text-gray-500 mb-1.5">Agent DID <span class="text-gray-300 font-normal">(必须)</span></label>
             <input v-model="newAgentDid" placeholder="did:wba:host:agent-name" class="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-200 font-mono" />
           </div>
         </div>

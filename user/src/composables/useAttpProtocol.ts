@@ -19,6 +19,7 @@ const userConfig = reactive<UserAttpConfig>({
   didDocPath: '',
   didKeyPath: '',
   protocolNodes: [],
+  toolNodes: [],
   agents: [],
 })
 
@@ -107,6 +108,7 @@ async function saveUserConfig(): Promise<boolean> {
       didDocPath: userConfig.didDocPath,
       didKeyPath: userConfig.didKeyPath,
       protocolNodes: userConfig.protocolNodes,
+      toolNodes: userConfig.toolNodes,
       agents: userConfig.agents,
     }))
     const result = await window.electronAPI.saveUserConfig(config)
@@ -338,6 +340,13 @@ async function saveProtocolNodes(nodes: { name: string; url: string }[]): Promis
   return saveUserConfig()
 }
 
+// ---- Tool Node Management（工具节点）----
+
+async function saveToolNodes(nodes: { name: string; url: string }[]): Promise<boolean> {
+  userConfig.toolNodes = nodes.map(({ name, url }) => ({ name, url }))
+  return saveUserConfig()
+}
+
 // ---- Composable ----
 
 export function useAttpProtocol() {
@@ -370,5 +379,8 @@ export function useAttpProtocol() {
     updateProtocolNode,
     removeProtocolNode,
     saveProtocolNodes,
+
+    // Tool Node Management（工具节点）
+    saveToolNodes,
   }
 }

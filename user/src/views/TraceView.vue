@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
 import { apiFetch } from '../transport'
 import { useAttpProtocol } from '../composables/useAttpProtocol'
 import {
@@ -465,14 +466,42 @@ const formatDid = (did: string) => {
 
 // ─── Lifecycle ───────────────────────────────────────────────────────
 
+const route = useRoute()
+
 onMounted(() => {
   loadNodes()
   checkAllNodes()
-  // Auto-select first online node
+
+  // Check for query params from SessionsView "溯源" action
+  const querySessionId = route.query.sessionId as string | undefined
+  const queryProtocolUrl = route.query.protocolNodeUrl as string | undefined
+
+  if (querySessionId) {
+    sessionIdInput.value = querySessionId
+  }
+
+  // Auto-select node and query after nodes are loaded & status-checked
   setTimeout(() => {
-    const first = traceNodes.value.find(n => n.status === 'online')
-    if (first) selectedNodeId.value = first.id
-  }, 1500)
+    if (queryProtocolUrl) {
+      // Find the trace node matching the protocol URL
+      const normalizedUrl = queryProtocolUrl.replace(/\/+$/, '')
+      const matchedNode = traceNodes.value.find(n => n.url.replace(/\/+$/, '') === normalizedUrl)
+      if (matchedNode) {
+        selectedNodeId.value = matchedNode.id
+      }
+    }
+
+    // If no protocol URL specified, fall back to first online node
+    if (!selectedNodeId.value) {
+      const first = traceNodes.value.find(n => n.status === 'online')
+      if (first) selectedNodeId.value = first.id
+    }
+
+    // Auto-query if both sessionId and node are available
+    if (querySessionId && selectedNodeId.value) {
+      doQuery()
+    }
+  }, 2000)
 })
 </script>
 

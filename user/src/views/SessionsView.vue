@@ -3,7 +3,8 @@ import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useChat } from '../composables/useChat'
 import { getActiveAgent } from '../agent_manager'
-import { Search, X, ListChecks, Pin, PinOff, MessageSquare, MoreHorizontal, Trash2, Clock, Inbox } from 'lucide-vue-next'
+import { getSessionProtocolUrl } from '../composables/useAttpProtocol'
+import { Search, X, ListChecks, Pin, PinOff, MessageSquare, MoreHorizontal, Trash2, Clock, Inbox, Shield } from 'lucide-vue-next'
 
 const router = useRouter()
 const {
@@ -44,6 +45,29 @@ const handlePin = (id: string) => {
 
 const handleDelete = (id: string) => {
   deleteSessionRecord(id)
+  closeMenu()
+}
+
+// Toast
+const toastVisible = ref(false)
+const toastMessage = ref('')
+const toastType = ref<'success' | 'error'>('success')
+
+const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
+  toastMessage.value = msg
+  toastType.value = type
+  toastVisible.value = true
+  setTimeout(() => { toastVisible.value = false }, 2500)
+}
+
+const handleTrace = (id: string) => {
+  const protocolUrl = getSessionProtocolUrl(id)
+  if (!protocolUrl) {
+    showToast('该会话未绑定溯源节点，无法溯源', 'error')
+    closeMenu()
+    return
+  }
+  router.push(`/trace?sessionId=${encodeURIComponent(id)}&protocolNodeUrl=${encodeURIComponent(protocolUrl)}`)
   closeMenu()
 }
 
@@ -129,6 +153,10 @@ const handleDelete = (id: string) => {
                     <Pin class="w-3.5 h-3.5" /> {{ session.isPinned ? '取消置顶' : '置顶' }}
                   </button>
                   <div class="h-px bg-gray-100 my-1"></div>
+                  <button @click="handleTrace(session.id)" class="w-full text-left px-3 py-2 text-[13px] text-indigo-600 hover:bg-indigo-50 flex items-center gap-2 transition-colors">
+                    <Shield class="w-3.5 h-3.5" /> 溯源
+                  </button>
+                  <div class="h-px bg-gray-100 my-1"></div>
                   <button @click="handleDelete(session.id)" class="w-full text-left px-3 py-2 text-[13px] text-red-600 hover:bg-red-50 flex items-center gap-2 transition-colors group">
                     <Trash2 class="w-3.5 h-3.5 group-hover:scale-110 transition-transform" /> 删除
                   </button>
@@ -183,6 +211,10 @@ const handleDelete = (id: string) => {
                     <Pin class="w-3.5 h-3.5" /> {{ session.isPinned ? '取消置顶' : '置顶' }}
                   </button>
                   <div class="h-px bg-gray-100 my-1"></div>
+                  <button @click="handleTrace(session.id)" class="w-full text-left px-3 py-2 text-[13px] text-indigo-600 hover:bg-indigo-50 flex items-center gap-2 transition-colors">
+                    <Shield class="w-3.5 h-3.5" /> 溯源
+                  </button>
+                  <div class="h-px bg-gray-100 my-1"></div>
                   <button @click="handleDelete(session.id)" class="w-full text-left px-3 py-2 text-[13px] text-red-600 hover:bg-red-50 flex items-center gap-2 transition-colors group">
                     <Trash2 class="w-3.5 h-3.5 group-hover:scale-110 transition-transform" /> 删除
                   </button>
@@ -231,6 +263,13 @@ const handleDelete = (id: string) => {
             取消
           </button>
         </div>
+      </div>
+    </div>
+
+    <!-- Toast -->
+    <div v-if="toastVisible" class="fixed top-6 right-6 z-[200] transition-all">
+      <div :class="['px-4 py-2.5 rounded-xl text-[13px] font-medium shadow-lg border', toastType === 'error' ? 'bg-red-50 text-red-600 border-red-200' : 'bg-emerald-50 text-emerald-600 border-emerald-200']">
+        {{ toastMessage }}
       </div>
     </div>
   </div>
