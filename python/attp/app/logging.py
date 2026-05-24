@@ -76,7 +76,8 @@ def set_log_level(level: str) -> None:
         from attp.app.logging import set_log_level
         set_log_level("DEBUG")  # 启用详细调试信息
     """
-    _root_logger.level(level).info(f"Log level set to {level}")
+    _root_logger.level(level)
+    _root_logger.info(f"Log level set to {level}")
 
 
 # ---------------------------------------------------------------------------
