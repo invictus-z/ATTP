@@ -188,14 +188,6 @@ class ATTPClient:
                 metadata=metadata,
             )
 
-            # Persist updated trace back to session
-            if "recorded_hop" in metadata:
-                session.set_trace_metadata({
-                    "recorded_hop": metadata["recorded_hop"],
-                    "protocol_url": metadata.get("protocol_url"),
-                })
-                self._session_manager.save(session)
-
             return result if isinstance(result, str) else str(result)
 
         return "Error: Invalid target format. Use 'did:wba:...'"
