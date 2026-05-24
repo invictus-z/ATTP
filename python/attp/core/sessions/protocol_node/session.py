@@ -87,7 +87,8 @@ class ProtocolSession:
     # ================================================================
 
     def add_trusted_did(self, did: str) -> None:
-        self.trusted_did_list.append(did)
+        if did not in self.trusted_did_list:
+            self.trusted_did_list.append(did)
         self.updated_at = time.time()
 
     def get_latest_trusted_did(self) -> str | None:
@@ -144,7 +145,8 @@ class ProtocolSession:
         """一次完成 Branch B 验证通过后的所有状态更新。"""
         self.remove_pending_message(nonce)
         self.hop_count_map[hop_count[0]] = hop_count[1]
-        self.trusted_did_list.append(trusted_did)
+        if trusted_did not in self.trusted_did_list:
+            self.trusted_did_list.append(trusted_did)
         if nonce not in self.completed_nonces:
             self.completed_nonces.append(nonce)
         self.updated_at = time.time()

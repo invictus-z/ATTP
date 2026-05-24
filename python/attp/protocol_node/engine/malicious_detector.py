@@ -94,8 +94,8 @@ class MaliciousNodeDetector:
         bp2_did = back_msg_2.node_did
 
         logger.debug(
-            "evaluate_dual_back_prop: session=%s, nonce=%s, bp1_did=%s, bp2_did=%s",
-            session_id, nonce, bp1_did, bp2_did
+            f"evaluate_dual_back_prop: session={session_id}, nonce={nonce}, "
+            f"bp1_did={bp1_did}, bp2_did={bp2_did}"
         )
 
         raw_evidence = {
@@ -105,8 +105,7 @@ class MaliciousNodeDetector:
 
         trusted_list = session.get_trusted_did_list()
         logger.debug(
-            "Trusted list: %s, latest_trusted=%s",
-            trusted_list, session.get_latest_trusted_did()
+            f"Trusted list: {trusted_list}, latest_trusted={session.get_latest_trusted_did()}"
         )
 
         # --- Step 0a: 回传1身份签名检查 ---
@@ -154,7 +153,7 @@ class MaliciousNodeDetector:
 
         # --- Step 1: 回传2身份签名检查 ---
         bp2_did = back_msg_2.node_did
-        logger.debug("Step 1: 回传2 DID 解析中: %s", bp2_did)
+        logger.debug(f"Step 1: 回传2 DID 解析中: {bp2_did}")
         bp2_result = await self._did_resolver.resolve_full(bp2_did)
         if bp2_result.public_key is None:
             logger.debug("Step 1: 回传2 DID 解析失败")
@@ -187,7 +186,7 @@ class MaliciousNodeDetector:
 
         # --- Step 2: DID 比对 ---
         if bp1_did == bp2_did:
-            logger.debug("Step 2: DID 比对失败 - 两条回传DID相同: %s", bp1_did)
+            logger.debug(f"Step 2: DID 比对失败 - 两条回传DID相同: {bp1_did}")
             return _build_report(
                 malicious_dids=[bp1_did],
                 evidence_type=EvidenceType.SAME_DID_DUPLICATE,
@@ -196,11 +195,11 @@ class MaliciousNodeDetector:
                 nonce=nonce,
                 raw_evidence=raw_evidence,
             )
-        logger.debug("Step 2: DID 比对通过 (bp1_did=%s != bp2_did=%s)", bp1_did, bp2_did)
+        logger.debug(f"Step 2: DID 比对通过 (bp1_did={bp1_did} != bp2_did={bp2_did})")
 
         # --- Step 3: 回传1内容签名自检 ---
         bp1_sender_did = stored_msg.sender_did
-        logger.debug("Step 3: 回传1发送者 DID 解析中: %s", bp1_sender_did)
+        logger.debug(f"Step 3: 回传1发送者 DID 解析中: {bp1_sender_did}")
         bp1_sender_result = await self._did_resolver.resolve_full(bp1_sender_did)
         if bp1_sender_result.public_key is None:
             logger.debug("Step 3: 回传1发送者 DID 解析失败")
@@ -284,8 +283,7 @@ class MaliciousNodeDetector:
         node_did = pending_msg.node_did
 
         logger.debug(
-            "evaluate_single_back_prop: session=%s, nonce=%s, node_did=%s",
-            session_id, nonce, node_did
+            f"evaluate_single_back_prop: session={session_id}, nonce={nonce}, node_did={node_did}"
         )
 
         raw_evidence = {
@@ -294,8 +292,7 @@ class MaliciousNodeDetector:
 
         trusted_list = session.get_trusted_did_list()
         logger.debug(
-            "Trusted list: %s, latest_trusted=%s",
-            trusted_list, session.get_latest_trusted_did()
+            f"Trusted list: {trusted_list}, latest_trusted={session.get_latest_trusted_did()}"
         )
 
         # --- Case A: 身份签名解不开 ---
@@ -324,23 +321,22 @@ class MaliciousNodeDetector:
         # --- Case B: 身份签名解得开，但 DID 不在可信名单中 ---
         if trusted_list and node_did not in trusted_list:
             logger.debug(
-                "Case B: DID 不在可信名单中 (node_did=%s, trusted_list=%s)",
-                node_did, trusted_list
+                f"Case B: DID 不在可信名单中 (node_did={node_did}, trusted_list={trusted_list})"
             )
             return _build_report(
                 malicious_dids=list(trusted_list),
                 evidence_type=EvidenceType.TRUSTED_LIST_VIOLATION,
-                description=f"单回传DID({node_did})不在可信名单中，"
+                description=f"单回传DID({node_did})与最新名单({latest_trusted})不一致，"
                             f"可信名单中的节点为恶意，一起通报: {trusted_list}",
                 session_id=session_id,
                 nonce=nonce,
                 raw_evidence=raw_evidence,
             )
-        logger.debug("Case B: DID 在可信名单中")
+        logger.debug("Case B: DID 与最新名单一致")
 
-        # --- Case C: 身份签名解得开，且 DID 在可信名单中 ---
+        # --- Case C: 身份签名解得开，且 DID = 最新名单 ---
         has_subsequent = session.has_subsequent_activity_after(nonce)
-        logger.debug("Case C: 检查后续活动: has_subsequent=%s", has_subsequent)
+        logger.debug(f"Case C: 检查后续活动: has_subsequent={has_subsequent}")
 
         if has_subsequent:
             logger.debug("Case C: 有后续活动，检查是否有不同身份")
@@ -348,11 +344,11 @@ class MaliciousNodeDetector:
             has_diff = session.has_subsequent_with_different_verified_identity(
                 nonce, node_did,
             )
-            logger.debug("Case C: 有不同身份: %s", has_diff)
+            logger.debug(f"Case C: 有不同身份: {has_diff}")
             if has_diff:
                 # 判定为"接收了但未回传"，target_did 为恶意
                 target = pending_msg.hop.get("target_did", "")
-                logger.debug("Case C: 检测到未回传，target=%s", target)
+                logger.debug(f"Case C: 检测到未回传，target={target}")
                 return _build_report(
                     malicious_dids=[target],
                     evidence_type=EvidenceType.NO_PROPAGATION,
@@ -367,16 +363,15 @@ class MaliciousNodeDetector:
                 "Case C: 后续消息都是恶意节点发的，视为自发自弃"
             )
             logger.info(
-                "单回传有后续活动但无不同身份，视为恶意节点自发自弃: "
-                "session={}, nonce={}", session_id, nonce,
+                f"单回传有后续活动但无不同身份，视为恶意节点自发自弃: "
+                f"session={session_id}, nonce={nonce}"
             )
             return None
 
         # 无后续消息 → 抛弃，不予记录
         logger.debug("Case C: 无后续活动，视为垃圾消息抛弃")
         logger.info(
-            "单回传无后续活动，视为垃圾消息抛弃: session={}, nonce={}",
-            session_id, nonce,
+            f"单回传无后续活动，视为垃圾消息抛弃: session={session_id}, nonce={nonce}"
         )
         return None
 
