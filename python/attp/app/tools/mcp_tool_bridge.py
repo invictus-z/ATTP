@@ -474,6 +474,13 @@ class MCPToolBridge:
                     recorded_hop=recorded_hop_t2a,
                     private_key=private_key,
                 )
+
+                # 更新 session 的 trace metadata — 使用 T2A 返回的 recorded_hop
+                session.set_trace_metadata({
+                    "recorded_hop": recorded_hop_t2a.to_dict(),
+                    "protocol_url": node_message_t2a.protocol_url,
+                })
+                logger.warning("tool session update (T2A): recorded_hop from tool response")
             except BackPropagationError as e:
                 return f"Error: BackMessage #4 failed: {e}"
             except (json.JSONDecodeError, Exception) as e:
@@ -481,13 +488,6 @@ class MCPToolBridge:
                 return str(result_body)
         else:
             return str(result_body)
-
-        # 更新 session 的 trace metadata（仍处于 locked_session 中）
-        if "recorded_hop" in metadata:
-            session.set_trace_metadata({
-                "recorded_hop": metadata["recorded_hop"],
-                "protocol_url": metadata.get("protocol_url"),
-            })
 
         return result
 
