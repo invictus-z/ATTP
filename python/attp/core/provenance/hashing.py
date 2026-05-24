@@ -9,7 +9,7 @@ def calculate_genesis_hash(session_id: str, protocol_node_address: str) -> str:
     raw = json.dumps({
         "session_id": session_id,
         "protocol_node_address": protocol_node_address,
-    }, sort_keys=True, separators=(",", ":"))
+    }, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
@@ -29,5 +29,5 @@ def calculate_hop_hash(
         "hop_count": hop_count,
         "timestamp": timestamp,
         "session_id": session_id,
-    }, sort_keys=True, separators=(",", ":"))
+    }, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()

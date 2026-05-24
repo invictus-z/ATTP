@@ -89,7 +89,11 @@ def get_record_router(
 
         if result.status == "stored":
             logger.info("Record stored (pending): session={}", session_id)
-            return JSONResponse({"status": "stored"})
+            return JSONResponse({
+                "status": "stored",
+                "nonce": back_msg.nonce,
+                "session_id": session_id,
+            })
 
         if result.status == "malicious":
             report = result.malicious_report

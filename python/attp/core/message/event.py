@@ -44,7 +44,7 @@ class RecordedHop:
             "content": self.content,
             "timestamp": self.timestamp,
             "hop_count": self.hop_count,
-        }, sort_keys=True, separators=(",", ":"))
+        }, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
     def to_dict(self) -> dict[str, Any]:
@@ -126,7 +126,7 @@ class NodeMessage:
 # ---------------------------------------------------------------------------
 
 def _identity_hash(node_did: str, nonce: str) -> str:
-    raw = json.dumps({"node_did": node_did, "nonce": nonce},    sort_keys=True, separators=(",", ":"))
+    raw = json.dumps({"node_did": node_did, "nonce": nonce}, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 

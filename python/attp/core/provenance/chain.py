@@ -145,24 +145,24 @@ class ChainManager:
             logger.warning("Back-prop: prev_hop present but no stored record")
             return False, "No stored record to verify against"
 
-        prev_sign = prev_hop.get("sig_content", "")
-        prev_sender_did = prev_hop.get("sender_did", "")
+        prev_sign = prev_hop.get("Signature", "")
+        prev_sender_did = prev_hop.get("node_did", "")
 
         store_hop_hash = calculate_hop_hash(
-            content=stored_hop.get("content", ""),
-            sender_did=stored_hop.get("sender_did", ""),
+            content=stored_hop.get("Content", ""),
+            sender_did=stored_hop.get("node_did", ""),
             target_did=stored_hop.get("target_did", ""),
-            hop_count=stored_hop.get("hop_count", [0, 0]),
-            timestamp=stored_hop.get("timestamp", 0.0),
+            hop_count=stored_hop.get("Hop_Count", [0, 0]),
+            timestamp=stored_hop.get("Timestamp", 0.0),
             session_id=stored_hop.get("session_id"),
         )
 
         prev_hop_hash = calculate_hop_hash(
-            content=prev_hop.get("content", ""),
+            content=prev_hop.get("Content", ""),
             sender_did=prev_sender_did,
             target_did=prev_hop.get("target_did", ""),
-            hop_count=prev_hop.get("hop_count", [0, 0]),
-            timestamp=prev_hop.get("timestamp", 0.0),
+            hop_count=prev_hop.get("Hop_Count", [0, 0]),
+            timestamp=prev_hop.get("Timestamp", 0.0),
             session_id=session_id,
         )
 
@@ -172,7 +172,7 @@ class ChainManager:
             return False, f"No public key for previous node {prev_sender_did}"
 
         step1_ok = verify_signature(prev_hop_hash, prev_sign, prev_public_key)
-        step2_ok = stored_hop.get("sig_content") == prev_sign
+        step2_ok = stored_hop.get("Signature") == prev_sign
         step3_ok = store_hop_hash == prev_hop_hash
 
         if step1_ok and step2_ok and step3_ok:
