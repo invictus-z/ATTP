@@ -3,7 +3,7 @@
 基于 anp 的 create_did_wba_document 为指定的 Agent 批量生成 DID 文档及密钥文件。
 
 生成的密钥类型：
-  - key-1: secp256k1（用于 DID 认证）
+  - key-1: Ed25519（用于 DID 认证）
   - key-2: secp256r1（用于 E2EE 消息签名）
   - key-3: X25519（用于 E2EE 密钥协商）
 """

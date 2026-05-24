@@ -1,0 +1,19 @@
+{
+  "did": "did:wba:home.local:user-name",
+  "didDocPath": "~/.attp/user/did/did.json",
+  "didKeyPath": "~/.attp/user/did/key-1_private.pem",
+  "protocolNodes": [
+    {
+      "name": "pn_name",
+      "url": "http://pn_host:pn_port"
+    }
+  ],
+  "agents": [
+    {
+      "name": "agent_name",
+      "baseUrl": "http://agent_host:agent_port",
+      "did": "did:wba:did-server.test:agent-name:agent-did-suffix"
+    }
+  ],
+  "toolNodes": []
+}
