@@ -15,6 +15,8 @@ import asyncio
 import signal
 import sys
 
+from attp.app.logging import set_log_level
+set_log_level("DEBUG")
 
 def main():
     parser = argparse.ArgumentParser(

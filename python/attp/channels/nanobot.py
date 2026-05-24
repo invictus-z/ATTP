@@ -26,6 +26,8 @@ from attp.core.agent_tracer import AgentTracer
 if TYPE_CHECKING:
     from attp.app.config.config import ATTPConfigFile
 
+from attp.app.logging import set_log_level
+set_log_level("DEBUG")
 
 class ATTPConfig(Base):
     """ATTP channel configuration."""

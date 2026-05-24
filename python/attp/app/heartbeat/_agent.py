@@ -98,7 +98,7 @@ class AgentHealthChecker:
                 logger.debug("agent {} is healthy", did)
             else:
                 self._fail_counts[did] = self._fail_counts.get(did, 0) + 1
-                logger.warning(
+                logger.debug(
                     "agent {} returned unexpected response: {} (fail_count={})",
                     did, result, self._fail_counts[did],
                 )
@@ -106,7 +106,7 @@ class AgentHealthChecker:
                     self._evict(did)
         except asyncio.TimeoutError:
             self._fail_counts[did] = self._fail_counts.get(did, 0) + 1
-            logger.warning(
+            logger.debug(
                 "agent {} timed out ({}s) (fail_count={})",
                 did, self._timeout, self._fail_counts[did],
             )
@@ -114,7 +114,7 @@ class AgentHealthChecker:
                 self._evict(did)
         except Exception as e:
             self._fail_counts[did] = self._fail_counts.get(did, 0) + 1
-            logger.warning(
+            logger.debug(
                 "agent {} error: {} (fail_count={})",
                 did, e, self._fail_counts[did],
             )
@@ -129,12 +129,12 @@ class AgentHealthChecker:
         ad_url = self._attp_client.registered_agents.get(did, {}).get("ad_url")
         if ad_url:
             self._attp_client.failed_urls.add(ad_url)
-            logger.warning(
+            logger.debug(
                 "agent {} evicted, ad_url={} added back to failed_urls",
                 did, ad_url,
             )
         else:
-            logger.warning(
+            logger.debug(
                 "agent {} evicted, but no ad_url found in registered_agents",
                 did,
             )

@@ -66,6 +66,19 @@ def get_logger(component: str) -> _ComponentLogger:
     return _ComponentLogger(component)
 
 
+def set_log_level(level: str) -> None:
+    """设置全局日志等级。
+
+    Args:
+        level: 日志等级，可选 "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"
+
+    Example:
+        from attp.app.logging import set_log_level
+        set_log_level("DEBUG")  # 启用详细调试信息
+    """
+    _root_logger.level(level).info(f"Log level set to {level}")
+
+
 # ---------------------------------------------------------------------------
 # InterceptHandler: 将标准 logging 桥接到 loguru（可选，默认禁用）
 # ---------------------------------------------------------------------------

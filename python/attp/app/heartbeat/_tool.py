@@ -93,14 +93,14 @@ class ToolNodeHealthChecker:
         if count >= self._max_fail:
             await self._evict(did, ad_url)
         else:
-            logger.warning(
+            logger.debug(
                 "tool node {} failed ({}/{})",
                 did, count, self._max_fail,
             )
 
     async def _evict(self, did: str, ad_url: str) -> None:
         """移除工具节点并记录失败信息用于后续恢复。"""
-        logger.warning(
+        logger.debug(
             "tool node {} evicted after {} consecutive failures",
             did, self._max_fail,
         )

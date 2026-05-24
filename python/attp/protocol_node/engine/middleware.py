@@ -128,6 +128,14 @@ async def intercept_record(
     # 2. DID 解析 → 公钥 + 节点类型
     result = await did_resolver.resolve_full(node_did)
     if result.public_key is None:
+        # DEBUG: 详细的诊断信息
+        logger.debug(
+            "DID resolution failed: did=%s, url=%s, failure_reason=%s, "
+            "http_status=%s, error_details=%s",
+            node_did, result.resolution_url, result.failure_reason,
+            result.http_status, result.error_details
+        )
+        # WARNING: 关键错误提示
         logger.warning("DID resolution failed for sender: {}", node_did)
         return InterceptResult(
             status="error", node_type=None,
