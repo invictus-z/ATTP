@@ -17,7 +17,7 @@
 
     # 2. 命令行启动
     python -m test.stub.protocol_node_stub
-    # 默认监听 0.0.0.0:9999，可通过环境变量 STUB_HOST / STUB_PORT 自定义
+    # 默认监听 0.0.0.0:9998，可通过环境变量 STUB_HOST / STUB_PORT 自定义
 """
 
 from __future__ import annotations
@@ -264,7 +264,7 @@ def main():
     import uvicorn
 
     host = os.environ.get("STUB_HOST", "0.0.0.0")
-    port = int(os.environ.get("STUB_PORT", "9999"))
+    port = int(os.environ.get("STUB_PORT", "9998"))
     force = os.environ.get("STUB_FORCE_STATUS", "auto")
 
     # 配置日志格式：时间戳 + logger名 + 级别 + 消息

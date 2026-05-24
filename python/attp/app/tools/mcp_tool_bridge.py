@@ -227,15 +227,30 @@ class MCPToolBridge:
         _call = self._call_tool_node
 
         async def handler(**kwargs: Any) -> str:
-            chat_id = kwargs.pop("chat_id", "") # 要求填入 chat_id 以便 ATTP 消息追踪
+            chat_id = kwargs.pop("chat_id", "")
+            if not chat_id:
+                return "Error: chat_id is required for tool calling. This is needed for message tracing."
             arguments = json.dumps(kwargs, ensure_ascii=False)
             return await _call(tool_did, tool_name, arguments, chat_id)
+
+        # 强制添加 chat_id 到 input_schema
+        if "properties" not in input_schema:
+            input_schema["properties"] = {}
+        if "required" not in input_schema:
+            input_schema["required"] = []
+        
+        input_schema["properties"]["chat_id"] = {
+            "type": "string",
+            "description": "当前会话ID，用于消息追踪和溯源（必需）"
+        }
+        if "chat_id" not in input_schema["required"]:
+            input_schema["required"].append("chat_id")
 
         # 创建透传 fn_metadata
         passthrough_model = type(f"{mcp_name}_args", (PassthroughArgModel,), {})
         passthrough_metadata = FuncMetadata(arg_model=passthrough_model)
 
-        # 直接构造 Tool 对象，使用远程工具的 inputSchema
+        # 直接构造 Tool 对象，使用远程工具的 inputSchema（包含 chat_id）
         tool = MCPTool(
             fn=handler,
             name=mcp_name,
@@ -320,6 +335,9 @@ class MCPToolBridge:
         4. 等待 tool_response（含 NodeMessage(T2A)），hop_count 保持不变
         5. 发送 BackMessage #4 (Phase 1, Agent 确认) → Protocol Node（严格门控）
         """
+        if not chat_id:
+            return "Error: chat_id is required for tool calling. This is needed for message tracing."
+        
         tool_info = self._tool_nodes.get(tool_did)
         if not tool_info:
             return f"Error: Tool node {tool_did} not found."
