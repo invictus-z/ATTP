@@ -74,7 +74,7 @@ python scripts/did_creator.py --hostname did-server.test --names my-agent --outp
 | 文件 | 说明 |
 |------|------|
 | `did.json` | DID 文档 |
-| `key-1_private.pem` / `key-1_public.pem` | secp256k1 密钥对 — 用于 DID 认证 |
+| `key-1_private.pem` / `key-1_public.pem` | Ed25519 密钥对 — 用于 DID 认证 |
 | `key-2_private.pem` / `key-2_public.pem` | secp256r1 密钥对 — 用于 E2EE 消息签名 |
 | `key-3_private.pem` / `key-3_public.pem` | X25519 密钥对 — 用于 E2EE 密钥协商 |
 

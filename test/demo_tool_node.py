@@ -7,14 +7,14 @@
     python test/demo_tool_node.py
 
 端点:
-    GET  http://127.0.0.1:9000/attp/health     — 健康检查
-    GET  http://127.0.0.1:9000/attp/ad.json    — 工具描述
-    POST http://127.0.0.1:9000/attp            — 调用工具
+    GET  http://127.0.0.1:9999/attp/health     — 健康检查
+    GET  http://127.0.0.1:9999/attp/ad.json    — 工具描述
+    POST http://127.0.0.1:9999/attp            — 调用工具
 
 测试示例:
-    curl http://127.0.0.1:9000/attp/health
-    curl http://127.0.0.1:9000/attp/ad.json
-    curl -X POST http://127.0.0.1:9000/attp -H "Content-Type: application/json" -d "{\"message_type\":\"tool_request\",\"sender_did\":\"did:wba:test:sender\",\"tool_name\":\"add\",\"arguments\":\"{\\\"a\\\":3,\\\"b\\\":5}\"}"
+    curl http://127.0.0.1:9999/attp/health
+    curl http://127.0.0.1:9999/attp/ad.json
+    curl -X POST http://127.0.0.1:9999/attp -H "Content-Type: application/json" -d "{\"message_type\":\"tool_request\",\"sender_did\":\"did:wba:test:sender\",\"tool_name\":\"add\",\"arguments\":\"{\\\"a\\\":3,\\\"b\\\":5}\"}"
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ from attp.sdk.tools import ATTPToolNode
 DID = "did:wba:did-server.test:demo-tool"
 NAME = "demo-tool"
 HOST = "0.0.0.0"
-PORT = 9000
+PORT = 9999
 
 
 async def main():
