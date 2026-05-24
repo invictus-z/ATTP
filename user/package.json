@@ -1,0 +1,63 @@
+{
+  "name": "attp-user",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "main": "electron/main.js",
+  "scripts": {
+    "clean": "rm -rf node_modules package-lock.json",
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "electron": "electron .",
+    "electron:dev": "concurrently -k \"vite\" \"wait-on http://localhost:5173 && electron . --dev\"",
+    "electron:prod": "vite build && electron .",
+    "electron:build": "tsc && vite build && electron-builder"
+  },
+  "build": {
+    "appId": "com.attp.nanobot-workspace",
+    "productName": "ATTP User Dashboard",
+    "files": [
+      "dist/**/*",
+      "electron/**/*"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  },
+  "devDependencies": {
+    "@types/dompurify": "^3.0.5",
+    "@types/estree": "^1.0.8",
+    "@types/marked": "^5.0.2",
+    "autoprefixer": "^10.4.17",
+    "concurrently": "^9.1.2",
+    "electron": "^35.2.1",
+    "lucide": "^0.359.0",
+    "postcss": "^8.4.35",
+    "tailwindcss": "^3.4.1",
+    "typescript": "^5.2.2",
+    "vite": "^5.0.0",
+    "wait-on": "^8.0.3"
+  },
+  "dependencies": {
+    "@noble/curves": "^2.2.0",
+    "@noble/hashes": "^2.2.0",
+    "@noble/secp256k1": "^3.1.0",
+    "@vitejs/plugin-vue": "^6.0.6",
+    "dompurify": "^3.4.2",
+    "electron-store": "^11.0.2",
+    "highlight.js": "^11.11.1",
+    "lucide-vue-next": "^1.0.0",
+    "marked": "^18.0.3",
+    "vue": "^3.5.34",
+    "vue-router": "^4.6.4",
+    "ws": "^8.18.0"
+  }
+}
