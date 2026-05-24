@@ -171,22 +171,21 @@ class ATTPClient:
         if not target or not content or not chat_id:
             return "Error: target, content and chat_id are all required."
 
-        session = self._session_manager.get_or_create(chat_id)
-
         # ----- send to agent -----
         if target.startswith("did:"):
-            trace_metadata = session.get_trace_metadata()
-            metadata: dict[str, Any] = {"Session_ID": chat_id}
-            if trace_metadata:
-                metadata.update(trace_metadata)
+            async with self._session_manager.locked_session(chat_id) as session:
+                trace_metadata = session.get_trace_metadata()
+                metadata: dict[str, Any] = {"Session_ID": chat_id}
+                if trace_metadata:
+                    metadata.update(trace_metadata)
 
-            result = await self.send_to_agent(
-                target_did=target,
-                sender_did=self.agent_did,
-                content=content,
-                message_type="agent_request",
-                metadata=metadata,
-            )
+                result = await self.send_to_agent(
+                    target_did=target,
+                    sender_did=self.agent_did,
+                    content=content,
+                    message_type="agent_request",
+                    metadata=metadata,
+                )
 
             return result if isinstance(result, str) else str(result)
 

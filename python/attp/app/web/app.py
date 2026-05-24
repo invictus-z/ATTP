@@ -26,6 +26,7 @@ from attp.app.web.api import config_setting, node_status
 
 if TYPE_CHECKING:
     from attp.app.config.config import WebAppConfig
+    from attp.core.sessions.app import AppSession
 
 
 class WebApp():
@@ -93,12 +94,11 @@ class WebApp():
                         if self._tracer and self._private_key_path and self._agent_did:
                             try:
                                 if self._session_manager:
-                                    session = self._session_manager.get_or_create(session_id)
-                                    session.set_trace_metadata({
-                                        "recorded_hop": node_msg.recorded_hop.to_dict(),
-                                        "protocol_url": node_msg.protocol_url,
-                                    })
-                                    self._session_manager.save(session)
+                                    async with self._session_manager.locked_session(session_id) as session:
+                                        session.set_trace_metadata({
+                                            "recorded_hop": node_msg.recorded_hop.to_dict(),
+                                            "protocol_url": node_msg.protocol_url,
+                                        })
                                 private_key = self._tracer.load_private_key(self._private_key_path)
                                 await send_back_message(
                                     protocol_url=node_msg.protocol_url,
@@ -205,70 +205,85 @@ class WebApp():
         logger.warning("[DEBUG-DUP] send_message_to_user called: session={}, content_len={}, ws_clients={}",
                        session_id, len(content), len(self._clients))
         try:
-            session = self._session_manager.get(session_id) if self._session_manager else None
-            trace = session.get_trace_metadata() if session else None
-
-            if trace and self._tracer and self._private_key_path and self._agent_did:
-                protocol_url = trace.get("protocol_url", "")
-                prev_hop_dict = trace.get("recorded_hop", {})
-                user_did = prev_hop_dict.get("sender_did", "")
-
-                if protocol_url and user_did:
-                    hop_metadata = self._tracer.append_hop(
-                        metadata=dict(trace),
-                        content=content,
-                        node_did=self._agent_did,
-                        target_did=user_did,
-                        private_key_path=self._private_key_path,
-                        behavior_type="A2U",
-                    )
-                    hop = hop_metadata.get("recorded_hop")
-                    if hop:
-                        recorded = RecordedHop.from_dict(hop)
-                        nonce = uuid.uuid4().hex
-                        node_msg = NodeMessage(
-                            protocol_url=protocol_url,
-                            nonce=nonce,
-                            recorded_hop=recorded,
-                        )
-                        # 时序规则：先回传协议节点
-                        private_key = self._tracer.load_private_key(self._private_key_path)
-                        await send_back_message(
-                            protocol_url=protocol_url,
-                            node_did=self._agent_did,
-                            nonce=nonce,
-                            recorded_hop=recorded,
-                            private_key=private_key,
-                        )
-                        # 更新 session trace
-                        if session:
-                            session.set_trace_metadata({
-                                "recorded_hop": hop,
-                                "protocol_url": protocol_url,
-                            })
-                            self._session_manager.save(session)
-
-                        # 序列化 NodeMessage 并 WS 发送
-                        data_str = json.dumps(node_msg.to_dict())
-                        disconnected = []
-                        for client in self._clients:
-                            try:
-                                await client.send_text(data_str)
-                            except Exception as e:
-                                logger.error("Failed to send to client: {}", e)
-                                disconnected.append(client)
-                        for client in disconnected:
-                            if client in self._clients:
-                                self._clients.remove(client)
+            if self._session_manager:
+                async with self._session_manager.locked_session(session_id, create=False) as session:
+                    if not session:
+                        logger.warning("send_message_to_user: no session for {}", session_id)
                         return
-
-            # 无 trace 信息时降级
-            logger.warning("send_message_to_user: no trace metadata for session={}", session_id)
+                    await self._send_message_to_user_locked(session, content, session_id)
+            else:
+                logger.warning("send_message_to_user: no session manager")
         except Exception as e:
             logger.error("send_message_to_user: A2U NodeMessage 构建失败: {}", e)
 
         # 降级：无法构建 NodeMessage，消息被丢弃
         logger.warning("send_message_to_user: fallback — message dropped for session={}", session_id)
+
+    async def _send_message_to_user_locked(
+        self, session: AppSession, content: str, session_id: str
+    ) -> bool:
+        """Internal: build A2U NodeMessage while holding the session lock.
+
+        Returns True if message was sent successfully.
+        Must be called inside a ``locked_session`` context.
+        """
+        trace = session.get_trace_metadata()
+
+        if trace and self._tracer and self._private_key_path and self._agent_did:
+            protocol_url = trace.get("protocol_url", "")
+            prev_hop_dict = trace.get("recorded_hop", {})
+            user_did = prev_hop_dict.get("sender_did", "")
+
+            if protocol_url and user_did:
+                hop_metadata = self._tracer.append_hop(
+                    metadata=dict(trace),
+                    content=content,
+                    node_did=self._agent_did,
+                    target_did=user_did,
+                    private_key_path=self._private_key_path,
+                    behavior_type="A2U",
+                )
+                hop = hop_metadata.get("recorded_hop")
+                if hop:
+                    recorded = RecordedHop.from_dict(hop)
+                    nonce = uuid.uuid4().hex
+                    node_msg = NodeMessage(
+                        protocol_url=protocol_url,
+                        nonce=nonce,
+                        recorded_hop=recorded,
+                    )
+                    # 时序规则：先回传协议节点
+                    private_key = self._tracer.load_private_key(self._private_key_path)
+                    await send_back_message(
+                        protocol_url=protocol_url,
+                        node_did=self._agent_did,
+                        nonce=nonce,
+                        recorded_hop=recorded,
+                        private_key=private_key,
+                    )
+                    # 更新 session trace
+                    session.set_trace_metadata({
+                        "recorded_hop": hop,
+                        "protocol_url": protocol_url,
+                    })
+
+                    # 序列化 NodeMessage 并 WS 发送
+                    data_str = json.dumps(node_msg.to_dict())
+                    disconnected = []
+                    for client in self._clients:
+                        try:
+                            await client.send_text(data_str)
+                        except Exception as e:
+                            logger.error("Failed to send to client: {}", e)
+                            disconnected.append(client)
+                    for client in disconnected:
+                        if client in self._clients:
+                            self._clients.remove(client)
+                    return True
+
+        # 无 trace 信息时降级
+        logger.warning("send_message_to_user: no trace metadata for session={}", session_id)
+        return False
 
     async def record_message(self, content: str, metadata: dict | None = None) -> None:
         """Directly send message to UI via WebSocket.

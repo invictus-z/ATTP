@@ -137,8 +137,7 @@ class MaliciousNodeDetector:
         # --- Step 0b: 回传1可信名单校验 ---
         if trusted_list and bp1_did not in trusted_list:
             logger.debug(
-                "Step 0b: 回传1 DID 不在可信名单中 (bp1_did=%s, trusted_list=%s)",
-                bp1_did, trusted_list
+                f"Step 0b: 回传1 DID 不在可信名单中 (bp1_did={bp1_did}, trusted_list={trusted_list})"
             )
             return _build_report(
                 malicious_dids=list(trusted_list),

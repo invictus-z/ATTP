@@ -337,7 +337,7 @@ class MCPToolBridge:
         """
         if not chat_id:
             return "Error: chat_id is required for tool calling. This is needed for message tracing."
-        
+
         tool_info = self._tool_nodes.get(tool_did)
         if not tool_info:
             return f"Error: Tool node {tool_did} not found."
@@ -357,14 +357,36 @@ class MCPToolBridge:
                 except Exception as e:
                     logger.error("Failed to load private key: {}", e)
 
-        # 从 session 获取 trace metadata（和 send_to_agent 一样）
+        # 通过 locked_session 保护整个 read-compute-write 周期
+        if self._session_manager:
+            async with self._session_manager.locked_session(chat_id) as session:
+                return await self._call_tool_node_locked(
+                    session, tool_did, tool_name, arguments, chat_id,
+                    tool_info, private_key_path, private_key,
+                )
+        else:
+            return "Error: session manager not configured"
+
+    async def _call_tool_node_locked(
+        self,
+        session: Any,
+        tool_did: str,
+        tool_name: str,
+        arguments: str,
+        chat_id: str,
+        tool_info: ToolNodeInfo,
+        private_key_path: str | None,
+        private_key: Any,
+    ) -> str:
+        """Internal: tool call logic while holding the session lock.
+
+        Must be called inside a ``locked_session`` context.
+        """
+        # 从 session 获取 trace metadata
         metadata: dict[str, Any] = {"Session_ID": chat_id}
-        if self._session_manager and chat_id:
-            session = self._session_manager.get(chat_id)
-            if session:
-                trace = session.get_trace_metadata()
-                if trace:
-                    metadata.update(trace)
+        trace = session.get_trace_metadata()
+        if trace:
+            metadata.update(trace)
 
         # -- 通过 AgentTracer.append_hop 正确递增 hop_count --
         nonce = uuid.uuid4().hex
@@ -372,13 +394,12 @@ class MCPToolBridge:
 
         if private_key_path and self._tracer:
             try:
-                # 构建结构化 content
                 content_data = {
                     "tool_name": tool_name,
                     "arguments": json.loads(arguments) if isinstance(arguments, str) else arguments,
                 }
                 content = json.dumps(content_data, ensure_ascii=False)
-                
+
                 metadata = self._tracer.append_hop(
                     metadata=metadata,
                     content=content,
@@ -396,7 +417,6 @@ class MCPToolBridge:
             return "Error: Hop metadata not generated"
 
         protocol_node_address = metadata.get("protocol_url", "")
-
         recorded_hop_a2t = RecordedHop.from_dict(hop)
 
         # -- 构建 NodeMessage(A2T) --
@@ -426,7 +446,7 @@ class MCPToolBridge:
             async with aiohttp.ClientSession() as http_session:
                 async with http_session.post(
                     endpoint,
-                    json=node_message_a2t.to_dict(),  # 纯 NodeMessage 格式
+                    json=node_message_a2t.to_dict(),
                     timeout=aiohttp.ClientTimeout(total=60),
                 ) as resp:
                     if resp.status != 200:
@@ -443,7 +463,6 @@ class MCPToolBridge:
                 node_message_t2a = NodeMessage.from_dict(result_body)
                 recorded_hop_t2a = node_message_t2a.recorded_hop
 
-                # 从 content 中提取 result
                 content_data = json.loads(recorded_hop_t2a.content)
                 result = content_data.get("result", str(result_body))
 
@@ -459,18 +478,16 @@ class MCPToolBridge:
                 return f"Error: BackMessage #4 failed: {e}"
             except (json.JSONDecodeError, Exception) as e:
                 logger.warning("Failed to process T2A NodeMessage: {}", e)
-                return str(result_body)  # 降级处理
+                return str(result_body)
         else:
             return str(result_body)
 
-        # 更新 session 的 trace metadata
-        if self._session_manager and chat_id and "recorded_hop" in metadata:
-            session = self._session_manager.get_or_create(chat_id)
+        # 更新 session 的 trace metadata（仍处于 locked_session 中）
+        if "recorded_hop" in metadata:
             session.set_trace_metadata({
                 "recorded_hop": metadata["recorded_hop"],
                 "protocol_url": metadata.get("protocol_url"),
             })
-            self._session_manager.save(session)
 
         return result
 
