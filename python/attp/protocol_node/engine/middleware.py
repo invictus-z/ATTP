@@ -167,7 +167,7 @@ async def intercept_record(
 
     # 构造 PendingMessage 用的 hop dict
     hop_dict = {
-        "node_did": recorded.sender_did,
+        "sender_did": recorded.sender_did,
         "target_did": recorded.target_did,
         "Content": recorded.content,
         "Timestamp": recorded.timestamp,
@@ -262,11 +262,11 @@ async def intercept_record(
                 error="hop_zero_must_be_u2a", sender_did=node_did,
             )
 
-        # 6b. Hop Count 校验
-        prev_completed_hc = session.get_last_completed_hop_count()
-        if prev_completed_hc is not None:
+        # 6b. Hop Count 校验（基于 hop_count_map）
+        max_a2a = session.get_max_a2a_count()
+        if max_a2a is not None:
             if behavior_type == "A2A":
-                if current_hc[0] != prev_completed_hc[0] + 1 or current_hc[1] != 0:
+                if current_hc[0] != max_a2a + 1 or current_hc[1] != 0:
                     session.remove_pending_message(nonce)
                     await session_manager.save(session)
                     return InterceptResult(
@@ -274,7 +274,15 @@ async def intercept_record(
                         error="hop_count_violation_a2a", sender_did=node_did,
                     )
             else:
-                if current_hc[0] != prev_completed_hc[0] or current_hc[1] != prev_completed_hc[1] + 1:
+                if current_hc[0] > max_a2a:
+                    session.remove_pending_message(nonce)
+                    await session_manager.save(session)
+                    return InterceptResult(
+                        status="error", node_type=node_type,
+                        error="hop_count_violation_non_a2a", sender_did=node_did,
+                    )
+                expected_intra = session.get_latest_intra_count(current_hc[0])
+                if expected_intra is None or current_hc[1] != expected_intra + 1:
                     session.remove_pending_message(nonce)
                     await session_manager.save(session)
                     return InterceptResult(
@@ -282,9 +290,9 @@ async def intercept_record(
                         error="hop_count_violation_non_a2a", sender_did=node_did,
                     )
 
-        # Step 7: 验证通过，更新可信名单
+        # Step 7: 验证通过，更新可信名单（使用回传2的 node_did 作为可信身份）
         session.complete_verification(
-            nonce, hop_count=current_hc, trusted_did=recorded.target_did,
+            nonce, hop_count=current_hc, trusted_did=node_did,
         )
         await session_manager.save(session)
 

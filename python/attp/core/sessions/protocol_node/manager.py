@@ -14,7 +14,7 @@ class ProtocolSessionManager:
     """Session store keyed by session_id — protocol node layer only.
 
     When ``storage`` is provided, ``save()`` persists verification state
-    (completed_nonces, last_hop_count, trusted_dids) to SQLite, and
+    (completed_nonces, hop_count_map, trusted_dids) to SQLite, and
     ``get_or_create()`` lazily restores it on first access.
 
     Without ``storage``, behaves as a pure in-memory dict (backward compatible).
@@ -31,8 +31,8 @@ class ProtocolSessionManager:
                 saved = await self._storage.load_verification_state(session_id)
                 if saved:
                     session.completed_nonces = saved["completed_nonces"]
-                    if saved["last_hop_count"] is not None:
-                        session.set_last_completed_hop_count(saved["last_hop_count"])
+                    if saved["hop_count_map"] is not None:
+                        session.hop_count_map = saved["hop_count_map"]
                     session.trusted_did_list = list(saved["trusted_dids"])
             self._sessions[session_id] = session
         return self._sessions[session_id]
@@ -47,7 +47,7 @@ class ProtocolSessionManager:
                 session.key,
                 {
                     "completed_nonces": session.completed_nonces,
-                    "last_hop_count": session.get_last_completed_hop_count(),
+                    "hop_count_map": session.hop_count_map,
                     "trusted_dids": session.get_trusted_did_list(),
                 },
             )

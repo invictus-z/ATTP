@@ -16,16 +16,16 @@ class ProtocolSessionRepository(BaseRepository):
 
     async def save_verification_state(self, session_id: str, state: dict) -> None:
         nonces_json = json.dumps(state.get("completed_nonces", []), ensure_ascii=False)
-        hc = state.get("last_hop_count")
-        hc_json = json.dumps(hc, ensure_ascii=False) if hc is not None else None
+        hcm = state.get("hop_count_map")
+        hcm_json = json.dumps(hcm, ensure_ascii=False) if hcm is not None else None
         dids_json = json.dumps(state.get("trusted_dids", []), ensure_ascii=False)
 
         await self._db.execute(
             """INSERT OR REPLACE INTO protocol_session_state
-               (session_id, completed_nonces_json, last_hop_count_json,
+               (session_id, completed_nonces_json, hop_count_map_json,
                 trusted_dids_json, updated_at)
                VALUES (?, ?, ?, ?, ?)""",
-            (session_id, nonces_json, hc_json, dids_json, _time.time()),
+            (session_id, nonces_json, hcm_json, dids_json, _time.time()),
         )
 
     async def load_verification_state(self, session_id: str) -> dict | None:
@@ -37,7 +37,7 @@ class ProtocolSessionRepository(BaseRepository):
             return None
         return {
             "completed_nonces": json.loads(row["completed_nonces_json"]),
-            "last_hop_count": json.loads(row["last_hop_count_json"]) if row["last_hop_count_json"] is not None else None,
+            "hop_count_map": json.loads(row["hop_count_map_json"]) if row["hop_count_map_json"] is not None else None,
             "trusted_dids": json.loads(row["trusted_dids_json"]),
         }
 

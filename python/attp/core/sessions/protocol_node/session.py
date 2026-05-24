@@ -30,7 +30,7 @@ class ProtocolSession:
     # -- 消息验证状态 --
     pending_messages: dict[str, PendingMessage] = field(default_factory=dict)
     completed_nonces: list[str] = field(default_factory=list)
-    last_completed_hop_count: list[int] | None = None
+    hop_count_map: dict[int, int] = field(default_factory=dict)
 
     # -- 可信名单 --
     trusted_did_list: list[str] = field(default_factory=list)
@@ -74,12 +74,13 @@ class ProtocolSession:
     # Hop count validation
     # ================================================================
 
-    def get_last_completed_hop_count(self) -> list[int] | None:
-        return self.last_completed_hop_count
+    def get_max_a2a_count(self) -> int | None:
+        """返回 hop_count_map 中最大的 key（即当前最大的 a2a_count）。"""
+        return max(self.hop_count_map) if self.hop_count_map else None
 
-    def set_last_completed_hop_count(self, hc: list[int]) -> None:
-        self.last_completed_hop_count = hc
-        self.updated_at = time.time()
+    def get_latest_intra_count(self, a2a_count: int) -> int | None:
+        """返回指定 a2a_count 对应的最新 intra_count。"""
+        return self.hop_count_map.get(a2a_count)
 
     # ================================================================
     # Trusted DID list
@@ -142,7 +143,7 @@ class ProtocolSession:
     ) -> None:
         """一次完成 Branch B 验证通过后的所有状态更新。"""
         self.remove_pending_message(nonce)
-        self.last_completed_hop_count = hop_count
+        self.hop_count_map[hop_count[0]] = hop_count[1]
         self.trusted_did_list.append(trusted_did)
         if nonce not in self.completed_nonces:
             self.completed_nonces.append(nonce)

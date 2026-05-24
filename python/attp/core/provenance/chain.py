@@ -146,11 +146,11 @@ class ChainManager:
             return False, "No stored record to verify against"
 
         prev_sign = prev_hop.get("Signature", "")
-        prev_sender_did = prev_hop.get("node_did", "")
+        prev_sender_did = prev_hop.get("sender_did", "")
 
         store_hop_hash = calculate_hop_hash(
             content=stored_hop.get("Content", ""),
-            sender_did=stored_hop.get("node_did", ""),
+            sender_did=stored_hop.get("sender_did", ""),
             target_did=stored_hop.get("target_did", ""),
             hop_count=stored_hop.get("Hop_Count", [0, 0]),
             timestamp=stored_hop.get("Timestamp", 0.0),

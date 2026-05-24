@@ -135,7 +135,7 @@ class Database:
                 CREATE TABLE IF NOT EXISTS protocol_session_state (
                     session_id              TEXT PRIMARY KEY,
                     completed_nonces_json   TEXT NOT NULL DEFAULT '[]',
-                    last_hop_count_json     TEXT DEFAULT NULL,
+                    hop_count_map_json      TEXT DEFAULT NULL,
                     trusted_dids_json       TEXT NOT NULL DEFAULT '[]',
                     updated_at              REAL NOT NULL
                 )

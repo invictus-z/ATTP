@@ -136,23 +136,21 @@ class MaliciousNodeDetector:
         logger.debug("Step 0a: 回传1身份签名验证成功")
 
         # --- Step 0b: 回传1可信名单校验 ---
-        latest_trusted = session.get_latest_trusted_did()
-        if latest_trusted is not None and bp1_did != latest_trusted:
+        if trusted_list and bp1_did not in trusted_list:
             logger.debug(
-                "Step 0b: 回传1 DID 与最新名单不一致 (bp1_did=%s, latest_trusted=%s)",
-                bp1_did, latest_trusted
+                "Step 0b: 回传1 DID 不在可信名单中 (bp1_did=%s, trusted_list=%s)",
+                bp1_did, trusted_list
             )
-            # 回传1 DID 与 最新名单不一致 → 可信名单中的节点为恶意
             return _build_report(
                 malicious_dids=list(trusted_list),
                 evidence_type=EvidenceType.TRUSTED_LIST_VIOLATION,
-                description=f"回传1的DID({bp1_did})与最新名单({latest_trusted})不一致，"
+                description=f"回传1的DID({bp1_did})不在可信名单中，"
                             f"可信名单中的节点为恶意，一起通报: {trusted_list}",
                 session_id=session_id,
                 nonce=nonce,
                 raw_evidence=raw_evidence,
             )
-        logger.debug("Step 0b: 回传1 DID 与最新名单一致")
+        logger.debug("Step 0b: 回传1 DID 在可信名单中")
 
         # --- Step 1: 回传2身份签名检查 ---
         bp2_did = back_msg_2.node_did
@@ -323,25 +321,24 @@ class MaliciousNodeDetector:
             )
         logger.debug("Case A: 身份签名验证成功")
 
-        # --- Case B: 身份签名解得开，但 DID ≠ 最新名单 ---
-        latest_trusted = session.get_latest_trusted_did()
-        if latest_trusted is not None and node_did != latest_trusted:
+        # --- Case B: 身份签名解得开，但 DID 不在可信名单中 ---
+        if trusted_list and node_did not in trusted_list:
             logger.debug(
-                "Case B: DID 与最新名单不一致 (node_did=%s, latest_trusted=%s)",
-                node_did, latest_trusted
+                "Case B: DID 不在可信名单中 (node_did=%s, trusted_list=%s)",
+                node_did, trusted_list
             )
             return _build_report(
                 malicious_dids=list(trusted_list),
                 evidence_type=EvidenceType.TRUSTED_LIST_VIOLATION,
-                description=f"单回传DID({node_did})与最新名单({latest_trusted})不一致，"
+                description=f"单回传DID({node_did})不在可信名单中，"
                             f"可信名单中的节点为恶意，一起通报: {trusted_list}",
                 session_id=session_id,
                 nonce=nonce,
                 raw_evidence=raw_evidence,
             )
-        logger.debug("Case B: DID 与最新名单一致")
+        logger.debug("Case B: DID 在可信名单中")
 
-        # --- Case C: 身份签名解得开，且 DID = 最新名单 ---
+        # --- Case C: 身份签名解得开，且 DID 在可信名单中 ---
         has_subsequent = session.has_subsequent_activity_after(nonce)
         logger.debug("Case C: 检查后续活动: has_subsequent=%s", has_subsequent)
 
@@ -392,7 +389,7 @@ class MaliciousNodeDetector:
         import json
         raw = json.dumps({
             "session_id": hop.get("session_id", ""),
-            "sender_did": hop.get("node_did", ""),
+            "sender_did": hop.get("sender_did", ""),
             "target_did": hop.get("target_did", ""),
             "content": hop.get("Content", ""),
             "timestamp": hop.get("Timestamp", 0.0),
