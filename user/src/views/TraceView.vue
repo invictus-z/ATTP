@@ -9,80 +9,94 @@ import {
   Info, Layers, AlertOctagon
 } from 'lucide-vue-next'
 
-// ─── Types ───────────────────────────────────────────────────────────
+  // ─── Types ───────────────────────────────────────────────────────────
 
-interface TraceNode {
-  id: string
-  name: string
-  url: string
-  status: 'online' | 'offline' | 'checking'
-}
-
-interface BehaviorEntry {
-  id?: number
-  content: string
-  target: string
-  timestamp: string | null
-  verification_status?: string
-  node_type?: string
-}
-
-interface HopNode {
-  hop_count: number[]
-  node_did: string
-  A2T: BehaviorEntry[]
-  A2U: BehaviorEntry[]
-  U2A: BehaviorEntry[]
-  A2A: BehaviorEntry[]
-  T2A: BehaviorEntry[]
-}
-
-interface AnalysisReport {
-  id: number
-  batch_index: number
-  from_trace_id: number
-  to_trace_id: number
-  timestamp: string | null
-  report: Record<string, any>
-}
-
-interface Alert {
-  report_id: number
-  batch_index: number
-  verdict: string
-  summary: string
-  from_trace_id: number
-  to_trace_id: number
-  timestamp: string | null
-  suspicious_nodes: SuspiciousNode[]
-}
-
-interface SuspiciousNode {
-  node_did: string | null
-  severity: string | null
-  taint_score: number | null
-  evidence: string | null
-}
-
-interface AggregateData {
-  session_id: string
-  intent: any
-  traces: {
-    nodes: HopNode[]
-    total_entries: number
+  interface TraceNode {
+    id: string
+    name: string
+    url: string
+    status: 'online' | 'offline' | 'checking'
   }
-  reports: AnalysisReport[]
-  alerts: Alert[]
-  total_batches: number
-  total_alerts: number
-}
 
-interface AnalysisStatus {
-  status: string
-  session_id?: string
-  phase?: string
-  progress?: number
-}
+  // 新的 API 返回的扁平化条目格式
+  interface BehaviorChainEntry {
+    id?: number
+    hop_count: number[]
+    field_type: string
+    sender_type: string
+    sender_did: string
+    target_did: string
+    content: string
+    timestamp: string | null
+  }
+
+  interface BehaviorEntry {
+    id?: number
+    content: string
+    target: string
+    timestamp: string | null
+    verification_status?: string
+    node_type?: string
+  }
+
+  interface HopNode {
+    hop_count: number[]
+    node_did: string
+    A2T: BehaviorEntry[]
+    A2U: BehaviorEntry[]
+    U2A: BehaviorEntry[]
+    A2A: BehaviorEntry[]
+    T2A: BehaviorEntry[]
+  }
+
+  interface AnalysisReport {
+    id: number
+    batch_index: number
+    from_trace_id: number
+    to_trace_id: number
+    timestamp: string | null
+    report: Record<string, any>
+  }
+
+  interface Alert {
+    report_id: number
+    batch_index: number
+    verdict: string
+    summary: string
+    from_trace_id: number
+    to_trace_id: number
+    timestamp: string | null
+    suspicious_nodes: SuspiciousNode[]
+  }
+
+  interface SuspiciousNode {
+    node_did: string | null
+    severity: string | null
+    taint_score: number | null
+    evidence: string | null
+  }
+
+  // 新的 API 返回格式
+  interface AggregateData {
+    session_id: string
+    intent: any
+    traces: {
+      chain: BehaviorChainEntry[]
+      total_entries: number
+      nodes?: HopNode[]  // 转换后的节点分组结构
+    }
+    reports: AnalysisReport[]
+    alerts: Alert[]
+    total_batches: number
+    total_alerts: number
+  }
+
+  interface AnalysisStatus {
+    status: string
+    session_id?: string
+    phase?: string
+    progress?: number
+  }
 
 // ─── Node Management State ───────────────────────────────────────────
 
@@ -219,6 +233,62 @@ const buildUrl = (path: string) => {
   return `${selectedNode.value.url.replace(/\/+$/, '')}${path}`
 }
 
+// ─── Data Transformation ──────────────────────────────────────────────
+
+/**
+ * 将扁平的 chain 转换为按节点分组的结构
+ * API 返回的 chain 是扁平数组，每个条目包含 hop_count 和 sender_did
+ * 需要按 (hop_count, sender_did) 分组，在每个节点内按 field_type 组织条目
+ */
+const transformChainToNodes = (chain: BehaviorChainEntry[]): HopNode[] => {
+  const nodeMap = new Map<string, HopNode>()
+  
+  chain.forEach(entry => {
+    const key = `${entry.hop_count.join('.')}_${entry.sender_did}`
+    
+    if (!nodeMap.has(key)) {
+      nodeMap.set(key, {
+        hop_count: entry.hop_count,
+        node_did: entry.sender_did,
+        A2T: [],
+        A2U: [],
+        U2A: [],
+        A2A: [],
+        T2A: [],
+      })
+    }
+    
+    const node = nodeMap.get(key)!
+    const behaviorEntry: BehaviorEntry = {
+      id: entry.id,
+      content: entry.content,
+      target: entry.target_did,
+      timestamp: entry.timestamp,
+    }
+    
+    // 根据 field_type 将条目添加到对应的数组
+    if (entry.field_type === 'A2T') {
+      node.A2T.push(behaviorEntry)
+    } else if (entry.field_type === 'A2U') {
+      node.A2U.push(behaviorEntry)
+    } else if (entry.field_type === 'U2A') {
+      node.U2A.push(behaviorEntry)
+    } else if (entry.field_type === 'A2A') {
+      node.A2A.push(behaviorEntry)
+    } else if (entry.field_type === 'T2A') {
+      node.T2A.push(behaviorEntry)
+    }
+  })
+  
+  // 按 hop_count 排序
+  return Array.from(nodeMap.values()).sort((a, b) => {
+    const [a0, a1] = a.hop_count
+    const [b0, b1] = b.hop_count
+    if (a0 !== b0) return a0 - b0
+    return a1 - b1
+  })
+}
+
 // ─── Data Fetching ───────────────────────────────────────────────────
 
 const fetchAggregate = async () => {
@@ -228,7 +298,16 @@ const fetchAggregate = async () => {
     const url = buildUrl(`/api/analysis/aggregate/${sessionIdInput.value.trim()}?protocol_node_address=${encodeURIComponent(selectedNode.value.url)}`)
     const result = await apiFetch(url)
     if (result.ok) {
-      aggregateData.value = result.data
+      const rawData = result.data as AggregateData
+      // 转换 chain 为 nodes
+      const nodes = transformChainToNodes(rawData.traces.chain)
+      aggregateData.value = {
+        ...rawData,
+        traces: {
+          ...rawData.traces,
+          nodes,
+        },
+      }
     } else {
       showToast('获取综合数据失败', 'error')
     }
@@ -247,7 +326,13 @@ const fetchBehavior = async () => {
     const url = buildUrl(`/api/behavior/${sessionIdInput.value.trim()}?protocol_node_address=${encodeURIComponent(selectedNode.value.url)}`)
     const result = await apiFetch(url)
     if (result.ok) {
-      behaviorData.value = result.data
+      const rawData = result.data as { session_id: string; chain: BehaviorChainEntry[]; protocol_node_address?: string }
+      // 转换 chain 为 nodes
+      const nodes = transformChainToNodes(rawData.chain)
+      behaviorData.value = {
+        session_id: rawData.session_id,
+        nodes,
+      }
     } else {
       showToast('获取行为溯源数据失败', 'error')
     }
