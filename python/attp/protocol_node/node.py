@@ -231,11 +231,11 @@ class ProtocolNode:
                 analyzer=horizontal_analyzer,
                 horizontal_state_mgr=horizontal_state_mgr,
                 tracer=self._tracer,
-                accumulation_threshold=getattr(analysis_cfg, "horizontal_accumulation_threshold", 5),
+                accumulation_threshold=getattr(analysis_cfg, "horizontal_threshold", 5),
             )
             logger.info(
                 "Cross-Lock horizontal axis enabled (accumulation_threshold={})",
-                getattr(analysis_cfg, "horizontal_accumulation_threshold", 5),
+                getattr(analysis_cfg, "horizontal_threshold", 5),
             )
 
         # --- 十字锁定协调器 ---

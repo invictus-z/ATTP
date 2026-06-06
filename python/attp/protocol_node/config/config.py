@@ -44,7 +44,7 @@ class AnalysisConfig(PNBase):
 
     # Cross-Lock 横向分析配置
     horizontal_enabled: bool = True               # 横向分析开关（依赖 enabled=True）
-    horizontal_accumulation_threshold: int = 5    # 累积多少次纵向分析后触发横向
+    horizontal_threshold: int = 5                 # 累积多少次纵向分析后触发横向
 
 
 class ProtocolNodeConfigFile(PNBase):

@@ -33,19 +33,26 @@
     - [3.6 行为记录分发（behavior\_controller）](#36-行为记录分发behavior_controller)
     - [3.7 消息追踪层完整数据流](#37-消息追踪层完整数据流)
   - [4. 污点分析层](#4-污点分析层)
-    - [4.1 AnalysisOrchestrator 集成与生命周期](#41-analysisorchestrator-集成与生命周期)
+    - [4.1 CrossLockCoordinator 集成与生命周期](#41-crosslockcoordinator-集成与生命周期)
       - [4.1.1 构建条件](#411-构建条件)
       - [4.1.2 注入路径](#412-注入路径)
       - [4.1.3 配置模型](#413-配置模型)
       - [4.1.4 热重载](#414-热重载)
     - [4.2 U2A 意图提取触发](#42-u2a-意图提取触发)
-    - [4.3 批次化分析调度](#43-批次化分析调度)
-    - [4.4 分析 API 端点](#44-分析-api-端点)
-      - [4.4.1 分析报告查询](#441-分析报告查询)
-      - [4.4.2 意图状态查询](#442-意图状态查询)
-      - [4.4.3 聚合查询（traces + reports + alerts）](#443-聚合查询traces--reports--alerts)
-      - [4.4.4 手动触发分析](#444-手动触发分析)
-      - [4.4.5 分析任务状态](#445-分析任务状态)
+    - [4.3 纵轴批次化分析调度](#43-纵轴批次化分析调度)
+    - [4.4 横轴累积触发](#44-横轴累积触发)
+    - [4.5 纵向分析 API 端点](#45-纵向分析-api-端点)
+      - [4.5.1 纵向分析报告查询](#451-纵向分析报告查询)
+      - [4.5.2 意图状态查询](#452-意图状态查询)
+      - [4.5.3 聚合查询（traces + reports + alerts）](#453-聚合查询traces--reports--alerts)
+      - [4.5.4 手动触发纵向分析](#454-手动触发纵向分析)
+      - [4.5.5 纵向分析任务状态](#455-纵向分析任务状态)
+    - [4.6 横向分析 API 端点](#46-横向分析-api-端点)
+      - [4.6.1 DID 横向分析报告](#461-did-横向分析报告)
+      - [4.6.2 DID 横向累积状态](#462-did-横向累积状态)
+      - [4.6.3 横向分析任务状态](#463-横向分析任务状态)
+      - [4.6.4 手动触发横向分析](#464-手动触发横向分析)
+      - [4.6.5 横向分析总览](#465-横向分析总览)
   - [5. 配置模型与热重载](#5-配置模型与热重载)
     - [5.1 配置模型层级](#51-配置模型层级)
     - [5.2 配置加载](#52-配置加载)
@@ -54,8 +61,10 @@
   - [7. 错误码体系](#7-错误码体系)
   - [8. API 端点汇总](#8-api-端点汇总)
     - [8.1 Record 接收](#81-record-接收)
-    - [8.2 行为溯源与分析](#82-行为溯源与分析)
-    - [8.3 恶意节点查询](#83-恶意节点查询)
+    - [8.2 行为溯源](#82-行为溯源)
+    - [8.3 纵向分析](#83-纵向分析)
+    - [8.4 横向分析](#84-横向分析)
+    - [8.5 恶意节点查询](#85-恶意节点查询)
   - [9. 设计模式与总结](#9-设计模式与总结)
     - [9.1 设计模式](#91-设计模式)
     - [9.2 架构特点](#92-架构特点)
@@ -70,7 +79,7 @@ Protocol Node（协议节点/溯源节点）是 ATTP（Agents Traceability and T
 | 协议层 | Protocol Node 对应模块 | 说明 |
 |--------|----------------------|------|
 | **消息追踪层** | `engine/middleware.py`、`engine/malicious_detector.py`、`api/record.py`、`api/malicious.py`、`api/trace.py` | 接收双轮回溯消息、身份验证、内容一致性校验、恶意节点判定、行为溯源查询 |
-| **污点分析层** | `AnalysisOrchestrator`（core 层）集成、`api/trace.py` 分析路由 | LLM 驱动的语义污点检测、意图提取、批次化分析、报告聚合 |
+| **污点分析层** | `CrossLockCoordinator`（core 层）集成、`api/analysis/vertical.py`、`api/analysis/horizontal.py` | 十字锁定污点分析：纵轴（Session-Level）+ 横轴（DID-Level）LLM 驱动的语义检测 |
 
 Protocol Node 的核心职责：
 
@@ -79,8 +88,8 @@ Protocol Node 的核心职责：
 | 双轮回溯确认 | 接收通信双方的 BackMessage，通过 nonce 匹配实现不可否认性验证 |
 | 恶意节点检测 | 基于决策树的自动恶意判定（身份篡改、内容篡改、可信名单违规等 7 种证据类型） |
 | 行为溯源存储 | 将验证通过的行为记录持久化到 SQLite，支持按 session 查询完整行为链 |
-| 语义污点分析 | 可选集成 LLM 分析引擎，对行为链进行意图对齐和节点间影响力检测 |
-| 恶意节点档案 | 累计恶意行为记录，维护节点严重等级（clean → warning → dangerous → banned） |
+| 语义污点分析 | 可选集成十字锁定分析引擎（纵轴+横轴），对行为链进行意图对齐和全局行为检测 |
+| 恶意节点档案 | 累计恶意行为记录（统一协议审查/纵向/横向三个来源），维护节点严重等级（clean → warning → dangerous → banned） |
 
 ---
 
@@ -109,8 +118,12 @@ protocol_node/
 └── api/
     ├── __init__.py
     ├── record.py                    # /record 接收路由 — 双轮回溯确认入口
-    ├── trace.py                     # /api/* 溯源与分析路由
-    └── malicious.py                 # /api/malicious/* 恶意节点查询路由
+    ├── trace.py                     # /api/* 溯源查询路由
+    ├── malicious.py                 # /api/malicious/* 恶意节点查询路由（统一格式）
+    └── analysis/                    # 污点分析 API 子路由
+        ├── __init__.py
+        ├── vertical.py              # /api/analysis/* 纵向分析路由
+        └── horizontal.py            # /api/horizontal/* 横向分析路由
 ```
 
 ### 模块依赖关系
@@ -146,13 +159,24 @@ ProtocolNode (node.py)
   │     │     └── middleware.intercept_record()  — 验证管道
   │     │
   │     ├── behavior router (api/trace.py)
-  │     │     └── ProtocolTracer — 行为溯源 + 分析报告查询
+  │     │     └── ProtocolTracer — 行为溯源查询
+  │     │
+  │     ├── analysis sub-routers (api/analysis/)
+  │     │     ├── vertical.py   — 纵向分析 API
+  │     │     └── horizontal.py — 横向分析 API
   │     │
   │     └── malicious router (api/malicious.py)
-  │           └── ProtocolTracer — 恶意节点查询
+  │           └── ProtocolTracer — 恶意节点查询（统一格式，支持 source 筛选）
   │
-  └── AnalysisOrchestrator (core/analysis/orchestrator.py) [可选]
-        └── SemanticTaintAnalyzer — LLM 语义污点分析
+  └── CrossLockCoordinator (core/analysis/cross_lock.py) [可选]
+        ├── VerticalOrchestrator — 纵向分析编排
+        │     ├── VerticalTaintAnalyzer — LLM 纵向污点分析
+        │     ├── VerticalAnalysisManager — 纵向状态管理
+        │     └── ProtocolTracer
+        └── HorizontalOrchestrator [可选] — 横向分析编排
+              ├── HorizontalTaintAnalyzer — LLM 横向污点分析
+              ├── HorizontalAnalysisManager — 横向状态管理
+              └── ProtocolTracer
 ```
 
 ### 启动流程
@@ -171,8 +195,12 @@ ProtocolNode.__init__(config_path)
        ├── 6. ProtocolPort(tracer, session_manager,     → 统一端口
        │     host, port, did_resolver, behavior_controller,
        │     malicious_detector)
-       ├── 7. _build_orchestrator() [可选]             → LLM 分析引擎
-       │     └── port.set_orchestrator(orchestrator)
+       ├── 7. _build_orchestrator() [可选]             → CrossLockCoordinator（纵轴 + 横轴）
+       │     ├── VerticalOrchestrator + VerticalAnalysisManager
+       │     ├── HorizontalOrchestrator + HorizontalAnalysisManager [可选]
+       │     └── CrossLockCoordinator 串联两轴
+       │     └── port.set_orchestrator(coordinator)
+       │     └── 挂载 vertical / horizontal 分析子路由
        ├── 8. port.start()                             → uvicorn 启动
        └── 9. _periodic_sweep() Task                   → 过期 PendingMessage 扫描
 ```
@@ -213,29 +241,38 @@ ProtocolPort._mount_routes()
   │
   ├── /api                       → behavior router (api/trace.py)
   │     ├── GET  /api/status                  — 健康检查
-  │     ├── GET  /api/behavior/{session_id}   — 行为溯源链
-  │     ├── GET  /api/analysis/{session_id}   — 分析报告
+  │     └── GET  /api/behavior/{session_id}   — 行为溯源链
+  │
+  ├── /api/analysis              → vertical analysis router (api/analysis/vertical.py)
+  │     ├── GET  /api/analysis/{session_id}   — 纵向分析报告
   │     ├── GET  /api/analysis/intent/{session_id}   — 意图状态
-  │     ├── GET  /api/analysis/aggregate/{session_id} — 聚合查询
-  │     ├── POST /api/analysis/trigger/{session_id}  — 手动触发分析
-  │     └── GET  /api/analysis/status/{session_id}   — 分析任务状态
+  │     ├── GET  /api/analysis/aggregate/{session_id} — 聚合查询（traces+reports+alerts）
+  │     ├── POST /api/analysis/trigger/{session_id}  — 手动触发纵向分析
+  │     └── GET  /api/analysis/status/{session_id}   — 纵向分析任务状态
+  │
+  ├── /api/horizontal            → horizontal analysis router (api/analysis/horizontal.py)
+  │     ├── GET  /api/horizontal/report/{did}         — DID 横向分析报告
+  │     ├── GET  /api/horizontal/state/{did}           — DID 横向累积状态
+  │     ├── GET  /api/horizontal/status/{did}          — 横向分析任务状态
+  │     ├── POST /api/horizontal/trigger/{did}         — 手动触发横向分析
+  │     └── GET  /api/horizontal/overview              — 横向分析总览
   │
   └── /api/malicious             → malicious router (api/malicious.py)
-        ├── GET  /api/malicious/session/{session_id}  — 按 session 查询
-        ├── GET  /api/malicious/did/{did}             — 按 DID 查询
+        ├── GET  /api/malicious/session/{session_id}?source=...  — 按 session 查询
+        ├── GET  /api/malicious/did/{did}?source=...             — 按 DID 查询
         ├── GET  /api/malicious/dossier/{did}         — 单个档案
         └── GET  /api/malicious/dossiers              — 全部档案
 ```
 
-**AnalysisOrchestrator Late-Binding**：
+**CrossLockCoordinator Late-Binding**：
 
-由于 Orchestrator 在 `start()` 后可能被动态注入或替换（热重载），ProtocolPort 使用**可变列表** `[None]` 作为 holder 实现延迟绑定：
+由于 Coordinator 在 `start()` 后可能被动态注入或替换（热重载），ProtocolPort 使用**可变列表** `[None]` 作为 holder 实现延迟绑定：
 
 ```python
 self._orch_holder: list = [None]  # 长度为 1 的可变列表
 
-def set_orchestrator(self, orchestrator) -> None:
-    self._orch_holder[0] = orchestrator  # 所有路由通过 _orch_holder[0] 访问
+def set_orchestrator(self, coordinator) -> None:
+    self._orch_holder[0] = coordinator  # 所有路由通过 _orch_holder[0] 访问（CrossLockCoordinator 实例）
 ```
 
 **生命周期**：
@@ -573,23 +610,41 @@ did:wba:localhost:8000:path:segment
 
 #### 3.4.2 端点说明
 
+所有恶意报告端点现在使用**统一格式**（`malicious_reports` 表），支持 `?source=` 查询参数筛选来源。
+
+**统一报告格式**（`_format_report`）：
+
+```json
+{
+  "id": 1,
+  "source": "protocol_review",
+  "target_did": "did:wba:...",
+  "node_type": "agent",
+  "session_id": "...",
+  "evidence_type": "identity_tampering",
+  "severity": "high",
+  "taint_score": 0.85,
+  "evidence_description": "...",
+  "nonce": "...",
+  "report_id": null,
+  "timestamp": 1234567890.0,
+  "raw_evidence": {...}
+}
+```
+
+| `source` 值 | 说明 |
+|-------------|------|
+| `protocol_review` | 双轮回溯确认中由 `MaliciousNodeDetector` 检测到 |
+| `vertical_analysis` | 纵向语义污点分析中由 `VerticalOrchestrator` 检测到 |
+| `horizontal_analysis` | 横向行为分析中由 `HorizontalOrchestrator` 检测到 |
+
 **按 session 查询**：
 
 ```
-GET /api/malicious/session/{session_id}
+GET /api/malicious/session/{session_id}?source=vertical_analysis
 → {
     "session_id": "...",
-    "reports": [
-      {
-        "id": 1,
-        "malicious_did": "did:wba:...",
-        "evidence_type": "identity_tampering",
-        "evidence_description": "...",
-        "nonce": "...",
-        "timestamp": 1234567890.0,
-        "raw_evidence": {...}
-      }
-    ],
+    "reports": [_format_report(...)],
     "total": 1
   }
 ```
@@ -597,10 +652,10 @@ GET /api/malicious/session/{session_id}
 **按 DID 查询**：
 
 ```
-GET /api/malicious/did/{did}
+GET /api/malicious/did/{did}?source=horizontal_analysis
 → {
-    "malicious_did": "...",
-    "reports": [...],
+    "target_did": "...",
+    "reports": [_format_report(...)],
     "total": N
   }
 ```
@@ -759,9 +814,9 @@ class BehaviorController:
 
 ## 4. 污点分析层
 
-污点分析层通过可选集成的 `AnalysisOrchestrator` 实现 LLM 驱动的语义污点检测，在消息追踪层验证通过后自动触发。
+污点分析层采用**十字锁定（Cross-Lock）架构**，通过可选集成的 `CrossLockCoordinator` 实现 LLM 驱动的语义污点检测。纵轴在消息追踪层验证通过后自动触发，横轴在纵轴完成后通过累积计数器自动触发。
 
-### 4.1 AnalysisOrchestrator 集成与生命周期
+### 4.1 CrossLockCoordinator 集成与生命周期
 
 #### 4.1.1 构建条件
 
@@ -770,27 +825,41 @@ def _build_orchestrator(self):
     analysis_cfg = self._config.analysis
     if not analysis_cfg.enabled or not analysis_cfg.api_key:
         return None  # 未启用或未配置 API Key
+    # 构建 VerticalOrchestrator
+    # 如果配置了 accumulation_threshold > 0，同时构建 HorizontalOrchestrator
+    # 用 CrossLockCoordinator 串联两轴
 ```
 
-Orchestrator 仅在以下条件同时满足时创建：
+Coordinator 仅在以下条件同时满足时创建：
 
 | 条件 | 配置字段 | 默认值 |
 |------|---------|--------|
 | 启用分析 | `analysis.enabled` | `false` |
 | 配置 API Key | `analysis.api_key` | `""` |
 
+横轴（HorizontalOrchestrator）额外条件：
+
+| 条件 | 配置字段 | 默认值 |
+|------|---------|--------|
+| 累积阈值 > 0 | `analysis.accumulation_threshold` | `5` |
+
 #### 4.1.2 注入路径
 
 ```
 ProtocolNode.start()
   │
-  ├── _build_orchestrator() → orchestrator
-  └── port.set_orchestrator(orchestrator)
+  ├── _build_orchestrator() → CrossLockCoordinator
+  │     ├── VerticalOrchestrator + VerticalAnalysisManager
+  │     ├── HorizontalOrchestrator + HorizontalAnalysisManager [可选]
+  │     └── CrossLockCoordinator(vertical, horizontal)
+  └── port.set_orchestrator(coordinator)
         │
-        └── self._orch_holder[0] = orchestrator
+        └── self._orch_holder[0] = coordinator
               │
-              ├── record.py 通过 orchestrator_holder[0] 访问
-              └── trace.py 通过 _orch_ref[0] 访问
+              ├── record.py 通过 coordinator 访问（纵向回调）
+              ├── vertical.py 通过 coordinator.vertical 访问
+              ├── horizontal.py 通过 coordinator.horizontal 访问
+              └── Cross-Lock: 纵向完成 → 自动触发横向累积
 ```
 
 #### 4.1.3 配置模型
@@ -801,7 +870,8 @@ class AnalysisConfig(PNBase):
     api_key: str = ""                          # LLM API Key
     base_url: str = "https://api.openai.com/v1"  # API Base URL
     model: str = "gpt-4o"                      # LLM 模型名称
-    report_batch_size: int = 10                # 批次大小（多少条 record 触发一次分析）
+    report_batch_size: int = 10                # 纵向批次大小（多少条 record 触发一次纵向分析）
+    accumulation_threshold: int = 5            # 横向累积阈值（多少次纵向分析后触发横向分析）
 ```
 
 #### 4.1.4 热重载
@@ -810,14 +880,14 @@ class AnalysisConfig(PNBase):
 async def reload_config(self) -> None:
     # 重新加载配置文件
     self._config = ProtocolNodeConfigFile.load(self._config_path)
-    # 重建 Orchestrator（分析配置可能变化）
+    # 重建 CrossLockCoordinator（分析配置可能变化）
     self._orchestrator = self._build_orchestrator()
     self.set_orchestrator(self._orchestrator)
 ```
 
 ### 4.2 U2A 意图提取触发
 
-当收到 `hop_count=[0, 0]` 的 U2A（User → Agent）消息时，Orchestrator 会从用户原始输入中提取结构化意图：
+当收到 `hop_count=[0, 0]` 的 U2A（User → Agent）消息时，Coordinator 委托纵向编排器从用户原始输入中提取结构化意图：
 
 ```python
 # record.py 中的触发逻辑
@@ -831,29 +901,30 @@ if behavior_type == "U2A" and _orch and session_id and stored.hop.get("Hop_Count
 | 条件 | 说明 |
 |------|------|
 | `behavior_type == "U2A"` | 行为类型为 User → Agent |
-| `_orch is not None` | Orchestrator 已启用 |
+| `_orch is not None` | CrossLockCoordinator 已启用 |
 | `hop_count == [0, 0]` | 会话的第一条消息（用户原始输入） |
 
 **意图提取流程**：
 
 ```
-on_field_U2A_recorded(session_id, content)
-  │
-  ├── SemanticTaintAnalyzer.extract_intent(content)
-  │     → LLM 调用（INTENT_EXTRACTION_PROMPT）
-  │     → IntentDescriptor
-  │       ├── original_task      — 用户原始输入
-  │       ├── core_objective     — 核心目标（一句话）
-  │       ├── constraints        — 约束条件列表
-  │       ├── involved_capabilities — 涉及的能力域
-  │       └── risk_level         — 风险等级 (low/medium/high)
-  │
-  └── 持久化到 Session + SQLite
+CrossLockCoordinator.on_field_U2A_recorded(session_id, content)
+  → VerticalOrchestrator.on_field_U2A_recorded(session_id, content)
+      │
+      ├── VerticalTaintAnalyzer.extract_intent(content)
+      │     → LLM 调用（INTENT_EXTRACTION_PROMPT）
+      │     → IntentDescriptor
+      │       ├── original_task      — 用户原始输入
+      │       ├── core_objective     — 核心目标（一句话）
+      │       ├── constraints        — 约束条件列表
+      │       ├── involved_capabilities — 涉及的能力域
+      │       └── risk_level         — 风险等级 (low/medium/high)
+      │
+      └── VerticalAnalysisManager.set_intent() → 持久化到 Session + SQLite
 ```
 
-### 4.3 批次化分析调度
+### 4.3 纵轴批次化分析调度
 
-每条验证通过的 record 都会递增批次计数器，达到 `report_batch_size` 时自动触发分析：
+每条验证通过的 record 都会递增纵向批次计数器，达到 `report_batch_size` 时自动触发纵向分析：
 
 ```python
 # record.py 中的触发逻辑
@@ -861,48 +932,77 @@ if _orch and session_id:
     await _orch.on_record_received(session_id)
 ```
 
-**批次分析流程**：
+**纵向批次分析流程**：
 
 ```
-on_record_received(session_id)
-  │
-  ├── session.increment_report_count()
-  ├── count < batch_size? → 返回，等待更多 record
-  │
-  └── count >= batch_size → 触发分析
-        │
-        ├── run_analysis(session_id)
-        │     │
-        │     ├── 1. 检查 intent 是否已提取（否则重试，最多 3 次）
-        │     ├── 2. recover_traces_since(session_id, last_trace_id)
-        │     │     → 从 SQLite 获取未分析的 behavior_traces
-        │     ├── 3. SemanticTaintAnalyzer.analyze(traces, intent)
-        │     │     → 两阶段分析:
-        │     │       Phase 1: 意图对齐检查
-        │     │       Phase 2: 节点间影响力分析
-        │     │     → TaintReport
-        │     │       ├── node_verdicts — 各节点判定
-        │     │       │     ├── aligned: bool
-        │     │       │     ├── deviation_type: none/goal_hijack/constraint_violation/...
-        │     │       │     ├── influence_detected: bool
-        │     │       │     ├── influence_type: instruction_injection/info_collection/...
-        │     │       │     ├── taint_score: 0.0-1.0
-        │     │       │     └── severity: none/low/medium/high
-        │     │       ├── overall_verdict: clean/suspicious/malicious/error
-        │     │       └── context_summary — 传递给下一批次的上下文
-        │     │
-        │     ├── 4. save_analysis_report() → SQLite
-        │     ├── 5. 更新 session 状态（重置计数、移动游标、存储上下文）
-        │     └── 6. suspicious/malicious? → 安全告警
-        │
-        └── reset_report_count()
+CrossLockCoordinator.on_record_received(session_id)
+  → VerticalOrchestrator.on_record_received(session_id)
+      │
+      ├── VerticalAnalysisManager.increment_report_count()
+      ├── count < batch_size? → 返回，等待更多 record
+      │
+      └── count >= batch_size → 触发纵向分析
+            │
+            ├── run_analysis(session_id)
+            │     │
+            │     ├── 1. 检查 intent 是否已提取
+            │     ├── 2. recover_traces_since(session_id, last_trace_id)
+            │     │     → 从 SQLite 获取未分析的 behavior_traces
+            │     ├── 3. VerticalTaintAnalyzer.analyze(traces, intent)
+            │     │     → 按 5 种 field_type 的风险审查:
+            │     │       A2A: 指令注入、目标替换、社工欺骗、隐蔽协作
+            │     │       A2T: 越权工具调用、参数篡改、数据外泄
+            │     │       A2U: 信息误导、数据投毒、认知操控
+            │     │       U2A: Prompt注入、越权指令、约束绕过
+            │     │       T2A: 返回值篡改、注入传播
+            │     │     → VerticalTaintReport（含 analyzed_dids）
+            │     │
+            │     ├── 4. save_analysis_report() → SQLite（返回 report_row_id）
+            │     ├── 5. 更新纵向状态（重置计数、移动游标、存储上下文）
+            │     ├── 6. suspicious/malicious?
+            │     │     → save_malicious_report(source="vertical_analysis")
+            │     └── 7. Cross-Lock: 遍历 analyzed_dids → 触发横向累积
+            │
+            └── VerticalAnalysisManager.reset_report_count()
 ```
 
-### 4.4 分析 API 端点
+### 4.4 横轴累积触发
 
-`api/trace.py` 提供以下分析相关端点：
+纵轴分析完成后，CrossLockCoordinator 自动为每个涉及的 DID 调用横向累积：
 
-#### 4.4.1 分析报告查询
+```
+CrossLockCoordinator._on_vertical_done(did, session_id)
+  → HorizontalOrchestrator.on_vertical_analysis_completed(did, session_id)
+      │
+      ├── HorizontalAnalysisManager.increment_accumulation(did)
+      ├── count < threshold? → 返回，等待更多纵向分析
+      │
+      └── count >= threshold → 自动触发横向分析
+            │
+            ├── run_analysis(did)
+            │     │
+            │     ├── 1. 恢复 per-DID 游标
+            │     ├── 2. recover_traces_by_did_since(did, last_trace_id)
+            │     ├── 3. 推导 node_type（agent / tool / user）
+            │     ├── 4. 构建 CrossSessionProfile
+            │     ├── 5. 选择 node_type 专用 Prompt
+            │     │     agent: 跨Session指令链 / 缓慢投毒 / 目标替换 / 行为漂移
+            │     │     tool: 工具滥用 / 数据泄露 / 接口异常
+            │     │     user: 社工攻击 / 长期操控 / 账号异常
+            │     ├── 6. HorizontalTaintAnalyzer.analyze()
+            │     ├── 7. save_horizontal_report() → SQLite
+            │     ├── 8. 更新游标，重置累积计数
+            │     └── 9. suspicious/malicious?
+            │           → save_malicious_report(source="horizontal_analysis")
+            │
+            └── HorizontalAnalysisManager.reset_accumulation(did)
+```
+
+### 4.5 纵向分析 API 端点
+
+`api/analysis/vertical.py` 提供以下纵向分析相关端点：
+
+#### 4.5.1 纵向分析报告查询
 
 ```
 GET /api/analysis/{session_id}
@@ -915,10 +1015,11 @@ GET /api/analysis/{session_id}
         "from_trace_id": 1,
         "to_trace_id": 10,
         "timestamp": 1234567890.0,
-        "report": {                    // 完整 TaintReport
+        "report": {                    // 完整 VerticalTaintReport
           "node_verdicts": [...],
           "overall_verdict": "clean",
-          "context_summary": "..."
+          "context_summary": "...",
+          "analyzed_dids": ["did:wba:..."]
         }
       }
     ],
@@ -926,7 +1027,7 @@ GET /api/analysis/{session_id}
   }
 ```
 
-#### 4.4.2 意图状态查询
+#### 4.5.2 意图状态查询
 
 ```
 GET /api/analysis/intent/{session_id}
@@ -948,7 +1049,7 @@ GET /api/analysis/intent/{session_id}
   }
 ```
 
-#### 4.4.3 聚合查询（traces + reports + alerts）
+#### 4.5.3 聚合查询（traces + reports + alerts）
 
 ```
 GET /api/analysis/aggregate/{session_id}?protocol_node_address=...
@@ -959,7 +1060,7 @@ GET /api/analysis/aggregate/{session_id}?protocol_node_address=...
       "chain": [...],                    // 完整行为链
       "total_entries": 15
     },
-    "reports": [...],                    // 所有分析报告
+    "reports": [...],                    // 所有纵向分析报告
     "alerts": [                          // 仅 suspicious/malicious 的告警
       {
         "report_id": 2,
@@ -986,7 +1087,7 @@ GET /api/analysis/aggregate/{session_id}?protocol_node_address=...
 
 **Alert 过滤规则**：仅提取 `overall_verdict` 为 `suspicious` 或 `malicious` 的报告，且仅包含 `severity` 为 `medium` 或 `high` 的节点。
 
-#### 4.4.4 手动触发分析
+#### 4.5.4 手动触发纵向分析
 
 ```
 POST /api/analysis/trigger/{session_id}
@@ -996,7 +1097,7 @@ POST /api/analysis/trigger/{session_id}
 
 Fire-and-forget 模式，立即返回，分析在后台异步执行。
 
-#### 4.4.5 分析任务状态
+#### 4.5.5 纵向分析任务状态
 
 ```
 GET /api/analysis/status/{session_id}
@@ -1005,6 +1106,90 @@ GET /api/analysis/status/{session_id}
     "session_id": "...",
     "phase": "analyzing",      // extracting_intent / analyzing / saving / ...
     "started_at": 1234567890.0
+  }
+```
+
+### 4.6 横向分析 API 端点
+
+`api/analysis/horizontal.py` 提供以下横向分析相关端点：
+
+#### 4.6.1 DID 横向分析报告
+
+```
+GET /api/horizontal/report/{did}
+→ {
+    "did": "did:wba:...",
+    "reports": [
+      {
+        "id": 1,
+        "batch_index": 0,
+        "node_type": "agent",
+        "from_trace_id": 1,
+        "to_trace_id": 50,
+        "sessions_scanned": 3,
+        "timestamp": 1234567890.0,
+        "report": {                    // 完整 HorizontalTaintReport
+          "did_verdict": {...},
+          "overall_verdict": "suspicious",
+          "context_summary": "..."
+        }
+      }
+    ],
+    "total_batches": 1
+  }
+```
+
+#### 4.6.2 DID 横向累积状态
+
+```
+GET /api/horizontal/state/{did}
+→ {
+    "did": "did:wba:...",
+    "accumulated_count": 3,
+    "last_trace_id": 50,
+    "batch_index": 0,
+    "has_context": false
+  }
+```
+
+#### 4.6.3 横向分析任务状态
+
+```
+GET /api/horizontal/status/{did}
+→ {
+    "status": "running",       // running / completed / not_found
+    "did": "did:wba:...",
+    "phase": "analyzing"       // recovering_traces / analyzing / saving_results / ...
+  }
+```
+
+#### 4.6.4 手动触发横向分析
+
+```
+POST /api/horizontal/trigger/{did}
+→ {"triggered": true, "did": "did:wba:...", "status": "running"}
+或 {"triggered": false, "reason": "horizontal_disabled"}
+```
+
+#### 4.6.5 横向分析总览
+
+```
+GET /api/horizontal/overview
+→ {
+    "horizontal_enabled": true,
+    "accumulation_threshold": 5,
+    "horizontal_dids": [
+      {
+        "did": "did:wba:...",
+        "accumulated_count": 3,
+        "last_horizontal_analysis": {
+          "batch_index": 0,
+          "verdict": "clean",
+          "timestamp": 1234567890.0
+        }
+      }
+    ],
+    "total_dids": 3
   }
 ```
 
@@ -1031,7 +1216,8 @@ ProtocolNodeConfigFile (~/.attp/protocol_node/config.json)
         ├── api_key: str = ""
         ├── base_url: str = "https://api.openai.com/v1"
         ├── model: str = "gpt-4o"
-        └── report_batch_size: int = 10
+        ├── report_batch_size: int = 10
+        └── accumulation_threshold: int = 5      # 横向分析累积阈值（0 = 禁用横轴）
 ```
 
 ### 5.2 配置加载
@@ -1052,7 +1238,7 @@ async def reload_config(self) -> None:
 | 变化项 | 处理策略 |
 |--------|---------|
 | 端口（host/port） | 仅记录 warning，需手动重启生效 |
-| 分析配置（enabled/api_key/model 等） | 重建 `AnalysisOrchestrator` 并注入 |
+| 分析配置（enabled/api_key/model 等） | 重建 `CrossLockCoordinator`（含纵轴 + 横轴）并注入 |
 
 ---
 
@@ -1121,24 +1307,39 @@ main()
 |------|------|------|
 | POST | `/record` | 接收并处理 BackMessage（双轮回溯确认入口） |
 
-### 8.2 行为溯源与分析
+### 8.2 行为溯源
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/api/status` | 健康检查 |
 | GET | `/api/behavior/{session_id}` | 行为溯源链查询 |
-| GET | `/api/analysis/{session_id}` | 分析报告查询 |
-| GET | `/api/analysis/intent/{session_id}` | 意图状态查询 |
-| GET | `/api/analysis/aggregate/{session_id}` | 聚合查询（traces + reports + alerts） |
-| POST | `/api/analysis/trigger/{session_id}` | 手动触发分析 |
-| GET | `/api/analysis/status/{session_id}` | 异步分析任务状态 |
 
-### 8.3 恶意节点查询
+### 8.3 纵向分析
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/api/malicious/session/{session_id}` | 按 session 查询恶意报告 |
-| GET | `/api/malicious/did/{did}` | 按 DID 查询恶意报告 |
+| GET | `/api/analysis/{session_id}` | 纵向分析报告查询 |
+| GET | `/api/analysis/intent/{session_id}` | 意图状态查询 |
+| GET | `/api/analysis/aggregate/{session_id}` | 聚合查询（traces + reports + alerts） |
+| POST | `/api/analysis/trigger/{session_id}` | 手动触发纵向分析 |
+| GET | `/api/analysis/status/{session_id}` | 纵向分析任务状态 |
+
+### 8.4 横向分析
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/horizontal/report/{did}` | DID 横向分析报告 |
+| GET | `/api/horizontal/state/{did}` | DID 横向累积状态 |
+| GET | `/api/horizontal/status/{did}` | 横向分析任务状态 |
+| POST | `/api/horizontal/trigger/{did}` | 手动触发横向分析 |
+| GET | `/api/horizontal/overview` | 横向分析总览 |
+
+### 8.5 恶意节点查询
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/malicious/session/{session_id}?source=...` | 按 session 查询恶意报告（支持 source 筛选） |
+| GET | `/api/malicious/did/{did}?source=...` | 按 DID 查询恶意报告（支持 source 筛选） |
 | GET | `/api/malicious/dossier/{did}` | 单个节点档案（含违规明细） |
 | GET | `/api/malicious/dossiers` | 全部节点档案（可按 severity 筛选） |
 
@@ -1151,12 +1352,14 @@ main()
 | 模式 | 应用场景 | 说明 |
 |------|---------|------|
 | **Facade（门面）** | `ProtocolNode` | 封装所有组件的创建和生命周期管理，对外仅暴露 `start()/stop()` |
+| **Coordinator（协调器）** | `CrossLockCoordinator` | 串联纵轴和横轴的触发关系，解耦纵横编排器 |
 | **Pipeline（管道）** | `middleware.intercept_record()` | 7 步顺序验证管线，每步可提前终止 |
-| **Strategy（策略）** | `BehaviorController` | 按 node_type 分发到不同处理器 |
+| **Strategy（策略）** | `BehaviorController`；横向分析按 `node_type` 选择 Prompt | 按 node_type 分发到不同处理器；agent/tool/user 隔离审查 |
 | **Decision Tree（决策树）** | `MaliciousNodeDetector` | 双回传 5 步 + 单回传 3 分支的树形判定逻辑 |
-| **Late Binding（延迟绑定）** | `orchestrator_holder: list` | 使用可变容器实现 Orchestrator 的延迟注入和热替换 |
+| **Late Binding（延迟绑定）** | `orchestrator_holder: list` | 使用可变容器实现 CrossLockCoordinator 的延迟注入和热替换 |
 | **Repository** | Core 层 `SqliteStore` | 数据访问抽象，Protocol Node 通过 `ProtocolTracer` 间接访问 |
-| **Observer** | Orchestrator 回调 | `on_field_U2A_recorded` / `on_record_received` 由 record 路由触发 |
+| **Observer（观察者）** | Coordinator 回调 | `on_field_U2A_recorded` / `on_record_received` 由 record 路由触发 |
+| **State Manager** | `VerticalAnalysisManager` / `HorizontalAnalysisManager` | 将分析状态管理从编排器中解耦 |
 
 ### 9.2 架构特点
 
@@ -1165,9 +1368,11 @@ main()
 | **自包含设计** | 传入 `config_path` 即可运行，内部自行加载配置、创建所有依赖 |
 | **存储前置** | Branch A 始终暂存，不拒绝，将安全判定延迟到 Branch B |
 | **双层恶意检测** | 双回传（实时判定）+ 单回传（过期判定），覆盖所有消息丢失场景 |
-| **可选分析集成** | AnalysisOrchestrator 完全可选，未配置时不影响消息追踪功能 |
+| **十字锁定分析** | 纵轴（Session-Level）+ 横轴（DID-Level）双维度污点分析，纵轴完成后自动累积触发横轴 |
+| **统一恶意报告** | 协议审查、纵向分析、横向分析三个来源写入同一张 `malicious_reports` 表，API 支持 `source` 筛选 |
+| **可选分析集成** | CrossLockCoordinator 完全可选，未配置时不影响消息追踪功能 |
 | **单端口架构** | 合并数据端口和 API 端口，简化部署和网络配置 |
-| **配置热重载** | 分析配置可热更新，端口变更需手动重启 |
+| **配置热重载** | 分析配置可热更新（包括纵轴/横轴），端口变更需手动重启 |
 
 ### 9.3 与 Core 层的关系
 
@@ -1178,7 +1383,9 @@ Protocol Node 是 Core 层的**上层编排者**：
 | `ProtocolTracer` | 溯源链验证 + SQLite 存储门面 |
 | `ProtocolSessionManager` | per-session 验证状态管理（PendingMessage、可信名单、hop_count） |
 | `DIDResolver` | DID → 公钥解析（带 TTL 缓存） |
-| `AnalysisOrchestrator` | 可选集成，LLM 语义污点分析生命周期管理 |
+| `CrossLockCoordinator` | 可选集成，十字锁定污点分析生命周期管理（纵轴 + 横轴） |
+| `VerticalAnalysisManager` | 纵向分析状态持久化管理 |
+| `HorizontalAnalysisManager` | 横向分析状态持久化管理 |
 | `ChainManager.verify_back_propagation` | 回传验证三步检查（签名→字节比对→哈希一致性） |
 
-Protocol Node 本身不实现加密算法、哈希计算或数据库访问，这些全部委托给 Core 层。Protocol Node 的核心价值在于**验证管线的编排**和**恶意节点判定决策树**的实现。
+Protocol Node 本身不实现加密算法、哈希计算或数据库访问，这些全部委托给 Core 层。Protocol Node 的核心价值在于**验证管线的编排**、**恶意节点判定决策树**和**十字锁定污点分析**的实现。

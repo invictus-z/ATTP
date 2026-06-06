@@ -12,6 +12,8 @@
         "apiKey": "",
         "baseUrl": "https://api.openai.com/v1",
         "model": "gpt-4o",
-        "reportBatchSize": 10
+        "reportBatchSize": 10,
+        "horizontalEnabled": true,
+        "horizontalThreshold": 5
     }
 }
