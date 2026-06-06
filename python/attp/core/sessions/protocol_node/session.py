@@ -178,7 +178,7 @@ class ProtocolSession:
     def increment_report_count(self) -> int:
         self.vertical_analysis.report_count += 1
         self.updated_at = time.time()
-        return self.analysis.report_count
+        return self.vertical_analysis.report_count
 
     def reset_report_count(self) -> None:
         self.vertical_analysis.report_count = 0

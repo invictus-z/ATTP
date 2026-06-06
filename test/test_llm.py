@@ -26,7 +26,7 @@ def load_defaults() -> dict:
         return {
             "api_key": analysis.get("apiKey", "sk-tndjmdbokroduydqwluzznlryzypkzitbiikqbepgvatacej"),
             "base_url": analysis.get("baseUrl", "https://api.siliconflow.cn/v1"),
-            "model": analysis.get("model", "deepseek-ai/DeepSeek-V4-Flash"),
+            "model": analysis.get("model", "deepseek-ai/DeepSeek-V3.2"),
         }
     return {}
 

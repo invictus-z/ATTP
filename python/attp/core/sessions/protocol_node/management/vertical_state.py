@@ -38,7 +38,7 @@ class VerticalAnalysisManager:
         session = self._session_mgr.get(session_id)
         if not session:
             return
-        state = session.get_vertical_analysis_state()
+        state = session.get_analysis_state()
         await self._tracer.save_analysis_session(session_id, {
             "intent_json": json.dumps(state["intent"], ensure_ascii=False) if state["intent"] else None,
             "report_count": state["report_count"],
@@ -52,7 +52,7 @@ class VerticalAnalysisManager:
         if session_id in self._restored_sessions:
             return
         session = await self._get_or_create(session_id)
-        state = session.get_vertical_analysis_state()
+        state = session.get_analysis_state()
         if state["last_trace_id"] != 0:
             self._restored_sessions.add(session_id)
             return
@@ -77,7 +77,7 @@ class VerticalAnalysisManager:
         """获取纵向分析状态。"""
         await self.restore_state(session_id)
         session = await self._get_or_create(session_id)
-        return session.get_vertical_analysis_state()
+        return session.get_analysis_state()
 
     async def increment_report_count(self, session_id: str) -> int:
         """递增纵向报告计数。"""

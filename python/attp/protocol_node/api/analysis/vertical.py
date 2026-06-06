@@ -67,24 +67,35 @@ def get_vertical_analysis_router(
 
     @router.get("/analysis/intent/{session_id}")
     async def get_analysis_intent(session_id: str):
-        """Return the extracted intent and vertical analysis state for a session."""
-        if not session_manager:
-            return {
-                "session_id": session_id,
-                "intent": None,
-                "analysis_state": None,
-            }
+        """Return the extracted intent and vertical analysis state for a session.
 
-        session = session_manager.get(session_id)
-        if not session:
-            return {
-                "session_id": session_id,
-                "intent": None,
-                "analysis_state": None,
-            }
+        Priority: in-memory session → fallback to vertical_analysis_states DB table.
+        """
+        intent_data = None
+        state: dict[str, Any] = {}
 
-        intent_data = session.get_intent()
-        state = session.get_analysis_state() or {}
+        # 1. 尝试从内存中的 session 获取
+        if session_manager:
+            session = session_manager.get(session_id)
+            if session:
+                intent_data = session.get_intent()
+                state = session.get_analysis_state() or {}
+
+        # 2. 内存未命中 → fallback 到 DB
+        if intent_data is None and not state.get("last_trace_id"):
+            try:
+                saved = await tracer.load_analysis_session(session_id)
+                if saved:
+                    if saved.get("intent_json"):
+                        intent_data = json.loads(saved["intent_json"])
+                    state = {
+                        "batch_index": saved.get("batch_index", 0),
+                        "last_trace_id": saved.get("last_trace_id", 0),
+                        "report_count": saved.get("report_count", 0),
+                        "context": saved.get("context", ""),
+                    }
+            except Exception as e:
+                logger.error("Error loading analysis session for {}: {}", session_id, e)
 
         return {
             "session_id": session_id,
@@ -168,12 +179,19 @@ def get_vertical_analysis_router(
                     ],
                 })
 
-        # 5. Get intent if available
+        # 5. Get intent (in-memory first, fallback to DB)
         intent = None
         if session_manager:
             session = session_manager.get(session_id)
             if session:
                 intent = session.get_intent()
+        if intent is None:
+            try:
+                saved = await tracer.load_analysis_session(session_id)
+                if saved and saved.get("intent_json"):
+                    intent = json.loads(saved["intent_json"])
+            except Exception:
+                pass
 
         return {
             "session_id": session_id,
