@@ -1,4 +1,4 @@
-"""Data models for semantic taint analysis."""
+"""Vertical Axis — 纵向分析数据模型。"""
 
 from __future__ import annotations
 
@@ -6,46 +6,28 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-
-@dataclass
-class IntentDescriptor:
-    """Structured user intent extracted from the original task (field c)."""
-
-    original_task: str
-    core_objective: str
-    constraints: list[str] = field(default_factory=list)
-    involved_capabilities: list[str] = field(default_factory=list)
-    risk_level: str = "medium"  # low / medium / high
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "original_task": self.original_task,
-            "core_objective": self.core_objective,
-            "constraints": self.constraints,
-            "involved_capabilities": self.involved_capabilities,
-            "risk_level": self.risk_level,
-        }
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> IntentDescriptor:
-        return cls(
-            original_task=data["original_task"],
-            core_objective=data["core_objective"],
-            constraints=data.get("constraints", []),
-            involved_capabilities=data.get("involved_capabilities", []),
-            risk_level=data.get("risk_level", "medium"),
-        )
+from attp.core.analysis.base_models import EvidenceItem
 
 
 @dataclass
 class NodeBehaviorProfile:
-    """Aggregated behavior profile for one node at one hop."""
+    """Aggregated behavior profile for one node at one hop.
+
+    field mapping:
+        field_a → A2T (Agent→Tool)
+        field_b → A2U (Agent→User)
+        field_c → U2A (User→Agent)
+        field_d → A2A (Agent→Agent)
+        field_e → T2A (Tool→Agent)
+    """
 
     node_did: str
     hop_count: list[int]
     field_a: list[dict] = field(default_factory=list)
     field_b: list[dict] = field(default_factory=list)
+    field_c: list[dict] = field(default_factory=list)
     field_d: list[dict] = field(default_factory=list)
+    field_e: list[dict] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -53,35 +35,10 @@ class NodeBehaviorProfile:
             "hop_count": self.hop_count,
             "field_a": self.field_a,
             "field_b": self.field_b,
+            "field_c": self.field_c,
             "field_d": self.field_d,
+            "field_e": self.field_e,
         }
-
-
-@dataclass
-class EvidenceItem:
-    """A single piece of evidence referencing specific trace entries."""
-
-    description: str
-    trace_ids: list[int] = field(default_factory=list)
-    field_type: str = ""
-    severity_hint: str = "info"  # info / warning / critical
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "description": self.description,
-            "trace_ids": self.trace_ids,
-            "field_type": self.field_type,
-            "severity_hint": self.severity_hint,
-        }
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> EvidenceItem:
-        return cls(
-            description=data.get("description", ""),
-            trace_ids=data.get("trace_ids", []),
-            field_type=data.get("field_type", ""),
-            severity_hint=data.get("severity_hint", "info"),
-        )
 
 
 @dataclass
@@ -115,8 +72,8 @@ class NodeTaintVerdict:
 
 
 @dataclass
-class TaintReport:
-    """Complete analysis report for one batch of records."""
+class VerticalTaintReport:
+    """Complete vertical analysis report for one batch of records."""
 
     session_id: str
     batch_index: int
@@ -127,6 +84,9 @@ class TaintReport:
     summary: str = ""
     context_summary: str = ""
     timestamp: float = field(default_factory=time.time)
+
+    # Cross-Lock: 本次分析涉及的所有 node_did（用于触发横向累积）
+    analyzed_dids: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -139,10 +99,11 @@ class TaintReport:
             "summary": self.summary,
             "context_summary": self.context_summary,
             "timestamp": self.timestamp,
+            "analyzed_dids": self.analyzed_dids,
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> TaintReport:
+    def from_dict(cls, data: dict[str, Any]) -> VerticalTaintReport:
         verdicts = []
         for v in data.get("node_verdicts", []):
             items = [EvidenceItem.from_dict(e) for e in v.get("evidence_items", [])]
@@ -168,4 +129,5 @@ class TaintReport:
             summary=data.get("summary", ""),
             context_summary=data.get("context_summary", ""),
             timestamp=data.get("timestamp", time.time()),
+            analyzed_dids=data.get("analyzed_dids", []),
         )

@@ -62,9 +62,13 @@ class Database:
                     ON behavior_traces(session_id, protocol_node_address, hop_count_a2a, hop_count_intra)
             ''')
 
-            # analysis_reports
+            # ---- Cross-Lock: 纵向表重命名迁移（旧表 → vertical_ 前缀） ----
+            # 兼容旧数据库：如果旧表存在则重命名
+            await self._migrate_vertical_tables(db)
+
+            # vertical_analysis_reports（原 analysis_reports）
             await db.execute('''
-                CREATE TABLE IF NOT EXISTS analysis_reports (
+                CREATE TABLE IF NOT EXISTS vertical_analysis_reports (
                     id              INTEGER PRIMARY KEY AUTOINCREMENT,
                     session_id      TEXT NOT NULL,
                     batch_index     INTEGER NOT NULL,
@@ -75,13 +79,13 @@ class Database:
                 )
             ''')
             await db.execute('''
-                CREATE INDEX IF NOT EXISTS idx_ar_session
-                    ON analysis_reports(session_id)
+                CREATE INDEX IF NOT EXISTS idx_var_session
+                    ON vertical_analysis_reports(session_id)
             ''')
 
-            # analysis_sessions
+            # vertical_analysis_states（原 analysis_sessions）
             await db.execute('''
-                CREATE TABLE IF NOT EXISTS analysis_sessions (
+                CREATE TABLE IF NOT EXISTS vertical_analysis_states (
                     session_id      TEXT PRIMARY KEY,
                     intent_json     TEXT,
                     report_count    INTEGER DEFAULT 0,
@@ -90,6 +94,44 @@ class Database:
                     context         TEXT DEFAULT '',
                     updated_at      REAL
                 )
+            ''')
+
+            # ---- Cross-Lock: 横向分析新增表 ----
+
+            # horizontal_analysis_states（per-DID）
+            await db.execute('''
+                CREATE TABLE IF NOT EXISTS horizontal_analysis_states (
+                    did                 TEXT PRIMARY KEY,
+                    node_type           TEXT NOT NULL DEFAULT 'agent',
+                    accumulated_count   INTEGER NOT NULL DEFAULT 0,
+                    last_trace_id       INTEGER NOT NULL DEFAULT 0,
+                    batch_index         INTEGER NOT NULL DEFAULT 0,
+                    context             TEXT NOT NULL DEFAULT '',
+                    updated_at          REAL NOT NULL
+                )
+            ''')
+
+            # horizontal_analysis_reports
+            await db.execute('''
+                CREATE TABLE IF NOT EXISTS horizontal_analysis_reports (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    did             TEXT NOT NULL,
+                    node_type       TEXT NOT NULL,
+                    batch_index     INTEGER NOT NULL DEFAULT 0,
+                    report_json     TEXT NOT NULL,
+                    from_trace_id   INTEGER NOT NULL DEFAULT 0,
+                    to_trace_id     INTEGER NOT NULL DEFAULT 0,
+                    sessions_scanned INTEGER NOT NULL DEFAULT 0,
+                    timestamp       REAL
+                )
+            ''')
+            await db.execute('''
+                CREATE INDEX IF NOT EXISTS idx_hor_did
+                    ON horizontal_analysis_reports(did)
+            ''')
+            await db.execute('''
+                CREATE INDEX IF NOT EXISTS idx_hor_did_batch
+                    ON horizontal_analysis_reports(did, batch_index)
             ''')
 
             # node_dossiers
@@ -143,6 +185,29 @@ class Database:
 
             await db.commit()
         logger.info("Database initialized at {}", self.db_path)
+
+    @staticmethod
+    async def _migrate_vertical_tables(db) -> None:
+        """Migrate old table names to vertical_ prefixed names (idempotent)."""
+        # Check if old tables exist and new ones don't
+        async def _table_exists(name: str) -> bool:
+            cursor = await db.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (name,)
+            )
+            row = await cursor.fetchone()
+            return row is not None
+
+        # Migrate analysis_reports → vertical_analysis_reports
+        if await _table_exists("analysis_reports") and not await _table_exists("vertical_analysis_reports"):
+            await db.execute("ALTER TABLE analysis_reports RENAME TO vertical_analysis_reports")
+            await db.execute("DROP INDEX IF EXISTS idx_ar_session")
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_var_session ON vertical_analysis_reports(session_id)")
+            logger.info("Migrated: analysis_reports → vertical_analysis_reports")
+
+        # Migrate analysis_sessions → vertical_analysis_states
+        if await _table_exists("analysis_sessions") and not await _table_exists("vertical_analysis_states"):
+            await db.execute("ALTER TABLE analysis_sessions RENAME TO vertical_analysis_states")
+            logger.info("Migrated: analysis_sessions → vertical_analysis_states")
 
     async def execute(self, sql: str, params: tuple[Any, ...] = ()) -> None:
         """执行写操作并自动 commit。"""

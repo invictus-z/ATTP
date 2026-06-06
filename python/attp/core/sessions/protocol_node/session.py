@@ -10,8 +10,8 @@ from .pending_message import PendingMessage
 
 
 @dataclass
-class AnalysisState:
-    """语义分析状态 — report 计数、游标、intent。"""
+class VerticalAnalysisState:
+    """纵向分析状态 — report 计数、游标、intent。"""
 
     report_count: int = 0
     last_trace_id: int = 0
@@ -35,8 +35,8 @@ class ProtocolSession:
     # -- 可信名单 --
     trusted_did_list: list[str] = field(default_factory=list)
 
-    # -- 分析状态 --
-    analysis: AnalysisState = field(default_factory=AnalysisState)
+    # -- 纵向分析状态 --
+    vertical_analysis: VerticalAnalysisState = field(default_factory=VerticalAnalysisState)
 
     # -- 通用元数据（仅用于动态数据，如 _pending_intent_content） --
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -168,33 +168,33 @@ class ProtocolSession:
 
     def get_analysis_state(self) -> dict[str, Any]:
         return {
-            "report_count": self.analysis.report_count,
-            "last_trace_id": self.analysis.last_trace_id,
-            "batch_index": self.analysis.batch_index,
-            "context": self.analysis.context,
-            "intent": self.analysis.intent,
+            "report_count": self.vertical_analysis.report_count,
+            "last_trace_id": self.vertical_analysis.last_trace_id,
+            "batch_index": self.vertical_analysis.batch_index,
+            "context": self.vertical_analysis.context,
+            "intent": self.vertical_analysis.intent,
         }
 
     def increment_report_count(self) -> int:
-        self.analysis.report_count += 1
+        self.vertical_analysis.report_count += 1
         self.updated_at = time.time()
         return self.analysis.report_count
 
     def reset_report_count(self) -> None:
-        self.analysis.report_count = 0
+        self.vertical_analysis.report_count = 0
         self.updated_at = time.time()
 
     def update_analysis_cursor(
         self, batch_index: int, last_trace_id: int, context: str,
     ) -> None:
-        self.analysis.batch_index = batch_index
-        self.analysis.last_trace_id = last_trace_id
-        self.analysis.context = context
+        self.vertical_analysis.batch_index = batch_index
+        self.vertical_analysis.last_trace_id = last_trace_id
+        self.vertical_analysis.context = context
         self.updated_at = time.time()
 
     def set_intent(self, intent: dict) -> None:
-        self.analysis.intent = intent
+        self.vertical_analysis.intent = intent
         self.updated_at = time.time()
 
     def get_intent(self) -> dict | None:
-        return self.analysis.intent
+        return self.vertical_analysis.intent

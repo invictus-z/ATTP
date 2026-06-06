@@ -12,6 +12,7 @@ from attp.core.storage.repositories import (
     ProtocolSessionRepository,
     TraceRepository,
 )
+from attp.core.storage.repositories.horizontal_repo import HorizontalRepository
 
 
 class SqliteStore:
@@ -26,6 +27,7 @@ class SqliteStore:
         self._analysis = AnalysisRepository(self._db)
         self._malicious = MaliciousRepository(self._db)
         self._session_state = ProtocolSessionRepository(self._db)
+        self._horizontal = HorizontalRepository(self._db)
 
     @classmethod
     async def create(cls, db_path: str | Path) -> SqliteStore:
@@ -135,3 +137,20 @@ class SqliteStore:
 
     async def load_verification_state(self, session_id: str) -> dict | None:
         return await self._session_state.load_verification_state(session_id)
+
+    # -- horizontal analysis --
+
+    async def save_horizontal_state(self, did: str, state: dict) -> None:
+        await self._horizontal.save_horizontal_state(did, state)
+
+    async def load_horizontal_state(self, did: str) -> dict | None:
+        return await self._horizontal.load_horizontal_state(did)
+
+    async def save_horizontal_report(self, report_json: str) -> None:
+        await self._horizontal.save_horizontal_report(report_json)
+
+    async def recover_horizontal_reports(self, did: str) -> list[dict]:
+        return await self._horizontal.recover_horizontal_reports(did)
+
+    async def recover_traces_by_did_since(self, did: str, since_id: int) -> tuple[list[dict], int]:
+        return await self._horizontal.recover_traces_by_did_since(did, since_id)

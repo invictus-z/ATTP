@@ -1,4 +1,7 @@
-"""LLM-based semantic taint analyzer."""
+"""Vertical Axis — 纵向语义污点分析器。
+
+支持 5 种 field_type（A2T/A2U/U2A/A2A/T2A）的差异化风险分区 Prompt。
+"""
 
 from __future__ import annotations
 
@@ -8,32 +11,36 @@ from typing import Any
 from openai import AsyncOpenAI
 
 from attp.app.logging import get_logger
-from attp.core.analysis.models import (
+from attp.core.analysis.base_models import IntentDescriptor
+from attp.core.analysis.vertical.models import (
     EvidenceItem,
-    IntentDescriptor,
     NodeBehaviorProfile,
     NodeTaintVerdict,
-    TaintReport,
+    VerticalTaintReport,
 )
-from attp.core.analysis.prompts import INTENT_EXTRACTION_PROMPT, ANALYSIS_PROMPT
+from attp.core.analysis.vertical.prompts import INTENT_EXTRACTION_PROMPT, VERTICAL_ANALYSIS_PROMPT
 
-logger = get_logger("Analysis")
+logger = get_logger("VerticalAnalysis")
 
 
-class SemanticTaintAnalyzer:
-    """Analyzes behavior traces using LLM for semantic taint detection."""
+class VerticalTaintAnalyzer:
+    """Analyzes behavior traces using LLM for vertical (session-level) semantic taint detection."""
 
     def __init__(
         self,
-        api_key: str,
+        api_key: str = "",
         base_url: str = "https://api.openai.com/v1",
         model: str = "gpt-4o",
+        client: AsyncOpenAI | None = None,
     ):
-        self._client = AsyncOpenAI(api_key=api_key, base_url=base_url)
+        if client is not None:
+            self._client = client
+        else:
+            self._client = AsyncOpenAI(api_key=api_key, base_url=base_url)
         self._model = model
 
     async def extract_intent(self, original_task: str) -> IntentDescriptor | None:
-        """Extract structured intent from user's original task via LLM."""
+        """Extract structured intent from the user's original task via LLM."""
         prompt = INTENT_EXTRACTION_PROMPT.format(original_task=original_task)
         try:
             response = await self._client.chat.completions.create(
@@ -67,11 +74,11 @@ class SemanticTaintAnalyzer:
         traces: list[dict],
         intent: IntentDescriptor,
         previous_context: str = "",
-    ) -> TaintReport:
-        """Run semantic taint analysis on a batch of behavior traces."""
+    ) -> VerticalTaintReport:
+        """Run vertical semantic taint analysis on a batch of behavior traces."""
         profiles = self._reconstruct_profiles(traces)
         if not profiles:
-            return TaintReport(
+            return VerticalTaintReport(
                 session_id=session_id,
                 batch_index=batch_index,
                 from_trace_id=from_trace_id,
@@ -80,7 +87,7 @@ class SemanticTaintAnalyzer:
 
         flow_graph = self._build_flow_graph(profiles)
         behaviors_str = self._format_behaviors(profiles)
-        prompt = ANALYSIS_PROMPT.format(
+        prompt = VERTICAL_ANALYSIS_PROMPT.format(
             intent=json.dumps(intent.to_dict(), ensure_ascii=False, indent=2),
             context=previous_context or "（首次分析，无前序上下文）",
             behaviors=behaviors_str,
@@ -122,7 +129,12 @@ class SemanticTaintAnalyzer:
                     taint_score=v.get("taint_score", 0.0),
                 ))
 
-            return TaintReport(
+            # Cross-Lock: 提取本次分析涉及的所有 unique node_did
+            analyzed_dids = list({
+                v.node_did for v in verdicts if v.node_did
+            })
+
+            return VerticalTaintReport(
                 session_id=session_id,
                 batch_index=batch_index,
                 from_trace_id=from_trace_id,
@@ -131,10 +143,11 @@ class SemanticTaintAnalyzer:
                 overall_verdict=result.get("overall_verdict", "clean"),
                 summary=result.get("summary", ""),
                 context_summary=result.get("context_summary", ""),
+                analyzed_dids=analyzed_dids,
             )
         except Exception as e:
-            logger.error("LLM analysis failed: {}", e)
-            return TaintReport(
+            logger.error("Vertical analysis failed: {}", e)
+            return VerticalTaintReport(
                 session_id=session_id,
                 batch_index=batch_index,
                 from_trace_id=from_trace_id,
@@ -148,7 +161,12 @@ class SemanticTaintAnalyzer:
     # ------------------------------------------------------------------
 
     def _reconstruct_profiles(self, traces: list[dict]) -> list[NodeBehaviorProfile]:
-        """Group traces by (node_did, hop_count[0]) into behavior profiles."""
+        """Group traces by (node_did, hop_count[0]) into behavior profiles.
+
+        Supports all 5 field_types:
+            A2T → field_a, A2U → field_b, U2A → field_c,
+            A2A → field_d, T2A → field_e
+        """
         profiles_map: dict[tuple[str, int], NodeBehaviorProfile] = {}
         for row in traces:
             hc = row["hop_count"]
@@ -170,8 +188,12 @@ class SemanticTaintAnalyzer:
                 profile.field_a.append(entry)
             elif ft == "A2U":
                 profile.field_b.append(entry)
+            elif ft == "U2A":
+                profile.field_c.append(entry)
             elif ft == "A2A":
                 profile.field_d.append(entry)
+            elif ft == "T2A":
+                profile.field_e.append(entry)
         return sorted(profiles_map.values(), key=lambda p: p.hop_count[0])
 
     def _build_flow_graph(self, profiles: list[NodeBehaviorProfile]) -> str:
@@ -182,7 +204,7 @@ class SemanticTaintAnalyzer:
             for d in p.field_d:
                 target = d.get("target", "")
                 target_short = target.split(":")[-1] if ":" in target else target
-                lines.append(f"Node [{node}] (hop={p.hop_count}) --(d, trace#{d.get('id', '?')})--> Node [{target_short}]")
+                lines.append(f"Node [{node}] (hop={p.hop_count}) --(A2A, trace#{d.get('id', '?')})--> Node [{target_short}]")
         return "\n".join(lines) if lines else "无节点间消息传递"
 
     def _format_behaviors(self, profiles: list[NodeBehaviorProfile]) -> str:
@@ -191,16 +213,24 @@ class SemanticTaintAnalyzer:
         for p in profiles:
             section = f"### 节点: {p.node_did} (hop={p.hop_count})\n"
             if p.field_a:
-                section += "**Agent->Tool 调用:**\n"
+                section += "**A2T (Agent→Tool) 调用:**\n"
                 for a in p.field_a:
                     section += f'  - [trace#{a["id"]}] 目标: {a["target"]}, 内容: {a["content"][:300]}\n'
             if p.field_b:
-                section += "**Agent->User 回复:**\n"
+                section += "**A2U (Agent→User) 回复:**\n"
                 for b in p.field_b:
                     section += f'  - [trace#{b["id"]}] 内容: {b["content"][:300]}\n'
+            if p.field_c:
+                section += "**U2A (User→Agent) 输入:**\n"
+                for c in p.field_c:
+                    section += f'  - [trace#{c["id"]}] 内容: {c["content"][:300]}\n'
             if p.field_d:
-                section += "**Agent->Agent 消息:**\n"
+                section += "**A2A (Agent→Agent) 消息:**\n"
                 for d in p.field_d:
                     section += f'  - [trace#{d["id"]}] 目标: {d["target"]}, 内容: {d["content"][:300]}\n'
+            if p.field_e:
+                section += "**T2A (Tool→Agent) 返回:**\n"
+                for e in p.field_e:
+                    section += f'  - [trace#{e["id"]}] 内容: {e["content"][:300]}\n'
             parts.append(section)
         return "\n".join(parts)

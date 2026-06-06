@@ -1,7 +1,7 @@
 """Protocol Node facade — combines authentication / provenance / storage.
 
 Used exclusively by ProtocolNode components (DataPort, ApiPort,
-AnalysisOrchestrator).  Agent-side tracing is handled by AgentTracer.
+CrossLockCoordinator).  Agent-side tracing is handled by AgentTracer.
 """
 
 from __future__ import annotations

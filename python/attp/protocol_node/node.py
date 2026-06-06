@@ -18,7 +18,7 @@ from attp.protocol_node.engine.behavior_controller import BehaviorController
 from attp.protocol_node.engine.malicious_detector import MaliciousNodeDetector
 
 if TYPE_CHECKING:
-    from attp.core.analysis.orchestrator import AnalysisOrchestrator
+    from attp.core.analysis.cross_lock import CrossLockCoordinator
 
 logger = get_logger("ProtocolNode")
 
@@ -44,7 +44,7 @@ class ProtocolNode:
         self._tracer: ProtocolTracer | None = None
         self._session_manager: ProtocolSessionManager | None = None
         self._port = None
-        self._orchestrator: AnalysisOrchestrator | None = None
+        self._orchestrator: CrossLockCoordinator | None = None
         self._sweep_task: asyncio.Task | None = None
         self._malicious_detector: MaliciousNodeDetector | None = None
 
@@ -95,7 +95,7 @@ class ProtocolNode:
             malicious_detector=malicious_detector,
         )
 
-        # 5. 可选：创建 AnalysisOrchestrator
+        # 5. 可选：创建 CrossLockCoordinator
         self._orchestrator = self._build_orchestrator()
         if self._orchestrator:
             self._port.set_orchestrator(self._orchestrator)
@@ -152,15 +152,15 @@ class ProtocolNode:
     # Orchestrator 管理
     # ------------------------------------------------------------------
 
-    def set_orchestrator(self, orchestrator: AnalysisOrchestrator | None) -> None:
-        """注入或清除 AnalysisOrchestrator。"""
+    def set_orchestrator(self, orchestrator: CrossLockCoordinator | None) -> None:
+        """注入或清除 CrossLockCoordinator。"""
         self._orchestrator = orchestrator
         if self._port:
             self._port.set_orchestrator(orchestrator)
         if orchestrator:
-            logger.info("AnalysisOrchestrator injected into ProtocolNode")
+            logger.info("CrossLockCoordinator injected into ProtocolNode")
         else:
-            logger.info("AnalysisOrchestrator cleared from ProtocolNode")
+            logger.info("CrossLockCoordinator cleared from ProtocolNode")
 
     async def reload_config(self) -> None:
         """重新加载配置文件并重建 Orchestrator。
@@ -191,26 +191,60 @@ class ProtocolNode:
     # ------------------------------------------------------------------
 
     def _build_orchestrator(self):
-        """根据当前配置构建 AnalysisOrchestrator，未启用则返回 None。"""
+        """根据当前配置构建 CrossLockCoordinator，未启用则返回 None。
+
+        Cross-Lock 架构：纵向分析（VerticalAxis）+ 横向分析（HorizontalAxis）。
+        """
         analysis_cfg = self._config.analysis
         if not analysis_cfg.enabled or not analysis_cfg.api_key:
             return None
 
-        from attp.core.analysis import SemanticTaintAnalyzer, AnalysisOrchestrator
+        from openai import AsyncOpenAI
 
-        analyzer = SemanticTaintAnalyzer(
-            api_key=analysis_cfg.api_key,
-            base_url=analysis_cfg.base_url,
-            model=analysis_cfg.model,
+        from attp.core.analysis.vertical import VerticalTaintAnalyzer, VerticalOrchestrator
+        from attp.core.analysis.horizontal import HorizontalTaintAnalyzer, HorizontalOrchestrator
+        from attp.core.analysis.cross_lock import CrossLockCoordinator
+        from attp.core.sessions.protocol_node.management import (
+            VerticalAnalysisManager,
+            HorizontalAnalysisManager,
         )
-        logger.info(
-            "Semantic taint analysis enabled (model={}, batch_size={})",
-            analysis_cfg.model,
-            analysis_cfg.report_batch_size,
-        )
-        return AnalysisOrchestrator(
-            analyzer=analyzer,
-            session_manager=self._session_manager,
+
+        llm_client = AsyncOpenAI(api_key=analysis_cfg.api_key, base_url=analysis_cfg.base_url)
+
+        # --- 纵轴 ---
+        vertical_analyzer = VerticalTaintAnalyzer(client=llm_client, model=analysis_cfg.model)
+        vertical_state_mgr = VerticalAnalysisManager(self._session_manager, self._tracer)
+        vertical_orch = VerticalOrchestrator(
+            analyzer=vertical_analyzer,
+            vertical_state_mgr=vertical_state_mgr,
             tracer=self._tracer,
             batch_size=analysis_cfg.report_batch_size,
         )
+
+        # --- 横轴 ---
+        horizontal_orch = None
+        if getattr(analysis_cfg, "horizontal_enabled", True):
+            horizontal_analyzer = HorizontalTaintAnalyzer(client=llm_client, model=analysis_cfg.model)
+            horizontal_state_mgr = HorizontalAnalysisManager(self._tracer.storage)
+            horizontal_orch = HorizontalOrchestrator(
+                analyzer=horizontal_analyzer,
+                horizontal_state_mgr=horizontal_state_mgr,
+                tracer=self._tracer,
+                accumulation_threshold=getattr(analysis_cfg, "horizontal_accumulation_threshold", 5),
+            )
+            logger.info(
+                "Cross-Lock horizontal axis enabled (accumulation_threshold={})",
+                getattr(analysis_cfg, "horizontal_accumulation_threshold", 5),
+            )
+
+        # --- 十字锁定协调器 ---
+        coordinator = CrossLockCoordinator(
+            vertical_orchestrator=vertical_orch,
+            horizontal_orchestrator=horizontal_orch,
+        )
+        logger.info(
+            "Cross-Lock coordinator built (model={}, vertical_batch_size={})",
+            analysis_cfg.model,
+            analysis_cfg.report_batch_size,
+        )
+        return coordinator

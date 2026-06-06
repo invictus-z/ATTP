@@ -34,13 +34,17 @@ class StorageConfig(PNBase):
 
 
 class AnalysisConfig(PNBase):
-    """语义污点分析（LLM）配置。"""
+    """语义污点分析（LLM）配置 — 十字锁定（Cross-Lock）架构。"""
 
     enabled: bool = False
     api_key: str = ""
     base_url: str = "https://api.openai.com/v1"
     model: str = "gpt-4o"
     report_batch_size: int = 10
+
+    # Cross-Lock 横向分析配置
+    horizontal_enabled: bool = True               # 横向分析开关（依赖 enabled=True）
+    horizontal_accumulation_threshold: int = 5    # 累积多少次纵向分析后触发横向
 
 
 class ProtocolNodeConfigFile(PNBase):

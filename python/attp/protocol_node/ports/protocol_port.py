@@ -72,23 +72,37 @@ class ProtocolPort:
             )
         )
 
-        # 2. /api/* 路由（行为溯源 + 分析）
+        # 2. /api/* 路由 — 行为溯源
         from attp.protocol_node.api.trace import get_behavior_router
         from attp.protocol_node.api.malicious import get_malicious_router
 
         self._app.include_router(
-            get_behavior_router(
-                tracer=self._tracer,
-                session_manager=self._session_manager,
-                orchestrator_holder=self._orch_holder,
-            )
+            get_behavior_router(tracer=self._tracer)
         )
         self._app.include_router(
             get_malicious_router(tracer=self._tracer)
         )
 
+        # 3. Cross-Lock 分析路由（纵向 + 横向）
+        from attp.protocol_node.api.analysis.vertical import get_vertical_analysis_router
+        from attp.protocol_node.api.analysis.horizontal import get_horizontal_analysis_router
+
+        self._app.include_router(
+            get_vertical_analysis_router(
+                tracer=self._tracer,
+                session_manager=self._session_manager,
+                coordinator_holder=self._orch_holder,
+            )
+        )
+        self._app.include_router(
+            get_horizontal_analysis_router(
+                tracer=self._tracer,
+                coordinator_holder=self._orch_holder,
+            )
+        )
+
     def set_orchestrator(self, orchestrator) -> None:
-        """注入 AnalysisOrchestrator 并更新所有路由引用。"""
+        """注入 CrossLockCoordinator 并更新所有路由引用。"""
         self._orchestrator = orchestrator
         self._orch_holder[0] = orchestrator
 

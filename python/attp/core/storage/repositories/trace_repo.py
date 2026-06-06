@@ -62,8 +62,8 @@ class TraceRepository(BaseRepository):
         result = []
         for row in rows:
             row["hop_count"] = [row.pop("hop_count_a2a", 0), row.pop("hop_count_intra", 0)]
-            row["sender_did"] = row.pop("node_did", "")
-            row["target_did"] = row.pop("target", "")
+            row["sender_did"] = row.get("node_did", "")
+            row["target_did"] = row.get("target", "")
             result.append(row)
         logger.debug(
             "Recovered behavior trace: session={}, pna={}, count={}",
@@ -84,7 +84,7 @@ class TraceRepository(BaseRepository):
         )
         for row in result:
             row["hop_count"] = [row.pop("hop_count_a2a", 0), row.pop("hop_count_intra", 0)]
-            row["sender_did"] = row.pop("node_did", "")
-            row["target_did"] = row.pop("target", "")
+            row["sender_did"] = row.get("node_did", "")
+            row["target_did"] = row.get("target", "")
         max_id = result[-1]["id"] if result else since_id
         return result, max_id
