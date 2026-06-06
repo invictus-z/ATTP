@@ -161,7 +161,7 @@ class HorizontalOrchestrator:
         # Step 7: Persist report
         self._task_phases[did] = "saving_results"
         report_json = json.dumps(report.to_dict(), ensure_ascii=False)
-        await self._tracer.storage.save_horizontal_report(report_json)
+        report_row_id = await self._tracer.storage.save_horizontal_report(report_json)
 
         # Step 8: Update cursor and reset accumulation
         await self._state_mgr.update_cursor(
@@ -173,9 +173,9 @@ class HorizontalOrchestrator:
         )
         await self._state_mgr.reset_accumulation(did)
 
-        # Step 9: Update dossier if malicious
+        # Step 9: Update malicious_reports + dossier if malicious
         if report.overall_verdict in ("suspicious", "malicious"):
-            await self._notify_analysis_result(did, report)
+            await self._notify_analysis_result(did, report, report_row_id)
 
         logger.info(
             "Horizontal analysis complete: did={}, verdict={}, sessions_scanned={}",
@@ -230,18 +230,27 @@ class HorizontalOrchestrator:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    async def _notify_analysis_result(self, did: str, report: HorizontalTaintReport) -> None:
-        """Log and record horizontal analysis result."""
+    async def _notify_analysis_result(
+        self, did: str, report: HorizontalTaintReport, report_row_id: int,
+    ) -> None:
+        """记录横向分析发现的恶意节点：写入 malicious_reports + 更新 dossier。"""
         verdict = report.did_verdict
         logger.warning(
             "Horizontal Security Alert: did={}, verdict={}, severity={}, score={}",
             did, report.overall_verdict, verdict.severity, verdict.taint_score,
         )
-        # Update node_dossiers via existing malicious infrastructure
         if verdict.severity in ("medium", "high"):
-            await self._tracer.storage.upsert_dossier(
-                malicious_did=did,
-                evidence_type="horizontal_taint_detected",
-                session_id=report.sessions_scanned > 0 and "cross_session" or "",
-                description=f"横向分析检测到跨Session恶意行为: {report.summary}",
-            )
+            await self._tracer.storage.save_malicious_report({
+                "source": "horizontal_analysis",
+                "target_did": did,
+                "node_type": verdict.node_type,
+                "session_id": "",
+                "evidence_type": verdict.threat_pattern,
+                "severity": verdict.severity,
+                "taint_score": verdict.taint_score,
+                "evidence_description": verdict.evidence,
+                "nonce": "",
+                "report_id": report_row_id,
+                "raw_evidence": {"evidence_items": [e.to_dict() for e in verdict.evidence_items]},
+                "timestamp": report.timestamp,
+            })

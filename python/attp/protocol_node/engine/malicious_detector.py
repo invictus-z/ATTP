@@ -39,6 +39,7 @@ class MaliciousNodeReport:
     nonce: str
     timestamp: float
     raw_evidence: dict
+    node_type: str = ""  # 由 middleware 从 DID 解析结果填入（agent / tool / user）
 
 
 def _build_report(

@@ -14,9 +14,10 @@ logger = get_logger("Tracing")
 class AnalysisRepository(BaseRepository):
     """analysis_reports + analysis_sessions CRUD。"""
 
-    async def save_analysis_report(self, report_json: str) -> None:
+    async def save_analysis_report(self, report_json: str) -> int:
+        """保存纵向分析报告，返回插入行的 id。"""
         report = json.loads(report_json)
-        await self._db.execute(
+        row_id = await self._db.execute_insert(
             """INSERT INTO vertical_analysis_reports
                (session_id, batch_index, report_json,
                 from_trace_id, to_trace_id, timestamp)
@@ -31,9 +32,10 @@ class AnalysisRepository(BaseRepository):
             ),
         )
         logger.info(
-            "Saved analysis report: session={}, batch={}",
-            report.get("session_id"), report.get("batch_index"),
+            "Saved analysis report: session={}, batch={}, id={}",
+            report.get("session_id"), report.get("batch_index"), row_id,
         )
+        return row_id
 
     async def recover_analysis_reports(self, session_id: str) -> list[dict]:
         return await self._db.execute_fetch(

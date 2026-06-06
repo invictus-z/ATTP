@@ -150,27 +150,39 @@ class Database:
                 )
             ''')
 
-            # malicious_nodes
+            # malicious_reports（统一恶意报告表，合并 protocol_review / vertical / horizontal）
             await db.execute('''
-                CREATE TABLE IF NOT EXISTS malicious_nodes (
+                CREATE TABLE IF NOT EXISTS malicious_reports (
                     id                      INTEGER PRIMARY KEY AUTOINCREMENT,
-                    session_id              TEXT NOT NULL,
-                    malicious_did           TEXT NOT NULL,
+                    source                  TEXT NOT NULL,
+                    target_did              TEXT NOT NULL,
+                    node_type               TEXT NOT NULL DEFAULT '',
+                    session_id              TEXT NOT NULL DEFAULT '',
                     evidence_type           TEXT NOT NULL,
-                    evidence_description    TEXT,
-                    nonce                   TEXT,
-                    timestamp               REAL,
-                    raw_evidence            TEXT DEFAULT '{}'
+                    severity                TEXT NOT NULL DEFAULT 'medium',
+                    taint_score             REAL NOT NULL DEFAULT 0.0,
+                    evidence_description    TEXT NOT NULL DEFAULT '',
+                    nonce                   TEXT DEFAULT '',
+                    report_id               INTEGER DEFAULT NULL,
+                    raw_evidence            TEXT DEFAULT '{}',
+                    timestamp               REAL
                 )
             ''')
             await db.execute('''
-                CREATE INDEX IF NOT EXISTS idx_mn_session
-                    ON malicious_nodes(session_id)
+                CREATE INDEX IF NOT EXISTS idx_mr_session
+                    ON malicious_reports(session_id)
             ''')
             await db.execute('''
-                CREATE INDEX IF NOT EXISTS idx_mn_did
-                    ON malicious_nodes(malicious_did)
+                CREATE INDEX IF NOT EXISTS idx_mr_did
+                    ON malicious_reports(target_did)
             ''')
+            await db.execute('''
+                CREATE INDEX IF NOT EXISTS idx_mr_source
+                    ON malicious_reports(source)
+            ''')
+
+            # ---- 迁移：malicious_nodes → malicious_reports ----
+            await self._migrate_malicious_nodes(db)
 
             # protocol_session_state — 验证状态持久化
             await db.execute('''
@@ -209,11 +221,75 @@ class Database:
             await db.execute("ALTER TABLE analysis_sessions RENAME TO vertical_analysis_states")
             logger.info("Migrated: analysis_sessions → vertical_analysis_states")
 
+    @staticmethod
+    async def _migrate_malicious_nodes(db) -> None:
+        """Migrate malicious_nodes → malicious_reports (idempotent)."""
+        async def _table_exists(name: str) -> bool:
+            cursor = await db.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (name,)
+            )
+            row = await cursor.fetchone()
+            return row is not None
+
+        async def _column_exists(table: str, column: str) -> bool:
+            cursor = await db.execute(f"PRAGMA table_info({table})")
+            rows = await cursor.fetchall()
+            return any(r[1] == column for r in rows)
+
+        if await _table_exists("malicious_nodes") and not await _table_exists("malicious_reports"):
+            await db.execute("ALTER TABLE malicious_nodes RENAME TO malicious_reports")
+            # 新增列（幂等：先检查列是否存在）
+            if not await _column_exists("malicious_reports", "source"):
+                await db.execute(
+                    "ALTER TABLE malicious_reports ADD COLUMN source TEXT NOT NULL DEFAULT 'protocol_review'"
+                )
+            if not await _column_exists("malicious_reports", "node_type"):
+                await db.execute(
+                    "ALTER TABLE malicious_reports ADD COLUMN node_type TEXT NOT NULL DEFAULT ''"
+                )
+            if not await _column_exists("malicious_reports", "severity"):
+                await db.execute(
+                    "ALTER TABLE malicious_reports ADD COLUMN severity TEXT NOT NULL DEFAULT 'medium'"
+                )
+            if not await _column_exists("malicious_reports", "taint_score"):
+                await db.execute(
+                    "ALTER TABLE malicious_reports ADD COLUMN taint_score REAL NOT NULL DEFAULT 0.0"
+                )
+            if not await _column_exists("malicious_reports", "report_id"):
+                await db.execute(
+                    "ALTER TABLE malicious_reports ADD COLUMN report_id INTEGER DEFAULT NULL"
+                )
+            # 重命名字段
+            await db.execute(
+                "ALTER TABLE malicious_reports RENAME COLUMN malicious_did TO target_did"
+            )
+            # 新索引
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_mr_did ON malicious_reports(target_did)"
+            )
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_mr_source ON malicious_reports(source)"
+            )
+            # 清理旧索引
+            await db.execute("DROP INDEX IF EXISTS idx_mn_session")
+            await db.execute("DROP INDEX IF EXISTS idx_mn_did")
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_mr_session ON malicious_reports(session_id)"
+            )
+            logger.info("Migrated: malicious_nodes → malicious_reports")
+
     async def execute(self, sql: str, params: tuple[Any, ...] = ()) -> None:
         """执行写操作并自动 commit。"""
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute(sql, params)
             await db.commit()
+
+    async def execute_insert(self, sql: str, params: tuple[Any, ...] = ()) -> int:
+        """执行 INSERT 并返回 lastrowid。"""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(sql, params)
+            await db.commit()
+            return cursor.lastrowid
 
     async def execute_fetch(
         self,

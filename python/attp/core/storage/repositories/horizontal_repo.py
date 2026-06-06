@@ -64,10 +64,10 @@ class HorizontalRepository(BaseRepository):
             (_time.time(), did),
         )
 
-    async def save_horizontal_report(self, report_json: str) -> None:
-        """保存横向分析报告。"""
+    async def save_horizontal_report(self, report_json: str) -> int:
+        """保存横向分析报告，返回插入行的 id。"""
         report = json.loads(report_json)
-        await self._db.execute(
+        row_id = await self._db.execute_insert(
             """INSERT INTO horizontal_analysis_reports
                (did, node_type, batch_index, report_json,
                 from_trace_id, to_trace_id, sessions_scanned, timestamp)
@@ -84,9 +84,10 @@ class HorizontalRepository(BaseRepository):
             ),
         )
         logger.info(
-            "Saved horizontal report: did={}, batch={}",
-            report.get("did"), report.get("batch_index"),
+            "Saved horizontal report: did={}, batch={}, id={}",
+            report.get("did"), report.get("batch_index"), row_id,
         )
+        return row_id
 
     async def recover_horizontal_reports(self, did: str) -> list[dict]:
         """查询DID的全部横向分析报告。"""

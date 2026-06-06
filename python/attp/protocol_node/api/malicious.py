@@ -38,28 +38,42 @@ def _normalise_did(did: str) -> str:
     return did
 
 
+def _format_report(r: dict) -> dict:
+    """格式化单条 malicious_report 记录为 API 响应字段。"""
+    raw = r.get("raw_evidence")
+    return {
+        "id": r["id"],
+        "source": r.get("source", "protocol_review"),
+        "target_did": r.get("target_did", r.get("malicious_did", "")),
+        "node_type": r.get("node_type", ""),
+        "session_id": r.get("session_id", ""),
+        "evidence_type": r["evidence_type"],
+        "severity": r.get("severity", "high"),
+        "taint_score": r.get("taint_score", 0.0),
+        "evidence_description": r.get("evidence_description", ""),
+        "nonce": r.get("nonce", ""),
+        "report_id": r.get("report_id"),
+        "timestamp": r.get("timestamp"),
+        "raw_evidence": json.loads(raw) if raw else {},
+    }
+
+
 def get_malicious_router(tracer: ProtocolTracer) -> APIRouter:
     router = APIRouter(prefix="/api/malicious")
 
     @router.get("/session/{session_id}")
-    async def query_by_session(session_id: str):
+    async def query_by_session(
+        session_id: str,
+        source: str | None = Query(None, description="筛选来源: protocol_review / vertical_analysis / horizontal_analysis"),
+    ):
         """查询指定 session 的恶意节点报告。"""
         try:
-            reports = await tracer.query_malicious_nodes(session_id=session_id)
+            reports = await tracer.query_malicious_reports(
+                session_id=session_id, source=source,
+            )
             return {
                 "session_id": session_id,
-                "reports": [
-                    {
-                        "id": r["id"],
-                        "malicious_did": r["malicious_did"],
-                        "evidence_type": r["evidence_type"],
-                        "evidence_description": r.get("evidence_description", ""),
-                        "nonce": r.get("nonce", ""),
-                        "timestamp": r.get("timestamp"),
-                        "raw_evidence": json.loads(r["raw_evidence"]) if r.get("raw_evidence") else {},
-                    }
-                    for r in reports
-                ],
+                "reports": [_format_report(r) for r in reports],
                 "total": len(reports),
             }
         except Exception as e:
@@ -67,29 +81,24 @@ def get_malicious_router(tracer: ProtocolTracer) -> APIRouter:
             return {"session_id": session_id, "reports": [], "total": 0}
 
     @router.get("/did/{did}")
-    async def query_by_did(did: str):
+    async def query_by_did(
+        did: str,
+        source: str | None = Query(None, description="筛选来源: protocol_review / vertical_analysis / horizontal_analysis"),
+    ):
         """查询指定 DID 的所有恶意节点报告。"""
+        canonical = _normalise_did(did)
         try:
-            reports = await tracer.query_malicious_nodes(malicious_did=_normalise_did(did))
+            reports = await tracer.query_malicious_reports(
+                target_did=canonical, source=source,
+            )
             return {
-                "malicious_did": did,
-                "reports": [
-                    {
-                        "id": r["id"],
-                        "session_id": r["session_id"],
-                        "evidence_type": r["evidence_type"],
-                        "evidence_description": r.get("evidence_description", ""),
-                        "nonce": r.get("nonce", ""),
-                        "timestamp": r.get("timestamp"),
-                        "raw_evidence": json.loads(r["raw_evidence"]) if r.get("raw_evidence") else {},
-                    }
-                    for r in reports
-                ],
+                "target_did": canonical,
+                "reports": [_format_report(r) for r in reports],
                 "total": len(reports),
             }
         except Exception as e:
             logger.error("Error querying malicious nodes for DID {}: {}", did, e)
-            return {"malicious_did": did, "reports": [], "total": 0}
+            return {"target_did": did, "reports": [], "total": 0}
 
     # -- dossier 路由 --
 
@@ -103,7 +112,7 @@ def get_malicious_router(tracer: ProtocolTracer) -> APIRouter:
                 return {"did": did, "found": False}
 
             # 附带该 DID 的所有违规明细
-            incidents = await tracer.query_malicious_nodes(malicious_did=canonical)
+            incidents = await tracer.query_malicious_reports(target_did=canonical)
             return {
                 "found": True,
                 "did": dossier["did"],
@@ -115,17 +124,7 @@ def get_malicious_router(tracer: ProtocolTracer) -> APIRouter:
                 "last_evidence_type": dossier["last_evidence_type"],
                 "last_session_id": dossier["last_session_id"],
                 "last_evidence_desc": dossier["last_evidence_desc"],
-                "incidents": [
-                    {
-                        "session_id": r["session_id"],
-                        "evidence_type": r["evidence_type"],
-                        "evidence_description": r.get("evidence_description", ""),
-                        "nonce": r.get("nonce", ""),
-                        "timestamp": r.get("timestamp"),
-                        "raw_evidence": json.loads(r["raw_evidence"]) if r.get("raw_evidence") else {},
-                    }
-                    for r in incidents
-                ],
+                "incidents": [_format_report(r) for r in incidents],
             }
         except Exception as e:
             logger.error("Error querying dossier for DID {}: {}", did, e)

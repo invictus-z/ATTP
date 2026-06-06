@@ -22,6 +22,43 @@ from attp.core.analysis.vertical.prompts import INTENT_EXTRACTION_PROMPT, VERTIC
 
 logger = get_logger("VerticalAnalysis")
 
+# field_type → sender node_type（与 HorizontalTaintAnalyzer 一致）
+FIELD_TYPE_TO_SENDER_NODE_TYPE: dict[str, str] = {
+    "A2T": "agent", "A2U": "agent", "A2A": "agent",
+    "U2A": "user",
+    "T2A": "tool",
+}
+
+
+def _derive_node_type(traces: list[dict], did: str) -> str:
+    """从 traces 中推导指定 DID 的 node_type。
+
+    逻辑与 HorizontalTaintAnalyzer._derive_node_type 完全一致：
+    1. 优先取 DID 作为 sender (node_did) 的第一条 trace 的 field_type 推导
+    2. Fallback: DID 仅作为 target 出现时，从接收视角推导
+
+    Args:
+        traces: trace 列表，每条包含 node_did, target_did/target, field_type。
+        did: 需要推导 node_type 的 DID。
+
+    Returns:
+        推导出的 node_type（agent / user / tool），未匹配时返回 "agent"。
+    """
+    # sender 视角（优先）
+    for t in traces:
+        if t.get("node_did") == did:
+            return FIELD_TYPE_TO_SENDER_NODE_TYPE.get(t["field_type"], "agent")
+    # fallback: 该 DID 仅作为 target 出现，从接收视角推导
+    _RECEIVER_MAP: dict[str, str] = {
+        "A2T": "tool", "A2U": "user", "A2A": "agent",
+        "U2A": "agent", "T2A": "agent",
+    }
+    for t in traces:
+        target = t.get("target_did") or t.get("target", "")
+        if target == did:
+            return _RECEIVER_MAP.get(t["field_type"], "agent")
+    return "agent"
+
 
 class VerticalTaintAnalyzer:
     """Analyzes behavior traces using LLM for vertical (session-level) semantic taint detection."""

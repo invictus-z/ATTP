@@ -71,8 +71,9 @@ class SqliteStore:
 
     # -- analysis_reports --
 
-    async def save_analysis_report(self, report_json: str) -> None:
-        await self._analysis.save_analysis_report(report_json)
+    async def save_analysis_report(self, report_json: str) -> int:
+        """保存纵向分析报告，返回插入行的 id。"""
+        return await self._analysis.save_analysis_report(report_json)
 
     async def recover_analysis_reports(self, session_id: str) -> list[dict]:
         return await self._analysis.recover_analysis_reports(session_id)
@@ -85,21 +86,31 @@ class SqliteStore:
     async def load_analysis_session(self, session_id: str) -> dict | None:
         return await self._analysis.load_analysis_session(session_id)
 
-    # -- malicious node reports --
+    # -- malicious reports (unified) --
 
-    async def save_malicious_report(
+    async def save_malicious_report(self, report: dict) -> int:
+        """统一写入 malicious_reports 表。
+
+        Args:
+            report: 包含 source, target_did, node_type, session_id,
+                    evidence_type, severity, taint_score,
+                    evidence_description, nonce, report_id,
+                    raw_evidence, timestamp 的字典。
+
+        Returns:
+            插入行的 id。
+        """
+        return await self._malicious.save_malicious_report(report)
+
+    async def query_malicious_reports(
         self,
-        session_id: str,
-        malicious_did: str,
-        evidence_type: str,
-        evidence_description: str = "",
-        nonce: str = "",
-        timestamp: float = 0.0,
-        raw_evidence: dict | None = None,
-    ) -> None:
-        await self._malicious.save_malicious_report(
-            session_id, malicious_did, evidence_type, evidence_description,
-            nonce, timestamp, raw_evidence,
+        session_id: str | None = None,
+        target_did: str | None = None,
+        source: str | None = None,
+    ) -> list[dict]:
+        """按条件查询恶意报告，支持 source 筛选。"""
+        return await self._malicious.query_malicious_reports(
+            session_id=session_id, target_did=target_did, source=source,
         )
 
     async def query_malicious_nodes(
@@ -107,7 +118,10 @@ class SqliteStore:
         session_id: str | None = None,
         malicious_did: str | None = None,
     ) -> list[dict]:
-        return await self._malicious.query_malicious_nodes(session_id, malicious_did)
+        """兼容旧接口。"""
+        return await self._malicious.query_malicious_nodes(
+            session_id=session_id, malicious_did=malicious_did,
+        )
 
     # -- node dossiers --
 
@@ -146,8 +160,9 @@ class SqliteStore:
     async def load_horizontal_state(self, did: str) -> dict | None:
         return await self._horizontal.load_horizontal_state(did)
 
-    async def save_horizontal_report(self, report_json: str) -> None:
-        await self._horizontal.save_horizontal_report(report_json)
+    async def save_horizontal_report(self, report_json: str) -> int:
+        """保存横向分析报告，返回插入行的 id。"""
+        return await self._horizontal.save_horizontal_report(report_json)
 
     async def recover_horizontal_reports(self, did: str) -> list[dict]:
         return await self._horizontal.recover_horizontal_reports(did)

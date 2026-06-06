@@ -80,8 +80,9 @@ class ProtocolTracer:
     async def recover_traces_since(self, session_id: str, since_id: int) -> tuple[list, int]:
         return await self._storage.recover_traces_since(session_id, since_id)
 
-    async def save_analysis_report(self, report_json: str) -> None:
-        await self._storage.save_analysis_report(report_json)
+    async def save_analysis_report(self, report_json: str) -> int:
+        """保存纵向分析报告，返回插入行的 id。"""
+        return await self._storage.save_analysis_report(report_json)
 
     async def recover_analysis_reports(self, session_id: str) -> list:
         return await self._storage.recover_analysis_reports(session_id)
@@ -94,24 +95,29 @@ class ProtocolTracer:
     async def load_analysis_session(self, session_id: str) -> dict | None:
         return await self._storage.load_analysis_session(session_id)
 
-    # -- malicious node reports --
+    # -- malicious reports (unified) --
 
     async def save_malicious_report(self, report) -> None:
-        """保存恶意节点报告。
+        """保存恶意节点报告（协议审查路径）。
 
         Args:
             report: MaliciousNodeReport 实例
         """
         for did in report.malicious_dids:
-            await self._storage.save_malicious_report(
-                session_id=report.session_id,
-                malicious_did=did,
-                evidence_type=report.evidence_type.value,
-                evidence_description=report.evidence_description,
-                nonce=report.nonce,
-                timestamp=report.timestamp,
-                raw_evidence=report.raw_evidence,
-            )
+            await self._storage.save_malicious_report({
+                "source": "protocol_review",
+                "target_did": did,
+                "node_type": getattr(report, "node_type", ""),
+                "session_id": report.session_id,
+                "evidence_type": report.evidence_type.value,
+                "severity": "high",
+                "taint_score": 0.0,
+                "evidence_description": report.evidence_description,
+                "nonce": report.nonce,
+                "report_id": None,
+                "raw_evidence": report.raw_evidence,
+                "timestamp": report.timestamp,
+            })
 
     async def query_malicious_nodes(
         self,
@@ -119,6 +125,17 @@ class ProtocolTracer:
         malicious_did: str | None = None,
     ) -> list:
         return await self._storage.query_malicious_nodes(session_id, malicious_did)
+
+    async def query_malicious_reports(
+        self,
+        session_id: str | None = None,
+        target_did: str | None = None,
+        source: str | None = None,
+    ) -> list:
+        """按条件查询恶意报告，支持 source 筛选。"""
+        return await self._storage.query_malicious_reports(
+            session_id=session_id, target_did=target_did, source=source,
+        )
 
     # -- node dossiers --
 

@@ -14,6 +14,7 @@ from fastapi import APIRouter
 
 from attp.app.logging import get_logger
 from attp.core.pn_tracer import ProtocolTracer
+from attp.protocol_node.api.malicious import _normalise_did
 
 logger = get_logger("HorizontalAPI")
 
@@ -44,8 +45,9 @@ def get_horizontal_analysis_router(
     @router.get("/report/{did}")
     async def get_horizontal_reports(did: str):
         """获取DID全部横向分析报告。"""
+        canonical = _normalise_did(did)
         try:
-            reports = await tracer.storage.recover_horizontal_reports(did)
+            reports = await tracer.storage.recover_horizontal_reports(canonical)
             parsed = []
             for r in reports:
                 parsed.append({
@@ -58,7 +60,7 @@ def get_horizontal_analysis_router(
                     "report": json.loads(r["report_json"]) if r.get("report_json") else {},
                 })
             return {
-                "did": did,
+                "did": canonical,
                 "reports": parsed,
                 "total_batches": len(parsed),
             }
@@ -69,18 +71,19 @@ def get_horizontal_analysis_router(
     @router.get("/state/{did}")
     async def get_horizontal_state(did: str):
         """获取DID横向分析累积状态。"""
+        canonical = _normalise_did(did)
         try:
-            state = await tracer.storage.load_horizontal_state(did)
+            state = await tracer.storage.load_horizontal_state(canonical)
             if not state:
                 return {
-                    "did": did,
+                    "did": canonical,
                     "accumulated_count": 0,
                     "last_trace_id": 0,
                     "batch_index": 0,
                     "has_context": False,
                 }
             return {
-                "did": did,
+                "did": canonical,
                 "accumulated_count": state.get("accumulated_count", 0),
                 "last_trace_id": state.get("last_trace_id", 0),
                 "batch_index": state.get("batch_index", 0),
@@ -143,9 +146,13 @@ def get_horizontal_analysis_router(
                 latest_h_report = None
                 if h_reports:
                     latest = h_reports[-1]
+                    try:
+                        report_data = json.loads(latest.get("report_json") or "{}")
+                    except (json.JSONDecodeError, TypeError):
+                        report_data = {}
                     latest_h_report = {
                         "batch_index": latest.get("batch_index", 0),
-                        "verdict": json.loads(latest.get("report_json", "{}")).get("overall_verdict"),
+                        "verdict": report_data.get("overall_verdict"),
                         "timestamp": latest.get("timestamp"),
                     }
                 horizontal_dids.append({
@@ -153,7 +160,8 @@ def get_horizontal_analysis_router(
                     "accumulated_count": h_state.get("accumulated_count", 0) if h_state else 0,
                     "last_horizontal_analysis": latest_h_report,
                 })
-            except Exception:
+            except Exception as e:
+                logger.error("Error loading horizontal data for did={}: {}", did, e)
                 horizontal_dids.append({"did": did, "accumulated_count": 0, "last_horizontal_analysis": None})
 
         return {

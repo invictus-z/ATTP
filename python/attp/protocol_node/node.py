@@ -142,6 +142,7 @@ class ProtocolNode:
                             msg, session,
                         )
                         if report:
+                            report.node_type = msg.sender_node_type
                             await self._tracer.save_malicious_report(report)
                     if expired:
                         await self._session_manager.save(session)

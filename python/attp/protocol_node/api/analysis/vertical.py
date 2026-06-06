@@ -84,7 +84,7 @@ def get_vertical_analysis_router(
             }
 
         intent_data = session.get_intent()
-        state = session.get_analysis_state()
+        state = session.get_analysis_state() or {}
 
         return {
             "session_id": session_id,

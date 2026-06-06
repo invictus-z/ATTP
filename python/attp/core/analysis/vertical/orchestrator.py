@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Callable, Awaitable
 
 from attp.app.logging import get_logger
 from attp.core.analysis.base_models import IntentDescriptor
+from attp.core.analysis.vertical.analyzer import _derive_node_type
 from attp.core.analysis.vertical.models import VerticalTaintReport
 
 if TYPE_CHECKING:
@@ -166,7 +167,7 @@ class VerticalOrchestrator:
         # Persist report
         self._task_phases[session_id] = "saving_results"
         report_json = json.dumps(report.to_dict(), ensure_ascii=False)
-        await self._tracer.save_analysis_report(report_json)
+        report_row_id = await self._tracer.save_analysis_report(report_json)
 
         # Update session state
         await self._state_mgr.reset_report_count(session_id)
@@ -179,7 +180,7 @@ class VerticalOrchestrator:
         if report.overall_verdict == "error":
             logger.error("Vertical analysis error for session={}: {}", session_id, report.summary)
         elif report.overall_verdict in ("suspicious", "malicious"):
-            await self._notify_analysis_result(session_id, report)
+            await self._notify_analysis_result(session_id, report, report_row_id, traces)
 
         # Cross-Lock: trigger horizontal accumulation for each involved DID
         if self._horizontal_trigger_callback and report.analyzed_dids:
@@ -245,13 +246,38 @@ class VerticalOrchestrator:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    async def _notify_analysis_result(self, session_id: str, report: VerticalTaintReport) -> None:
-        """Log analysis result. Report is persisted in DB and accessible via ApiPort."""
-        malicious_nodes = [
-            v.node_did for v in report.node_verdicts
+    async def _notify_analysis_result(
+        self,
+        session_id: str,
+        report: VerticalTaintReport,
+        report_row_id: int,
+        traces: list[dict],
+    ) -> None:
+        """记录纵向分析发现的恶意节点：写入 malicious_reports + 更新 dossier。"""
+        malicious_verdicts = [
+            v for v in report.node_verdicts
             if v.severity in ("medium", "high")
         ]
+        for v in malicious_verdicts:
+            node_type = _derive_node_type(traces, v.node_did)
+
+            await self._tracer.storage.save_malicious_report({
+                "source": "vertical_analysis",
+                "target_did": v.node_did,
+                "node_type": node_type,
+                "session_id": session_id,
+                "evidence_type": v.deviation_type,
+                "severity": v.severity,
+                "taint_score": v.taint_score,
+                "evidence_description": v.evidence,
+                "nonce": "",
+                "report_id": report_row_id,
+                "raw_evidence": {"evidence_items": [e.to_dict() for e in v.evidence_items]},
+                "timestamp": report.timestamp,
+            })
+
         logger.warning(
-            "Security Alert: session={}, verdict={}, malicious_nodes={}",
-            session_id, report.overall_verdict, malicious_nodes,
+            "Vertical Security Alert: session={}, verdict={}, malicious_nodes={}",
+            session_id, report.overall_verdict,
+            [v.node_did for v in malicious_verdicts],
         )
