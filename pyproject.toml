@@ -5,7 +5,7 @@ description = "alpha version for ATTP channel plugin on nanobot"
 requires-python = ">=3.11"
 
 dependencies = [
-    "nanobot-ai>=0.1,<0.2",
+    "nanobot-ai>=0.1.5,<0.2",
     "aiohttp>=3.9,<4.0",
     "fastapi>=0.110,<1.0",
     "anp>=0.8.7,<0.9",
