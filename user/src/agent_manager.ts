@@ -170,7 +170,7 @@ async function persist(): Promise<void> {
     const configResult = await window.electronAPI.readUserConfig();
     const config: UserAttpConfig = configResult.ok && configResult.data
       ? { ...configResult.data }
-      : { did: '', didDocPath: '', didKeyPath: '', protocolNodes: [], agents: [] };
+      : { did: '', didDocPath: '', didKeyPath: '', protocolNodes: [], toolNodes: [], agents: [] };
     // Deep-clone to strip Vue reactive proxies (not serializable through Electron IPC)
     config.agents = JSON.parse(JSON.stringify(agents.value.map(a => ({ name: a.name, baseUrl: a.baseUrl, did: a.did }))));
     await window.electronAPI.saveUserConfig(JSON.parse(JSON.stringify(config)));

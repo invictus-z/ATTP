@@ -7,7 +7,8 @@ import {
   Shield, Plus, X, Pencil, Trash2, Loader2, Activity, ExternalLink,
   Search, GitMerge, AlertTriangle, FileText, RefreshCw,
   ChevronDown, ChevronRight, CheckCircle2, XCircle, Clock, Zap,
-  Info, Layers, AlertOctagon
+  Info, Layers, AlertOctagon, Eye, UserX, BarChart3, Target,
+  Crosshair
 } from 'lucide-vue-next'
 
   // ─── Types ───────────────────────────────────────────────────────────
@@ -19,7 +20,6 @@ import {
     status: 'online' | 'offline' | 'checking'
   }
 
-  // 新的 API 返回的扁平化条目格式
   interface BehaviorChainEntry {
     id?: number
     hop_count: number[]
@@ -77,14 +77,13 @@ import {
     evidence: string | null
   }
 
-  // 新的 API 返回格式
   interface AggregateData {
     session_id: string
     intent: any
     traces: {
       chain: BehaviorChainEntry[]
       total_entries: number
-      nodes?: HopNode[]  // 转换后的节点分组结构
+      nodes?: HopNode[]
     }
     reports: AnalysisReport[]
     alerts: Alert[]
@@ -97,6 +96,65 @@ import {
     session_id?: string
     phase?: string
     progress?: number
+  }
+
+  // 恶意节点相关类型
+  interface MaliciousReport {
+    id: number
+    source: string
+    target_did: string
+    node_type: string
+    session_id: string
+    evidence_type: string
+    severity: string
+    taint_score: number
+    evidence_description: string
+    nonce: string
+    report_id: number | null
+    timestamp: number
+    raw_evidence: Record<string, any>
+  }
+
+  interface MaliciousDossier {
+    found: boolean
+    did: string
+    total_violations: number
+    severity_level: string  // clean / warning / dangerous / banned
+    first_seen_at: number
+    last_seen_at: number
+    evidence_breakdown: Record<string, number>
+    last_evidence_type: string
+    last_session_id: string
+    last_evidence_desc: string
+    incidents: MaliciousReport[]
+  }
+
+  // 横向分析相关类型
+  interface HorizontalReport {
+    id: number
+    batch_index: number
+    from_trace_id: number
+    to_trace_id: number
+    sessions_scanned: number
+    timestamp: string | null
+    report: Record<string, any>
+  }
+
+  interface HorizontalState {
+    did: string
+    accumulated_count: number
+    last_trace_id: number
+    batch_index: number
+    node_type?: string
+    has_context: boolean
+  }
+
+  interface IntentDescriptor {
+    original_task: string
+    core_objective: string
+    constraints: string[]
+    involved_capabilities: string[]
+    risk_level: string  // low / medium / high
   }
 
 // ─── Node Management State ───────────────────────────────────────────
@@ -118,7 +176,8 @@ const editingNodeId = ref<string | null>(null)
 const selectedNodeId = ref<string | null>(null)
 const sessionIdInput = ref('')
 const loading = ref(false)
-const activeTab = ref<'aggregate' | 'behavior' | 'reports' | 'alerts'>('aggregate')
+const activeTab = ref<'aggregate' | 'behavior' | 'reports' | 'alerts' | 'malicious' | 'horizontal'>('aggregate')
+const queryMode = ref<'vertical' | 'horizontal'>('vertical')
 
 // ─── Data State ──────────────────────────────────────────────────────
 
@@ -127,6 +186,19 @@ const behaviorData = ref<{ session_id: string; nodes: HopNode[] } | null>(null)
 const reportsData = ref<{ session_id: string; reports: AnalysisReport[]; total_batches: number } | null>(null)
 const analysisStatus = ref<AnalysisStatus | null>(null)
 const triggerLoading = ref(false)
+
+// 恶意节点
+const maliciousData = ref<{ session_id: string; reports: MaliciousReport[]; total: number } | null>(null)
+const dossiersData = ref<{ total: number; dossiers: MaliciousDossier[] } | null>(null)
+const maliciousSourceFilter = ref<string>('')
+
+// 横向分析
+const horizontalDidInput = ref('')
+const horizontalReports = ref<HorizontalReport[]>([])
+const horizontalState = ref<HorizontalState | null>(null)
+const horizontalLoading = ref(false)
+const horizontalTriggerLoading = ref(false)
+const horizontalStatus = ref<{ status: string; did: string } | null>(null)
 
 // ─── Toast ───────────────────────────────────────────────────────────
 
@@ -236,11 +308,6 @@ const buildUrl = (path: string) => {
 
 // ─── Data Transformation ──────────────────────────────────────────────
 
-/**
- * 将扁平的 chain 转换为按节点分组的结构
- * API 返回的 chain 是扁平数组，每个条目包含 hop_count 和 sender_did
- * 需要按 (hop_count, sender_did) 分组，在每个节点内按 field_type 组织条目
- */
 const transformChainToNodes = (chain: BehaviorChainEntry[]): HopNode[] => {
   const nodeMap = new Map<string, HopNode>()
   
@@ -267,21 +334,13 @@ const transformChainToNodes = (chain: BehaviorChainEntry[]): HopNode[] => {
       timestamp: entry.timestamp,
     }
     
-    // 根据 field_type 将条目添加到对应的数组
-    if (entry.field_type === 'A2T') {
-      node.A2T.push(behaviorEntry)
-    } else if (entry.field_type === 'A2U') {
-      node.A2U.push(behaviorEntry)
-    } else if (entry.field_type === 'U2A') {
-      node.U2A.push(behaviorEntry)
-    } else if (entry.field_type === 'A2A') {
-      node.A2A.push(behaviorEntry)
-    } else if (entry.field_type === 'T2A') {
-      node.T2A.push(behaviorEntry)
-    }
+    if (entry.field_type === 'A2T') node.A2T.push(behaviorEntry)
+    else if (entry.field_type === 'A2U') node.A2U.push(behaviorEntry)
+    else if (entry.field_type === 'U2A') node.U2A.push(behaviorEntry)
+    else if (entry.field_type === 'A2A') node.A2A.push(behaviorEntry)
+    else if (entry.field_type === 'T2A') node.T2A.push(behaviorEntry)
   })
   
-  // 按 hop_count 排序
   return Array.from(nodeMap.values()).sort((a, b) => {
     const [a0, a1] = a.hop_count
     const [b0, b1] = b.hop_count
@@ -300,14 +359,10 @@ const fetchAggregate = async () => {
     const result = await apiFetch(url)
     if (result.ok) {
       const rawData = result.data as AggregateData
-      // 转换 chain 为 nodes
       const nodes = transformChainToNodes(rawData.traces.chain)
       aggregateData.value = {
         ...rawData,
-        traces: {
-          ...rawData.traces,
-          nodes,
-        },
+        traces: { ...rawData.traces, nodes },
       }
     } else {
       showToast('获取综合数据失败', 'error')
@@ -328,12 +383,8 @@ const fetchBehavior = async () => {
     const result = await apiFetch(url)
     if (result.ok) {
       const rawData = result.data as { session_id: string; chain: BehaviorChainEntry[]; protocol_node_address?: string }
-      // 转换 chain 为 nodes
       const nodes = transformChainToNodes(rawData.chain)
-      behaviorData.value = {
-        session_id: rawData.session_id,
-        nodes,
-      }
+      behaviorData.value = { session_id: rawData.session_id, nodes }
     } else {
       showToast('获取行为溯源数据失败', 'error')
     }
@@ -362,6 +413,98 @@ const fetchReports = async () => {
   } finally {
     loading.value = false
   }
+}
+
+// 恶意节点
+const fetchMalicious = async () => {
+  if (!selectedNode.value || !sessionIdInput.value.trim()) return
+  loading.value = true
+  try {
+    let path = `/api/malicious/session/${sessionIdInput.value.trim()}`
+    if (maliciousSourceFilter.value) path += `?source=${maliciousSourceFilter.value}`
+    const url = buildUrl(path)
+    const result = await apiFetch(url)
+    if (result.ok) {
+      maliciousData.value = result.data
+    } else {
+      showToast('获取恶意节点数据失败', 'error')
+    }
+  } catch (e) {
+    console.error('Malicious fetch error:', e)
+    showToast('请求失败', 'error')
+  } finally {
+    loading.value = false
+  }
+}
+
+const fetchDossiers = async () => {
+  if (!selectedNode.value) return
+  try {
+    const url = buildUrl('/api/malicious/dossiers')
+    const result = await apiFetch(url)
+    if (result.ok) {
+      dossiersData.value = result.data
+    }
+  } catch (e) {
+    console.error('Dossiers fetch error:', e)
+  }
+}
+
+// 横向分析
+const fetchHorizontalReport = async () => {
+  if (!selectedNode.value || !horizontalDidInput.value.trim()) return
+  horizontalLoading.value = true
+  try {
+    const url = buildUrl(`/api/analysis/horizontal/report/${encodeURIComponent(horizontalDidInput.value.trim())}`)
+    const result = await apiFetch(url)
+    if (result.ok) {
+      horizontalReports.value = result.data.reports || []
+    } else {
+      showToast('获取横向分析报告失败', 'error')
+    }
+  } catch (e) {
+    console.error('Horizontal report fetch error:', e)
+    showToast('请求失败', 'error')
+  } finally {
+    horizontalLoading.value = false
+  }
+}
+
+const fetchHorizontalState = async () => {
+  if (!selectedNode.value || !horizontalDidInput.value.trim()) return
+  try {
+    const url = buildUrl(`/api/analysis/horizontal/state/${encodeURIComponent(horizontalDidInput.value.trim())}`)
+    const result = await apiFetch(url)
+    if (result.ok) {
+      horizontalState.value = result.data
+    }
+  } catch {
+    horizontalState.value = null
+  }
+}
+
+const triggerHorizontalAnalysis = async () => {
+  if (!selectedNode.value || !horizontalDidInput.value.trim()) return
+  horizontalTriggerLoading.value = true
+  try {
+    const url = buildUrl(`/api/analysis/horizontal/trigger/${encodeURIComponent(horizontalDidInput.value.trim())}`)
+    const result = await apiFetch(url, { method: 'POST' })
+    if (result.ok && result.data?.triggered) {
+      showToast('横向分析已触发', 'success')
+      fetchHorizontalState()
+    } else {
+      showToast(result.data?.reason === 'analysis_disabled' ? '分析功能未启用' : '触发失败', 'error')
+    }
+  } catch {
+    showToast('触发横向分析请求失败', 'error')
+  } finally {
+    horizontalTriggerLoading.value = false
+  }
+}
+
+const queryHorizontal = () => {
+  fetchHorizontalReport()
+  fetchHorizontalState()
 }
 
 const fetchAnalysisStatus = async () => {
@@ -401,16 +544,28 @@ const doQuery = () => {
   behaviorData.value = null
   reportsData.value = null
   analysisStatus.value = null
+  maliciousData.value = null
 
   if (activeTab.value === 'aggregate') fetchAggregate()
   else if (activeTab.value === 'behavior') fetchBehavior()
   else if (activeTab.value === 'reports') fetchReports()
-  else if (activeTab.value === 'alerts') fetchAggregate() // alerts come from aggregate
+  else if (activeTab.value === 'alerts') fetchAggregate()
+  else if (activeTab.value === 'malicious') { fetchMalicious(); fetchDossiers() }
+  else if (activeTab.value === 'horizontal') { /* 横向需要手动输入 DID */ }
 }
 
 const switchTab = (tab: typeof activeTab.value) => {
   activeTab.value = tab
-  doQuery()
+  // 仅对需要 session_id 的 tab 自动查询（如果已有 session_id）
+  // 横向分析和恶意节点档案不需要 session_id
+  if (tab === 'malicious') {
+    if (sessionIdInput.value.trim()) fetchMalicious()
+    fetchDossiers()
+  } else if (tab === 'horizontal') {
+    // 横向分析有独立查询按钮，不自动查询
+  } else if (sessionIdInput.value.trim()) {
+    doQuery()
+  }
 }
 
 // ─── Computed helpers ────────────────────────────────────────────────
@@ -449,12 +604,35 @@ const severityBadge = (sev: string) => {
   return { cls: 'bg-gray-50 text-gray-500 border-gray-200' }
 }
 
-const formatTime = (ts: string | null) => {
+const severityLevelBadge = (level: string) => {
+  if (level === 'clean') return { text: 'Clean', cls: 'bg-emerald-50 text-emerald-600 border-emerald-200' }
+  if (level === 'warning') return { text: 'Warning', cls: 'bg-amber-50 text-amber-600 border-amber-200' }
+  if (level === 'dangerous') return { text: 'Dangerous', cls: 'bg-orange-50 text-orange-600 border-orange-200' }
+  if (level === 'banned') return { text: 'Banned', cls: 'bg-red-50 text-red-600 border-red-200' }
+  return { text: level, cls: 'bg-gray-50 text-gray-500 border-gray-200' }
+}
+
+const riskLevelBadge = (level: string) => {
+  if (level === 'low') return { text: 'Low', cls: 'bg-emerald-50 text-emerald-600 border-emerald-200' }
+  if (level === 'medium') return { text: 'Medium', cls: 'bg-amber-50 text-amber-600 border-amber-200' }
+  if (level === 'high') return { text: 'High', cls: 'bg-red-50 text-red-600 border-red-200' }
+  return { text: level, cls: 'bg-gray-50 text-gray-500 border-gray-200' }
+}
+
+const sourceBadge = (source: string) => {
+  if (source === 'protocol_review') return { text: '协议审查', cls: 'bg-blue-50 text-blue-600 border-blue-200' }
+  if (source === 'vertical_analysis') return { text: '纵向分析', cls: 'bg-purple-50 text-purple-600 border-purple-200' }
+  if (source === 'horizontal_analysis') return { text: '横向分析', cls: 'bg-orange-50 text-orange-600 border-orange-200' }
+  return { text: source, cls: 'bg-gray-50 text-gray-500 border-gray-200' }
+}
+
+const formatTime = (ts: string | number | null) => {
   if (!ts) return '--'
   try {
-    return new Date(ts).toLocaleString('zh-CN', { hour12: false })
+    const d = typeof ts === 'number' ? new Date(ts * 1000) : new Date(ts)
+    return d.toLocaleString('zh-CN', { hour12: false })
   } catch {
-    return ts
+    return String(ts)
   }
 }
 
@@ -464,6 +642,16 @@ const formatDid = (did: string) => {
   return parts.length > 1 ? parts[parts.length - 1] : did
 }
 
+// 解析 intent
+const intentInfo = computed<IntentDescriptor | null>(() => {
+  const intent = aggregateData.value?.intent
+  if (!intent) return null
+  // intent 可能直接是 IntentDescriptor 或包裹在 intent 字段中
+  if (intent.original_task) return intent as IntentDescriptor
+  if (intent.intent && intent.intent.original_task) return intent.intent as IntentDescriptor
+  return null
+})
+
 // ─── Lifecycle ───────────────────────────────────────────────────────
 
 const route = useRoute()
@@ -472,7 +660,6 @@ onMounted(() => {
   loadNodes()
   checkAllNodes()
 
-  // Check for query params from SessionsView "溯源" action
   const querySessionId = route.query.sessionId as string | undefined
   const queryProtocolUrl = route.query.protocolNodeUrl as string | undefined
 
@@ -480,10 +667,8 @@ onMounted(() => {
     sessionIdInput.value = querySessionId
   }
 
-  // Auto-select node and query after nodes are loaded & status-checked
   setTimeout(() => {
     if (queryProtocolUrl) {
-      // Find the trace node matching the protocol URL
       const normalizedUrl = queryProtocolUrl.replace(/\/+$/, '')
       const matchedNode = traceNodes.value.find(n => n.url.replace(/\/+$/, '') === normalizedUrl)
       if (matchedNode) {
@@ -491,13 +676,11 @@ onMounted(() => {
       }
     }
 
-    // If no protocol URL specified, fall back to first online node
     if (!selectedNodeId.value) {
       const first = traceNodes.value.find(n => n.status === 'online')
       if (first) selectedNodeId.value = first.id
     }
 
-    // Auto-query if both sessionId and node are available
     if (querySessionId && selectedNodeId.value) {
       doQuery()
     }
@@ -514,7 +697,7 @@ onMounted(() => {
           <h2 class="text-xl font-semibold text-gray-900 tracking-tight">溯源模块</h2>
           <span class="px-2 py-0.5 rounded-full text-[10px] font-medium text-gray-500 bg-gray-100 border border-gray-200">{{ traceNodes.length }} 节点</span>
         </div>
-        <p class="text-sm text-gray-500">行为溯源 · 语义污点分析 · 审计追踪</p>
+        <p class="text-sm text-gray-500">行为溯源 · 语义污点分析 · 恶意检测 · 审计追踪</p>
       </div>
     </header>
 
@@ -578,8 +761,8 @@ onMounted(() => {
 
         <!-- ── Query Bar ── -->
         <div class="bg-white rounded-2xl border border-gray-200 p-5">
+          <!-- Row 1: Node select + Mode toggle -->
           <div class="flex items-center gap-3 flex-wrap">
-            <!-- Node Selector -->
             <div class="flex-1 min-w-[200px]">
               <label class="block text-[11px] font-medium text-gray-400 mb-1.5">溯源节点</label>
               <select v-model="selectedNodeId" class="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-300 transition-colors appearance-none">
@@ -589,43 +772,91 @@ onMounted(() => {
                 </option>
               </select>
             </div>
+            <div class="flex items-end">
+              <div class="flex bg-gray-100 rounded-xl p-1">
+                <button
+                  @click="queryMode = 'vertical'"
+                  :class="[
+                    'px-3 py-2 text-[12px] rounded-lg transition-colors font-medium flex items-center gap-1',
+                    queryMode === 'vertical' ? 'bg-white text-gray-900 shadow-sm border border-gray-200' : 'text-gray-500 hover:text-gray-700'
+                  ]"
+                ><Search class="w-3.5 h-3.5" /> 纵向分析</button>
+                <button
+                  @click="queryMode = 'horizontal'"
+                  :class="[
+                    'px-3 py-2 text-[12px] rounded-lg transition-colors font-medium flex items-center gap-1',
+                    queryMode === 'horizontal' ? 'bg-white text-gray-900 shadow-sm border border-gray-200' : 'text-gray-500 hover:text-gray-700'
+                  ]"
+                ><Crosshair class="w-3.5 h-3.5" /> 横向分析</button>
+              </div>
+            </div>
+          </div>
 
-            <!-- Session ID -->
+          <!-- Row 2: Input + Buttons -->
+          <div class="flex items-center gap-3 flex-wrap mt-3 pt-3 border-t border-gray-100">
             <div class="flex-[2] min-w-[280px]">
-              <label class="block text-[11px] font-medium text-gray-400 mb-1.5">Session ID</label>
+              <label class="block text-[11px] font-medium text-gray-400 mb-1.5">
+                {{ queryMode === 'vertical' ? '纵向分析 — Session ID' : '横向分析 — 节点 DID' }}
+              </label>
               <div class="relative">
-                <Search class="w-4 h-4 text-gray-400 absolute left-3 top-2.5 pointer-events-none" />
+                <Search v-if="queryMode === 'vertical'" class="w-4 h-4 text-gray-400 absolute left-3 top-2.5 pointer-events-none" />
+                <Crosshair v-else class="w-4 h-4 text-gray-400 absolute left-3 top-2.5 pointer-events-none" />
                 <input
+                  v-show="queryMode === 'vertical'"
                   v-model="sessionIdInput"
                   placeholder="输入 Session ID 进行溯源查询"
                   class="w-full pl-9 pr-3 py-2.5 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-300 transition-colors font-mono placeholder:text-gray-300"
-                  @keydown.enter="doQuery"
+                  @keydown.enter="doQuery()"
+                />
+                <input
+                  v-show="queryMode === 'horizontal'"
+                  v-model="horizontalDidInput"
+                  placeholder="输入节点 DID 进行横向分析"
+                  class="w-full pl-9 pr-3 py-2.5 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-300 transition-colors font-mono placeholder:text-gray-300"
+                  @keydown.enter="queryHorizontal()"
                 />
               </div>
             </div>
-
-            <!-- Query Button -->
-            <div class="flex items-end">
+            <div class="flex items-end gap-2">
               <button
-                @click="doQuery"
-                :disabled="!selectedNodeId || !sessionIdInput.trim() || loading"
+                @click="queryMode === 'vertical' ? doQuery() : queryHorizontal()"
+                :disabled="!selectedNodeId || (queryMode === 'vertical' ? (!sessionIdInput.trim() || loading) : (!horizontalDidInput.trim() || horizontalLoading))"
                 class="px-5 py-2.5 text-sm font-medium text-white bg-gray-900 rounded-xl hover:bg-gray-800 transition-colors shadow-sm flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
               >
-                <Loader2 v-if="loading" class="w-4 h-4 animate-spin" />
+                <Loader2 v-if="loading || horizontalLoading" class="w-4 h-4 animate-spin" />
                 <Search v-else class="w-4 h-4" />
                 查询
+              </button>
+              <button
+                v-if="queryMode === 'horizontal'"
+                @click="triggerHorizontalAnalysis"
+                :disabled="!selectedNodeId || !horizontalDidInput.trim() || horizontalTriggerLoading"
+                class="px-4 py-2.5 text-sm font-medium text-white bg-indigo-600 rounded-xl hover:bg-indigo-700 transition-colors flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <Loader2 v-if="horizontalTriggerLoading" class="w-4 h-4 animate-spin" />
+                <Zap v-else class="w-4 h-4" />
+                触发分析
+              </button>
+              <button
+                v-if="queryMode === 'vertical'"
+                @click="triggerAnalysis"
+                :disabled="triggerLoading || !selectedNodeId || !sessionIdInput.trim()"
+                class="px-4 py-2.5 text-sm font-medium text-white bg-indigo-600 rounded-xl hover:bg-indigo-700 transition-colors flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <Loader2 v-if="triggerLoading" class="w-4 h-4 animate-spin" />
+                <Zap v-else class="w-4 h-4" />
+                触发分析
               </button>
             </div>
           </div>
         </div>
 
-        <!-- ── No Data State ── -->
-        <div v-if="!loading && !aggregateData && !behaviorData && !reportsData" class="flex flex-col items-center justify-center py-20 text-gray-400">
+        <!-- ── No Node Selected State ── -->
+        <div v-if="!selectedNodeId" class="flex flex-col items-center justify-center py-20 text-gray-400">
           <div class="w-16 h-16 rounded-2xl bg-gray-50 flex items-center justify-center mb-4">
-            <GitMerge class="w-8 h-8 text-gray-300" />
+            <Shield class="w-8 h-8 text-gray-300" />
           </div>
-          <p class="text-sm">选择溯源节点并输入 Session ID 开始溯源查询</p>
-          <p class="text-xs text-gray-300 mt-1">溯源数据将按行为链路、分析报告和告警分类展示</p>
+          <p class="text-sm">请先选择一个溯源节点</p>
         </div>
 
         <!-- ── Loading ── -->
@@ -634,33 +865,52 @@ onMounted(() => {
           <span class="text-sm">正在查询溯源数据...</span>
         </div>
 
-        <!-- ── Data Display ── -->
-        <template v-if="!loading && (aggregateData || behaviorData || reportsData)">
-          <!-- Tab Bar -->
-          <div class="flex items-center gap-1 bg-gray-100/60 rounded-xl p-1">
-            <button
-              v-for="tab in ([
-                { key: 'aggregate', label: '综合视图', icon: Layers, count: aggregateData ? (aggregateData.traces?.total_entries ?? 0) : null },
-                { key: 'behavior', label: '行为溯源', icon: GitMerge, count: behaviorData ? behaviorData.nodes?.length ?? 0 : null },
-                { key: 'reports', label: '分析报告', icon: FileText, count: reportsData ? reportsData.total_batches : null },
-                { key: 'alerts', label: '告警', icon: AlertTriangle, count: aggregateData ? aggregateData.total_alerts : null },
-              ] as const)"
-              :key="tab.key"
-              @click="switchTab(tab.key as any)"
-              :class="[
-                'flex items-center gap-1.5 px-4 py-2 text-[13px] rounded-lg transition-colors font-medium',
-                activeTab === tab.key
-                  ? 'bg-white text-gray-900 shadow-sm border border-gray-200'
-                  : 'text-gray-500 hover:text-gray-700'
-              ]"
-            >
-              <component :is="tab.icon" class="w-3.5 h-3.5" />
-              <span>{{ tab.label }}</span>
-              <span v-if="tab.count !== null && tab.count > 0" class="px-1.5 py-0.5 rounded-full text-[10px] font-medium"
-                :class="tab.key === 'alerts' && tab.count > 0 ? 'bg-red-100 text-red-600' : 'bg-gray-200 text-gray-600'"
-              >{{ tab.count }}</span>
-            </button>
-          </div>
+        <!-- ── Data Display (always visible when node selected) ── -->
+        <template v-if="selectedNodeId && !loading">
+          <!-- Tab Bar — Vertical mode tabs -->
+          <template v-if="queryMode === 'vertical'">
+            <div class="flex items-center gap-1 bg-gray-100/60 rounded-xl p-1 flex-wrap">
+              <button
+                v-for="tab in ([
+                  { key: 'aggregate', label: '综合视图', icon: Layers, count: aggregateData ? (aggregateData.traces?.total_entries ?? 0) : null },
+                  { key: 'behavior', label: '行为溯源', icon: GitMerge, count: behaviorData ? behaviorData.nodes?.length ?? 0 : null },
+                  { key: 'reports', label: '分析报告', icon: FileText, count: reportsData ? reportsData.total_batches : null },
+                  { key: 'alerts', label: '告警', icon: AlertTriangle, count: aggregateData ? aggregateData.total_alerts : null },
+                  { key: 'malicious', label: '恶意节点', icon: UserX, count: maliciousData ? maliciousData.total : null },
+                ] as const)"
+                :key="tab.key"
+                @click="switchTab(tab.key as any)"
+                :class="[
+                  'flex items-center gap-1.5 px-4 py-2 text-[13px] rounded-lg transition-colors font-medium',
+                  activeTab === tab.key
+                    ? 'bg-white text-gray-900 shadow-sm border border-gray-200'
+                    : 'text-gray-500 hover:text-gray-700'
+                ]"
+              >
+                <component :is="tab.icon" class="w-3.5 h-3.5" />
+                <span>{{ tab.label }}</span>
+                <span v-if="tab.count !== null && tab.count > 0" class="px-1.5 py-0.5 rounded-full text-[10px] font-medium"
+                  :class="tab.key === 'alerts' && tab.count > 0 ? 'bg-red-100 text-red-600' : tab.key === 'malicious' && tab.count > 0 ? 'bg-red-100 text-red-600' : 'bg-gray-200 text-gray-600'"
+                >{{ tab.count }}</span>
+              </button>
+            </div>
+          </template>
+
+          <!-- Tab Bar — Horizontal mode tabs -->
+          <template v-else>
+            <div class="flex items-center gap-1 bg-gray-100/60 rounded-xl p-1">
+              <button
+                class="flex items-center gap-1.5 px-4 py-2 text-[13px] rounded-lg bg-white text-gray-900 shadow-sm border border-gray-200 font-medium"
+              >
+                <BarChart3 class="w-3.5 h-3.5" />
+                <span>横向分析</span>
+                <span v-if="horizontalReports.length > 0" class="px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-purple-100 text-purple-600">{{ horizontalReports.length }}</span>
+              </button>
+            </div>
+          </template>
+
+          <!-- ── Vertical Analysis Content ── -->
+          <template v-if="queryMode === 'vertical'">
 
           <!-- ── Aggregate Tab ── -->
           <div v-if="activeTab === 'aggregate' && aggregateData" class="space-y-5">
@@ -706,11 +956,59 @@ onMounted(() => {
               </div>
             </div>
 
-            <!-- Intent Info -->
-            <div v-if="aggregateData.intent" class="bg-white rounded-xl border border-gray-200 p-5">
+            <!-- Intent Info — 结构化渲染 -->
+            <div v-if="intentInfo" class="bg-white rounded-xl border border-gray-200 p-5">
+              <div class="flex items-center gap-2 mb-4">
+                <Target class="w-4 h-4 text-indigo-500" />
+                <span class="text-[13px] font-semibold text-gray-800">意图信息</span>
+                <span :class="['px-2 py-0.5 rounded-md text-[10px] font-semibold border', riskLevelBadge(intentInfo.risk_level).cls]">
+                  {{ riskLevelBadge(intentInfo.risk_level).text }} Risk
+                </span>
+              </div>
+
+              <div class="space-y-3">
+                <!-- Original Task -->
+                <div>
+                  <div class="text-[11px] font-medium text-gray-400 mb-1">用户原始输入</div>
+                  <div class="bg-gray-50 rounded-lg px-3 py-2 text-[13px] text-gray-800 leading-relaxed">{{ intentInfo.original_task }}</div>
+                </div>
+
+                <!-- Core Objective -->
+                <div>
+                  <div class="text-[11px] font-medium text-gray-400 mb-1">核心目标</div>
+                  <div class="bg-indigo-50/50 rounded-lg px-3 py-2 text-[13px] text-indigo-700 leading-relaxed">{{ intentInfo.core_objective }}</div>
+                </div>
+
+                <!-- Constraints & Capabilities -->
+                <div class="grid grid-cols-2 gap-4">
+                  <div v-if="intentInfo.constraints?.length">
+                    <div class="text-[11px] font-medium text-gray-400 mb-1.5">约束条件</div>
+                    <div class="space-y-1">
+                      <div v-for="(c, i) in intentInfo.constraints" :key="i"
+                        class="flex items-start gap-1.5 text-[12px] text-gray-600"
+                      >
+                        <span class="w-1 h-1 rounded-full bg-gray-400 mt-1.5 shrink-0"></span>
+                        {{ c }}
+                      </div>
+                    </div>
+                  </div>
+                  <div v-if="intentInfo.involved_capabilities?.length">
+                    <div class="text-[11px] font-medium text-gray-400 mb-1.5">涉及能力域</div>
+                    <div class="flex flex-wrap gap-1.5">
+                      <span v-for="(cap, i) in intentInfo.involved_capabilities" :key="i"
+                        class="px-2 py-0.5 rounded-md text-[10px] font-medium bg-blue-50 text-blue-600 border border-blue-200"
+                      >{{ cap }}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Fallback: raw intent if not parseable -->
+            <div v-else-if="aggregateData.intent" class="bg-white rounded-xl border border-gray-200 p-5">
               <div class="flex items-center gap-2 mb-3">
                 <Info class="w-4 h-4 text-indigo-500" />
-                <span class="text-[13px] font-semibold text-gray-800">意图信息</span>
+                <span class="text-[13px] font-semibold text-gray-800">意图信息（原始）</span>
               </div>
               <div class="bg-gray-50 rounded-lg p-4 text-sm text-gray-700 font-mono whitespace-pre-wrap">{{ JSON.stringify(aggregateData.intent, null, 2) }}</div>
             </div>
@@ -782,23 +1080,19 @@ onMounted(() => {
             </div>
 
             <div v-else class="relative">
-              <!-- Timeline line -->
               <div class="absolute left-[19px] top-3 bottom-3 w-px bg-gray-200 border-l border-dashed border-gray-300 z-0"></div>
 
               <div v-for="node in behaviorData.nodes" :key="node.hop_count.join('.')" class="relative flex gap-4 mb-8 z-10">
-                <!-- Hop badge -->
                 <div class="w-10 h-10 rounded-full bg-white border-2 border-indigo-200 flex items-center justify-center shrink-0 shadow-sm z-10">
                   <span class="text-[12px] font-bold text-indigo-600">{{ node.hop_count[0] }}.{{ node.hop_count[1] }}</span>
                 </div>
 
                 <div class="flex-1 min-w-0 space-y-3">
-                  <!-- Node DID -->
                   <div class="flex items-center gap-2">
                     <span class="text-[13px] font-semibold text-gray-800">Hop {{ node.hop_count[0] }}.{{ node.hop_count[1] }}</span>
                     <span class="text-[11px] font-mono text-gray-400 truncate" :title="node.node_did">{{ node.node_did }}</span>
                   </div>
 
-                  <!-- Entries by field type -->
                   <template v-for="ft in fieldTypes" :key="ft">
                     <div v-if="node[ft] && node[ft].length > 0" class="space-y-2">
                       <div class="flex items-center gap-1.5">
@@ -854,7 +1148,6 @@ onMounted(() => {
                   <span class="text-[10px] text-gray-400">{{ formatTime(report.timestamp) }}</span>
                 </div>
 
-                <!-- Verdict -->
                 <div v-if="report.report?.overall_verdict" class="flex items-center gap-2 mb-3">
                   <span class="text-[11px] text-gray-500">Verdict:</span>
                   <span :class="['px-2 py-0.5 rounded-md text-[10px] font-semibold border', verdictBadge(report.report.overall_verdict).cls]">
@@ -862,12 +1155,10 @@ onMounted(() => {
                   </span>
                 </div>
 
-                <!-- Summary -->
                 <p v-if="report.report?.summary" class="text-[12px] text-gray-600 leading-relaxed mb-3">
                   {{ report.report.summary }}
                 </p>
 
-                <!-- Node Verdicts -->
                 <div v-if="report.report?.node_verdicts?.length" class="space-y-2 mt-3">
                   <div class="text-[11px] font-medium text-gray-400">节点裁决 ({{ report.report.node_verdicts.length }})</div>
                   <div v-for="(nv, i) in report.report.node_verdicts" :key="i"
@@ -881,7 +1172,6 @@ onMounted(() => {
                   </div>
                 </div>
 
-                <!-- Raw Report JSON (collapsed) -->
                 <details class="mt-3">
                   <summary class="text-[11px] text-gray-400 cursor-pointer hover:text-gray-600 transition-colors">查看原始报告</summary>
                   <div class="mt-2 bg-gray-50 rounded-lg p-3 text-[11px] font-mono text-gray-600 whitespace-pre-wrap overflow-x-auto max-h-[300px] overflow-y-auto">
@@ -906,7 +1196,6 @@ onMounted(() => {
               class="bg-white rounded-xl border-2 overflow-hidden"
               :class="alert.verdict === 'malicious' ? 'border-red-300' : 'border-amber-200'"
             >
-              <!-- Alert Header -->
               <div class="p-4" :class="alert.verdict === 'malicious' ? 'bg-red-50/50' : 'bg-amber-50/50'">
                 <div class="flex items-center justify-between mb-2">
                   <div class="flex items-center gap-2">
@@ -924,7 +1213,6 @@ onMounted(() => {
                 </div>
               </div>
 
-              <!-- Suspicious Nodes -->
               <div v-if="alert.suspicious_nodes?.length" class="p-4 border-t border-gray-100">
                 <div class="text-[11px] font-medium text-gray-400 mb-2">可疑节点 ({{ alert.suspicious_nodes.length }})</div>
                 <div class="space-y-2">
@@ -956,19 +1244,240 @@ onMounted(() => {
             </div>
           </div>
 
-          <!-- ── Analysis Controls ── -->
-          <div class="bg-white rounded-2xl border border-gray-200 p-5">
+          <!-- ── Malicious Nodes Tab ── -->
+          <div v-if="activeTab === 'malicious'" class="space-y-5">
+            <!-- Source Filter -->
+            <div class="bg-white rounded-xl border border-gray-200 p-4 flex items-center gap-3 flex-wrap">
+              <span class="text-[12px] text-gray-500">来源筛选：</span>
+              <select v-model="maliciousSourceFilter" @change="fetchMalicious"
+                class="px-3 py-1.5 text-[12px] border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-200"
+              >
+                <option value="">全部来源</option>
+                <option value="protocol_review">协议审查</option>
+                <option value="vertical_analysis">纵向分析</option>
+                <option value="horizontal_analysis">横向分析</option>
+              </select>
+            </div>
+
+            <!-- Session Reports -->
+            <div class="bg-white rounded-xl border border-gray-200 p-5">
+              <div class="flex items-center gap-2 mb-4">
+                <UserX class="w-4 h-4 text-red-500" />
+                <span class="text-[13px] font-semibold text-gray-800">当前 Session 恶意报告</span>
+                <span v-if="maliciousData" class="px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-gray-100 text-gray-500 border border-gray-200">{{ maliciousData.total }}</span>
+              </div>
+
+              <div v-if="!maliciousData" class="text-center py-8 text-gray-400 text-[12px]">输入 Session ID 并查询</div>
+              <div v-else-if="maliciousData.reports.length === 0" class="text-center py-8 text-gray-400 text-[12px]">
+                <CheckCircle2 class="w-6 h-6 text-emerald-400 mx-auto mb-2" />
+                该 Session 未发现恶意行为
+              </div>
+              <div v-else class="space-y-3">
+                <div v-for="report in maliciousData.reports" :key="report.id"
+                  class="p-3 rounded-lg border"
+                  :class="report.severity === 'high' ? 'bg-red-50/50 border-red-200' : report.severity === 'medium' ? 'bg-amber-50/50 border-amber-200' : 'bg-blue-50/50 border-blue-200'"
+                >
+                  <div class="flex items-center justify-between mb-2">
+                    <div class="flex items-center gap-2">
+                      <span :class="['px-2 py-0.5 rounded-md text-[10px] font-semibold border', sourceBadge(report.source).cls]">
+                        {{ sourceBadge(report.source).text }}
+                      </span>
+                      <span :class="['px-1.5 py-0.5 rounded border text-[9px] font-medium', severityBadge(report.severity).cls]">
+                        {{ report.severity }}
+                      </span>
+                      <span class="px-1.5 py-0.5 rounded text-[9px] font-medium bg-gray-100 text-gray-500 border border-gray-200">
+                        {{ report.evidence_type }}
+                      </span>
+                    </div>
+                    <span class="text-[10px] text-gray-400">{{ formatTime(report.timestamp) }}</span>
+                  </div>
+
+                  <p class="text-[12px] text-gray-700 leading-relaxed mb-2">{{ report.evidence_description }}</p>
+
+                  <div class="flex items-center gap-4 text-[11px] text-gray-500">
+                    <div class="flex items-center gap-1">
+                      <span class="text-gray-400">Target:</span>
+                      <span class="font-mono truncate" :title="report.target_did">{{ formatDid(report.target_did) }}</span>
+                    </div>
+                    <div v-if="report.taint_score" class="flex items-center gap-1">
+                      <span class="text-gray-400">Taint:</span>
+                      <span class="font-mono font-medium text-gray-600">{{ report.taint_score }}</span>
+                    </div>
+                    <div class="flex items-center gap-1">
+                      <span class="text-gray-400">Type:</span>
+                      <span>{{ report.node_type }}</span>
+                    </div>
+                  </div>
+
+                  <details class="mt-2">
+                    <summary class="text-[10px] text-gray-400 cursor-pointer hover:text-gray-600">原始证据</summary>
+                    <div class="mt-1 bg-gray-50 rounded p-2 text-[10px] font-mono text-gray-500 whitespace-pre-wrap overflow-x-auto max-h-[200px] overflow-y-auto">
+                      {{ JSON.stringify(report.raw_evidence, null, 2) }}
+                    </div>
+                  </details>
+                </div>
+              </div>
+            </div>
+
+            <!-- Dossiers Overview -->
+            <div class="bg-white rounded-xl border border-gray-200 p-5">
+              <div class="flex items-center gap-2 mb-4">
+                <Eye class="w-4 h-4 text-indigo-500" />
+                <span class="text-[13px] font-semibold text-gray-800">恶意节点档案总览</span>
+                <button @click="fetchDossiers" class="ml-auto px-2 py-1 text-[10px] text-gray-400 hover:text-gray-600 transition-colors flex items-center gap-1">
+                  <RefreshCw class="w-3 h-3" /> 刷新
+                </button>
+              </div>
+
+              <div v-if="!dossiersData" class="text-center py-8 text-gray-400 text-[12px]">点击刷新加载档案数据</div>
+              <div v-else-if="dossiersData.dossiers.length === 0" class="text-center py-8 text-gray-400 text-[12px]">
+                <CheckCircle2 class="w-6 h-6 text-emerald-400 mx-auto mb-2" />
+                暂无已知恶意节点
+              </div>
+              <div v-else class="space-y-3">
+                <div v-for="dossier in dossiersData.dossiers" :key="dossier.did"
+                  class="p-3 rounded-lg border border-gray-200 bg-gray-50/50"
+                >
+                  <div class="flex items-center justify-between mb-2">
+                    <div class="flex items-center gap-2">
+                      <span :class="['px-2 py-0.5 rounded-md text-[10px] font-semibold border', severityLevelBadge(dossier.severity_level).cls]">
+                        {{ severityLevelBadge(dossier.severity_level).text }}
+                      </span>
+                      <span class="px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-gray-200 text-gray-600">
+                        {{ dossier.total_violations }} violations
+                      </span>
+                    </div>
+                  </div>
+
+                  <div class="text-[12px] font-mono text-gray-600 truncate mb-1" :title="dossier.did">{{ dossier.did }}</div>
+
+                  <div class="flex items-center gap-3 text-[11px] text-gray-500">
+                    <span>首次: {{ formatTime(dossier.first_seen_at) }}</span>
+                    <span>最近: {{ formatTime(dossier.last_seen_at) }}</span>
+                  </div>
+
+                  <div v-if="dossier.last_evidence_desc" class="mt-2 text-[11px] text-gray-500">
+                    <span class="text-gray-400">最近事件：</span>{{ dossier.last_evidence_desc }}
+                  </div>
+
+                  <!-- Evidence Breakdown -->
+                  <div v-if="dossier.evidence_breakdown && Object.keys(dossier.evidence_breakdown).length" class="mt-2 flex flex-wrap gap-1.5">
+                    <span v-for="(count, etype) in dossier.evidence_breakdown" :key="String(etype)"
+                      class="px-1.5 py-0.5 rounded text-[9px] font-medium bg-white text-gray-500 border border-gray-200"
+                    >{{ String(etype) }} ({{ count }})</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          </template><!-- end vertical content -->
+
+          <!-- ── Horizontal Analysis Content ── -->
+          <template v-else>
+          <div class="space-y-5">
+            <!-- Horizontal State -->
+            <div v-if="horizontalState" class="bg-white rounded-xl border border-gray-200 p-5">
+              <div class="flex items-center gap-2 mb-3">
+                <BarChart3 class="w-4 h-4 text-purple-500" />
+                <span class="text-[13px] font-semibold text-gray-800">累积状态</span>
+              </div>
+              <div class="grid grid-cols-4 gap-4">
+                <div class="bg-gray-50 rounded-lg p-3 text-center">
+                  <div class="text-[11px] text-gray-400 mb-1">累积次数</div>
+                  <div class="text-xl font-semibold text-gray-800">{{ horizontalState.accumulated_count }}</div>
+                </div>
+                <div class="bg-gray-50 rounded-lg p-3 text-center">
+                  <div class="text-[11px] text-gray-400 mb-1">最后 Trace ID</div>
+                  <div class="text-xl font-semibold text-gray-800">{{ horizontalState.last_trace_id }}</div>
+                </div>
+                <div class="bg-gray-50 rounded-lg p-3 text-center">
+                  <div class="text-[11px] text-gray-400 mb-1">批次索引</div>
+                  <div class="text-xl font-semibold text-gray-800">{{ horizontalState.batch_index }}</div>
+                </div>
+                <div class="bg-gray-50 rounded-lg p-3 text-center">
+                  <div class="text-[11px] text-gray-400 mb-1">节点类型</div>
+                  <div class="text-xl font-semibold text-gray-800">{{ horizontalState.node_type || '--' }}</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Horizontal Reports -->
+            <div v-if="horizontalReports.length > 0" class="space-y-4">
+              <div class="flex items-center gap-2 mb-2">
+                <FileText class="w-4 h-4 text-purple-500" />
+                <span class="text-[13px] font-semibold text-gray-800">横向分析报告</span>
+                <span class="px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-purple-100 text-purple-600 border border-purple-200">{{ horizontalReports.length }}</span>
+              </div>
+
+              <div v-for="report in horizontalReports" :key="report.id"
+                class="bg-white rounded-xl border border-gray-200 overflow-hidden hover:border-gray-300 transition-colors"
+              >
+                <div class="p-4">
+                  <div class="flex items-center justify-between mb-3">
+                    <div class="flex items-center gap-2">
+                      <span class="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-purple-50 text-purple-600 border border-purple-200">
+                        Batch #{{ report.batch_index }}
+                      </span>
+                      <span class="text-[11px] text-gray-400 font-mono">
+                        trace {{ report.from_trace_id }} → {{ report.to_trace_id }}
+                      </span>
+                      <span class="px-1.5 py-0.5 rounded text-[9px] font-medium bg-blue-50 text-blue-600 border border-blue-200">
+                        {{ report.sessions_scanned }} sessions
+                      </span>
+                    </div>
+                    <span class="text-[10px] text-gray-400">{{ formatTime(report.timestamp) }}</span>
+                  </div>
+
+                  <div v-if="report.report?.overall_verdict" class="flex items-center gap-2 mb-3">
+                    <span class="text-[11px] text-gray-500">Verdict:</span>
+                    <span :class="['px-2 py-0.5 rounded-md text-[10px] font-semibold border', verdictBadge(report.report.overall_verdict).cls]">
+                      {{ verdictBadge(report.report.overall_verdict).text }}
+                    </span>
+                  </div>
+
+                  <p v-if="report.report?.summary" class="text-[12px] text-gray-600 leading-relaxed mb-3">
+                    {{ report.report.summary }}
+                  </p>
+
+                  <div v-if="report.report?.node_verdicts?.length" class="space-y-2 mt-3">
+                    <div class="text-[11px] font-medium text-gray-400">节点裁决 ({{ report.report.node_verdicts.length }})</div>
+                    <div v-for="(nv, i) in report.report.node_verdicts" :key="i"
+                      class="flex items-center gap-2 p-2 bg-gray-50 rounded-lg border border-gray-100 text-[11px]"
+                    >
+                      <span :class="['px-1.5 py-0.5 rounded border text-[9px] font-medium', severityBadge(nv.severity || '').cls]">
+                        {{ nv.severity || '--' }}
+                      </span>
+                      <span class="font-mono text-gray-600 truncate flex-1">{{ formatDid(nv.node_did || '') }}</span>
+                      <span v-if="nv.taint_score != null" class="text-gray-400">taint: {{ nv.taint_score }}</span>
+                    </div>
+                  </div>
+
+                  <details class="mt-3">
+                    <summary class="text-[11px] text-gray-400 cursor-pointer hover:text-gray-600 transition-colors">查看原始报告</summary>
+                    <div class="mt-2 bg-gray-50 rounded-lg p-3 text-[11px] font-mono text-gray-600 whitespace-pre-wrap overflow-x-auto max-h-[300px] overflow-y-auto">
+                      {{ JSON.stringify(report.report, null, 2) }}
+                    </div>
+                  </details>
+                </div>
+              </div>
+            </div>
+
+            <div v-if="horizontalReports.length === 0 && horizontalState && !horizontalLoading" class="text-center py-12 text-gray-400 text-sm">
+              <BarChart3 class="w-6 h-6 text-gray-300 mx-auto mb-2" />
+              该 DID 暂无横向分析报告
+            </div>
+
+            <div v-if="!horizontalState && horizontalReports.length === 0 && !horizontalLoading" class="text-center py-12 text-gray-400 text-sm">
+              输入节点 DID 查询横向分析数据
+            </div>
+          </div>
+          </template><!-- end horizontal content -->
+
+          <!-- ── Analysis Status (vertical only) ── -->
+          <div v-if="queryMode === 'vertical' && analysisStatus" class="bg-white rounded-2xl border border-gray-200 p-5">
             <div class="flex items-center justify-between">
               <div class="flex items-center gap-3">
-                <button
-                  @click="triggerAnalysis"
-                  :disabled="triggerLoading || !selectedNodeId || !sessionIdInput.trim()"
-                  class="px-4 py-2 text-[13px] font-medium text-white bg-indigo-600 rounded-xl hover:bg-indigo-700 transition-colors flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  <Loader2 v-if="triggerLoading" class="w-3.5 h-3.5 animate-spin" />
-                  <Zap v-else class="w-3.5 h-3.5" />
-                  触发污点分析
-                </button>
                 <button
                   @click="fetchAnalysisStatus"
                   :disabled="!selectedNodeId || !sessionIdInput.trim()"
@@ -998,8 +1507,8 @@ onMounted(() => {
                   <span class="text-[12px] text-gray-400">未找到分析任务</span>
                 </template>
                 <template v-else>
-                  <Info class="w-4 h-4 text-gray-400" />
-                  <span class="text-[12px] text-gray-500">{{ analysisStatus.status }}</span>
+                  <Clock class="w-4 h-4 text-gray-400" />
+                  <span class="text-[12px] text-gray-400">{{ analysisStatus.status }}</span>
                 </template>
               </div>
             </div>
@@ -1010,70 +1519,63 @@ onMounted(() => {
     </div>
 
     <!-- ── Add Node Modal ── -->
-    <div v-if="showAddModal" class="fixed inset-0 bg-black/30 flex items-center justify-center z-50" @click.self="showAddModal = false">
-      <div class="bg-white rounded-xl shadow-xl border border-gray-100 w-[420px] p-6">
-        <div class="flex items-center justify-between mb-5">
-          <h3 class="text-sm font-semibold text-gray-800">添加溯源节点</h3>
-          <button @click="showAddModal = false" class="p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition">
-            <X class="w-4 h-4" />
-          </button>
+    <div v-if="showAddModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" @click.self="showAddModal = false">
+      <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="text-sm font-semibold text-gray-900">添加溯源节点</h3>
+          <button @click="showAddModal = false" class="p-1 text-gray-400 hover:text-gray-600"><X class="w-4 h-4" /></button>
         </div>
-        <div class="space-y-4">
+        <div class="space-y-3">
           <div>
-            <label class="block text-xs font-medium text-gray-500 mb-1.5">节点名称</label>
-            <input v-model="newNodeName" placeholder="e.g. 主溯源服务" class="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-300 transition-colors" />
+            <label class="block text-[11px] font-medium text-gray-400 mb-1">名称</label>
+            <input v-model="newNodeName" placeholder="例如：ATTP Node 1" class="w-full px-3 py-2 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-200" />
           </div>
           <div>
-            <label class="block text-xs font-medium text-gray-500 mb-1.5">节点地址</label>
-            <input v-model="newNodeUrl" placeholder="http://localhost:9000" class="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-300 transition-colors font-mono" />
-            <p class="text-[10px] text-gray-400 mt-1">溯源协议节点的 HTTP 地址</p>
+            <label class="block text-[11px] font-medium text-gray-400 mb-1">URL</label>
+            <input v-model="newNodeUrl" placeholder="http://localhost:9000" class="w-full px-3 py-2 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-200 font-mono" />
           </div>
         </div>
-        <div class="flex justify-end gap-2 mt-6">
-          <button @click="showAddModal = false" class="px-4 py-2 text-sm text-gray-500 hover:bg-gray-50 rounded-lg transition-colors">取消</button>
-          <button @click="addNode" class="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-colors">添加节点</button>
+        <div class="flex justify-end gap-2 mt-5">
+          <button @click="showAddModal = false" class="px-4 py-2 text-sm text-gray-500 hover:text-gray-700">取消</button>
+          <button @click="addNode" class="px-4 py-2 text-sm font-medium text-white bg-gray-900 rounded-xl hover:bg-gray-800">添加</button>
         </div>
       </div>
     </div>
 
     <!-- ── Edit Node Modal ── -->
-    <div v-if="showEditModal" class="fixed inset-0 bg-black/30 flex items-center justify-center z-50" @click.self="showEditModal = false">
-      <div class="bg-white rounded-xl shadow-xl border border-gray-100 w-[420px] p-6">
-        <div class="flex items-center justify-between mb-5">
-          <h3 class="text-sm font-semibold text-gray-800">编辑溯源节点</h3>
-          <button @click="showEditModal = false" class="p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition">
-            <X class="w-4 h-4" />
-          </button>
+    <div v-if="showEditModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" @click.self="showEditModal = false">
+      <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="text-sm font-semibold text-gray-900">编辑溯源节点</h3>
+          <button @click="showEditModal = false" class="p-1 text-gray-400 hover:text-gray-600"><X class="w-4 h-4" /></button>
         </div>
-        <div class="space-y-4">
+        <div class="space-y-3">
           <div>
-            <label class="block text-xs font-medium text-gray-500 mb-1.5">节点名称</label>
-            <input v-model="editNodeName" placeholder="e.g. 主溯源服务" class="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-300 transition-colors" />
+            <label class="block text-[11px] font-medium text-gray-400 mb-1">名称</label>
+            <input v-model="editNodeName" class="w-full px-3 py-2 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-200" />
           </div>
           <div>
-            <label class="block text-xs font-medium text-gray-500 mb-1.5">节点地址</label>
-            <input v-model="editNodeUrl" placeholder="http://localhost:9000" class="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-300 transition-colors font-mono" />
+            <label class="block text-[11px] font-medium text-gray-400 mb-1">URL</label>
+            <input v-model="editNodeUrl" class="w-full px-3 py-2 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-200 font-mono" />
           </div>
         </div>
-        <div class="flex justify-end gap-2 mt-6">
-          <button @click="showEditModal = false" class="px-4 py-2 text-sm text-gray-500 hover:bg-gray-50 rounded-lg transition-colors">取消</button>
-          <button @click="saveEditNode" class="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-colors">保存</button>
+        <div class="flex justify-end gap-2 mt-5">
+          <button @click="showEditModal = false" class="px-4 py-2 text-sm text-gray-500 hover:text-gray-700">取消</button>
+          <button @click="saveEditNode" class="px-4 py-2 text-sm font-medium text-white bg-gray-900 rounded-xl hover:bg-gray-800">保存</button>
         </div>
       </div>
     </div>
 
     <!-- ── Toast ── -->
-    <div :class="[
-      'fixed top-6 right-6 z-50 transition-all duration-300',
-      toastVisible ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-10 pointer-events-none'
-    ]">
-      <div :class="[
-        'flex items-center gap-2.5 px-4 py-3 rounded-xl border shadow-lg text-sm',
-        toastType === 'success' ? 'bg-emerald-50 border-emerald-100 text-emerald-700' : 'bg-red-50 border-red-100 text-red-700'
-      ]">
-        <component :is="toastType === 'success' ? Shield : X" class="w-4 h-4" />
-        <span>{{ toastMessage }}</span>
+    <transition name="toast">
+      <div v-if="toastVisible"
+        class="fixed bottom-6 left-1/2 -translate-x-1/2 z-[100] px-4 py-2.5 rounded-xl shadow-lg text-[13px] font-medium flex items-center gap-2"
+        :class="toastType === 'success' ? 'bg-gray-900 text-white' : 'bg-red-600 text-white'"
+      >
+        <CheckCircle2 v-if="toastType === 'success'" class="w-4 h-4" />
+        <XCircle v-else class="w-4 h-4" />
+        {{ toastMessage }}
       </div>
-    </div>
+    </transition>
   </div>
 </template>
