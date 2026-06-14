@@ -67,7 +67,7 @@ const handleTrace = (id: string) => {
     closeMenu()
     return
   }
-  router.push(`/trace?sessionId=${encodeURIComponent(id)}&protocolNodeUrl=${encodeURIComponent(protocolUrl)}`)
+  router.push(`/trace/query?sessionId=${encodeURIComponent(id)}&protocolNodeUrl=${encodeURIComponent(protocolUrl)}`)
   closeMenu()
 }
 

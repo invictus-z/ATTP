@@ -189,14 +189,40 @@ class MaliciousRepository(BaseRepository):
     async def query_all_dossiers(
         self,
         severity_level: str | None = None,
+        source: str | None = None,
         limit: int = 100,
     ) -> list[dict]:
+        """查询所有档案，可按 severity_level 和 source 筛选。
+
+        source 筛选语义：只返回"至少有一条来自该来源 incident"的档案
+        （通过 malicious_reports 子查询判定）。
+        """
+        conditions: list[str] = []
+        params: list[Any] = []
         if severity_level:
-            return await self._db.execute_fetch(
-                "SELECT * FROM node_dossiers WHERE severity_level = ? ORDER BY updated_at DESC LIMIT ?",
-                (severity_level, limit),
+            conditions.append("severity_level = ?")
+            params.append(severity_level)
+        if source:
+            conditions.append(
+                "did IN (SELECT DISTINCT target_did FROM malicious_reports WHERE source = ?)"
             )
-        return await self._db.execute_fetch(
-            "SELECT * FROM node_dossiers ORDER BY updated_at DESC LIMIT ?",
-            (limit,),
+            params.append(source)
+        where = (" WHERE " + " AND ".join(conditions)) if conditions else ""
+        sql = f"SELECT * FROM node_dossiers{where} ORDER BY updated_at DESC LIMIT ?"
+        params.append(limit)
+        return await self._db.execute_fetch(sql, tuple(params))
+
+    async def compute_source_breakdown(self) -> dict[str, dict[str, int]]:
+        """返回 {did: {source: count}} 映射，用于给 dossier 补来源分布。
+
+        一条 GROUP BY 查询拉全表，调用方按需取涉及的 did。
+        """
+        rows = await self._db.execute_fetch(
+            "SELECT target_did, source, COUNT(*) AS cnt "
+            "FROM malicious_reports GROUP BY target_did, source"
         )
+        result: dict[str, dict[str, int]] = {}
+        for row in rows:
+            did = row["target_did"]
+            result.setdefault(did, {})[row["source"]] = row["cnt"]
+        return result

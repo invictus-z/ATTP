@@ -61,44 +61,31 @@ def _format_report(r: dict) -> dict:
 def get_malicious_router(tracer: ProtocolTracer) -> APIRouter:
     router = APIRouter(prefix="/api/malicious")
 
-    @router.get("/session/{session_id}")
-    async def query_by_session(
-        session_id: str,
+    @router.get("/reports")
+    async def query_reports(
+        session_id: str | None = Query(None, description="按 session_id 筛选"),
+        did: str | None = Query(None, description="按 DID 筛选"),
         source: str | None = Query(None, description="筛选来源: protocol_review / vertical_analysis / horizontal_analysis"),
+        limit: int = Query(100, ge=1, le=1000),
     ):
-        """查询指定 session 的恶意节点报告。"""
-        try:
-            reports = await tracer.query_malicious_reports(
-                session_id=session_id, source=source,
-            )
-            return {
-                "session_id": session_id,
-                "reports": [_format_report(r) for r in reports],
-                "total": len(reports),
-            }
-        except Exception as e:
-            logger.error("Error querying malicious nodes for {}: {}", session_id, e)
-            return {"session_id": session_id, "reports": [], "total": 0}
+        """统一查询恶意报告，支持 session_id / did / source 组合筛选。
 
-    @router.get("/did/{did}")
-    async def query_by_did(
-        did: str,
-        source: str | None = Query(None, description="筛选来源: protocol_review / vertical_analysis / horizontal_analysis"),
-    ):
-        """查询指定 DID 的所有恶意节点报告。"""
-        canonical = _normalise_did(did)
+        合并原 ``/session/{session_id}`` 与 ``/did/{did}`` 两个端点。
+        """
+        canonical = _normalise_did(did) if did else None
         try:
             reports = await tracer.query_malicious_reports(
-                target_did=canonical, source=source,
+                session_id=session_id, target_did=canonical, source=source,
             )
+            if len(reports) > limit:
+                reports = reports[:limit]
             return {
-                "target_did": canonical,
-                "reports": [_format_report(r) for r in reports],
                 "total": len(reports),
+                "reports": [_format_report(r) for r in reports],
             }
         except Exception as e:
-            logger.error("Error querying malicious nodes for DID {}: {}", did, e)
-            return {"target_did": did, "reports": [], "total": 0}
+            logger.error("Error querying malicious reports: {}", e)
+            return {"total": 0, "reports": []}
 
     # -- dossier 路由 --
 
@@ -113,6 +100,11 @@ def get_malicious_router(tracer: ProtocolTracer) -> APIRouter:
 
             # 附带该 DID 的所有违规明细
             incidents = await tracer.query_malicious_reports(target_did=canonical)
+            # 由 incidents 计算来源分布
+            source_breakdown: dict[str, int] = {}
+            for inc in incidents:
+                src = inc.get("source", "unknown")
+                source_breakdown[src] = source_breakdown.get(src, 0) + 1
             return {
                 "found": True,
                 "did": dossier["did"],
@@ -121,6 +113,7 @@ def get_malicious_router(tracer: ProtocolTracer) -> APIRouter:
                 "first_seen_at": dossier["first_seen_at"],
                 "last_seen_at": dossier["last_seen_at"],
                 "evidence_breakdown": json.loads(dossier.get("evidence_breakdown", "{}")),
+                "source_breakdown": source_breakdown,
                 "last_evidence_type": dossier["last_evidence_type"],
                 "last_session_id": dossier["last_session_id"],
                 "last_evidence_desc": dossier["last_evidence_desc"],
@@ -133,12 +126,16 @@ def get_malicious_router(tracer: ProtocolTracer) -> APIRouter:
     @router.get("/dossiers")
     async def query_all_dossiers(
         severity: str | None = Query(None, alias="severity"),
+        source: str | None = Query(None, description="筛选来源: protocol_review / vertical_analysis / horizontal_analysis"),
         limit: int = Query(100, ge=1, le=1000),
     ):
-        """查询所有恶意节点档案，可按 severity 筛选。"""
+        """查询所有恶意节点档案，可按 severity / source 筛选。
+
+        每条档案附带 ``source_breakdown``（各来源违规计数），便于前端打标签。
+        """
         try:
             dossiers = await tracer.query_all_dossiers(
-                severity_level=severity, limit=limit,
+                severity_level=severity, source=source, limit=limit,
             )
             return {
                 "total": len(dossiers),
@@ -150,6 +147,7 @@ def get_malicious_router(tracer: ProtocolTracer) -> APIRouter:
                         "first_seen_at": d["first_seen_at"],
                         "last_seen_at": d["last_seen_at"],
                         "evidence_breakdown": json.loads(d.get("evidence_breakdown", "{}")),
+                        "source_breakdown": d.get("source_breakdown", {}),
                         "last_evidence_type": d["last_evidence_type"],
                         "last_session_id": d["last_session_id"],
                         "last_evidence_desc": d["last_evidence_desc"],

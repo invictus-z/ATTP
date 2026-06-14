@@ -140,9 +140,14 @@ class SqliteStore:
     async def query_all_dossiers(
         self,
         severity_level: str | None = None,
+        source: str | None = None,
         limit: int = 100,
     ) -> list[dict]:
-        return await self._malicious.query_all_dossiers(severity_level, limit)
+        return await self._malicious.query_all_dossiers(severity_level, source, limit)
+
+    async def compute_source_breakdown(self) -> dict[str, dict[str, int]]:
+        """返回 {did: {source: count}} 映射。"""
+        return await self._malicious.compute_source_breakdown()
 
     # -- protocol session state --
 

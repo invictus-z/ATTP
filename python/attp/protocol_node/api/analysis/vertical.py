@@ -1,11 +1,11 @@
 """纵向分析 API 路由 — Session 级语义污点分析。
 
-端点：
-    GET  /api/analysis/{session_id}           — 获取纵向分析报告
-    GET  /api/analysis/intent/{session_id}     — 获取意图与分析状态
-    GET  /api/analysis/aggregate/{session_id}  — 聚合视图（traces + reports + alerts）
-    POST /api/analysis/trigger/{session_id}    — 手动触发纵向分析
-    GET  /api/analysis/status/{session_id}     — 查询纵向分析任务状态
+端点（prefix `/api/analysis/v`）：
+    GET  /api/analysis/v/report/{session_id}     — 获取纵向分析报告
+    GET  /api/analysis/v/intent/{session_id}     — 获取意图与分析状态
+    GET  /api/analysis/v/aggregate/{session_id}  — 聚合视图（traces + reports + alerts）
+    POST /api/analysis/v/trigger/{session_id}    — 手动触发纵向分析
+    GET  /api/analysis/v/status/{session_id}     — 查询纵向分析任务状态
 """
 
 import json
@@ -26,14 +26,14 @@ def get_vertical_analysis_router(
     session_manager: Any = None,
     coordinator_holder: list | None = None,
 ) -> APIRouter:
-    router = APIRouter(prefix="/api")
+    router = APIRouter(prefix="/api/analysis/v")
     _coord_ref = coordinator_holder if coordinator_holder is not None else [None]
 
     # ------------------------------------------------------------------
     # 分析报告查询
     # ------------------------------------------------------------------
 
-    @router.get("/analysis/{session_id}")
+    @router.get("/report/{session_id}")
     async def get_analysis_reports(session_id: str):
         """Return all vertical taint analysis reports for a session."""
         try:
@@ -65,7 +65,7 @@ def get_vertical_analysis_router(
     # Intent & 分析状态
     # ------------------------------------------------------------------
 
-    @router.get("/analysis/intent/{session_id}")
+    @router.get("/intent/{session_id}")
     async def get_analysis_intent(session_id: str):
         """Return the extracted intent and vertical analysis state for a session.
 
@@ -112,7 +112,7 @@ def get_vertical_analysis_router(
     # 聚合视图（traces + reports + alerts）
     # ------------------------------------------------------------------
 
-    @router.get("/analysis/aggregate/{session_id}")
+    @router.get("/aggregate/{session_id}")
     async def get_aggregate_analysis(session_id: str, protocol_node_address: str | None = None):
         """Return behavior traces + vertical analysis reports + alerts combined."""
         # 1. Fetch behavior traces
@@ -210,7 +210,7 @@ def get_vertical_analysis_router(
     # 手动触发纵向分析
     # ------------------------------------------------------------------
 
-    @router.post("/analysis/trigger/{session_id}")
+    @router.post("/trigger/{session_id}")
     async def trigger_analysis(session_id: str):
         """Manually trigger vertical taint analysis (async, returns immediately)."""
         _coordinator = _coord_ref[0]
@@ -218,7 +218,7 @@ def get_vertical_analysis_router(
             return {"triggered": False, "reason": "analysis_disabled"}
         return await _coordinator.trigger_analysis_async(session_id)
 
-    @router.get("/analysis/status/{session_id}")
+    @router.get("/status/{session_id}")
     async def get_analysis_status(session_id: str):
         """Query async vertical analysis task status and phase."""
         _coordinator = _coord_ref[0]

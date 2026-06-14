@@ -146,10 +146,20 @@ class ProtocolTracer:
     async def query_all_dossiers(
         self,
         severity_level: str | None = None,
+        source: str | None = None,
         limit: int = 100,
     ) -> list:
-        """查询所有档案，可按 severity_level 筛选。"""
-        return await self._storage.query_all_dossiers(severity_level, limit)
+        """查询所有档案，可按 severity_level / source 筛选。
+
+        返回的每条档案会附带 ``source_breakdown``（各来源违规计数）。
+        """
+        dossiers = await self._storage.query_all_dossiers(severity_level, source, limit)
+        if not dossiers:
+            return []
+        breakdown = await self._storage.compute_source_breakdown()
+        for d in dossiers:
+            d["source_breakdown"] = breakdown.get(d["did"], {})
+        return dossiers
 
 
 # Backward-compatible alias
