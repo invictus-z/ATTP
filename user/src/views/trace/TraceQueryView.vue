@@ -37,6 +37,7 @@ const sessionIdInput = ref('')
 const didInput = ref('')
 const loading = ref(false)
 const activeTab = ref<'behavior' | 'reports' | 'alerts'>('behavior')
+const hasQueried = ref(false)
 
 // ─── 数据 ───
 const behaviorNodes = ref<HopNode[]>([])
@@ -84,19 +85,23 @@ const currentTriggerLoading = computed(() =>
   queryMode.value === 'vertical' ? vFlow.triggerLoading.value : hFlow.triggerLoading.value,
 )
 
-/** 状态展示：running | completed | failed | not_found | idle */
-const statusKind = computed<'idle' | 'running' | 'completed' | 'failed' | 'not_found'>(() => {
+/** 状态展示：running | completed | failed | not_found | uptodate | idle */
+const statusKind = computed<'idle' | 'running' | 'completed' | 'failed' | 'not_found' | 'uptodate'>(() => {
   const s = currentStatus.value
   if (!s) return 'idle'
   if (s.status === 'running' || s.status === 'already_running') return 'running'
-  if (s.status === 'completed') return s.triggered === false ? 'failed' : 'completed'
+  if (s.status === 'completed') {
+    if (s.triggered === false) {
+      // 已分析过、无新增 trace（旧报告仍有效）——不是失败
+      const r = s.reason || ''
+      if (r === 'no_unanalyzed_traces' || r === 'no_new_traces') return 'uptodate'
+      return 'failed'
+    }
+    return 'completed'
+  }
   if (s.status === 'not_found') return 'not_found'
   return 'idle'
 })
-
-const triggerEnabled = computed(() =>
-  statusKind.value === 'not_found' || statusKind.value === 'idle' || statusKind.value === 'failed' || statusKind.value === 'completed',
-)
 
 // ─── 数据拉取 ───
 async function fetchBehavior(sid: string) {
@@ -145,22 +150,24 @@ async function doQuery() {
     if (queryMode.value === 'vertical') {
       const sid = sessionIdInput.value.trim()
       if (!sid) return
+      hasQueried.value = true
       await Promise.all([
         fetchBehavior(sid),
         vFlow.refreshStatus(sid),
       ])
-      // 已完成则直接取报告
-      if (vFlow.status.value?.status === 'completed' && vFlow.status.value.triggered !== false) {
+      // 已完成则直接取报告（含「已是最新」态——旧报告仍应展示；仅真正失败时不取）
+      if (vFlow.status.value?.status === 'completed' && statusKind.value !== 'failed') {
         await fetchVerticalReport(sid)
       }
     } else {
       const did = didInput.value.trim()
       if (!did) return
+      hasQueried.value = true
       await Promise.all([
         fetchHorizontalState(did),
         hFlow.refreshStatus(did),
       ])
-      if (hFlow.status.value?.status === 'completed' && hFlow.status.value.triggered !== false) {
+      if (hFlow.status.value?.status === 'completed' && statusKind.value !== 'failed') {
         await fetchHorizontalReport(did)
       }
     }
@@ -201,6 +208,7 @@ function onViewDossier(did: string) {
 
 function switchMode(mode: 'vertical' | 'horizontal') {
   queryMode.value = mode
+  hasQueried.value = false
 }
 
 // ─── 生命周期 ───
@@ -284,14 +292,6 @@ onMounted(async () => {
                 <Loader2 v-if="loading" class="w-4 h-4 animate-spin" />
                 <Search v-else class="w-4 h-4" /> 查询
               </button>
-              <button v-if="triggerEnabled" @click="doTrigger"
-                :disabled="currentTriggerLoading || currentPolling || !selectedNodeId || (queryMode === 'vertical' ? !sessionIdInput.trim() : !didInput.trim())"
-                class="px-4 py-2.5 text-sm font-medium text-white bg-indigo-600 rounded-xl hover:bg-indigo-700 transition-colors flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                <Loader2 v-if="currentTriggerLoading || currentPolling" class="w-4 h-4 animate-spin" />
-                <Zap v-else class="w-4 h-4" />
-                {{ statusKind === 'completed' ? '重新分析' : '触发分析' }}
-              </button>
             </div>
           </div>
         </div>
@@ -319,6 +319,10 @@ onMounted(async () => {
                 <CheckCircle2 class="w-4 h-4 text-emerald-500" />
                 <span class="text-[12px] text-emerald-600 font-medium">分析完成</span>
               </template>
+              <template v-else-if="statusKind === 'uptodate'">
+                <CheckCircle2 class="w-4 h-4 text-gray-400" />
+                <span class="text-[12px] text-gray-500 font-medium">已是最新 · 无新增待分析 trace</span>
+              </template>
               <template v-else-if="statusKind === 'failed'">
                 <XCircle class="w-4 h-4 text-red-500" />
                 <span class="text-[12px] text-red-600 font-medium">分析失败</span>
@@ -326,7 +330,14 @@ onMounted(async () => {
               </template>
               <template v-else-if="statusKind === 'not_found'">
                 <Clock class="w-4 h-4 text-gray-400" />
-                <span class="text-[12px] text-gray-400">未找到分析任务，点击「触发分析」开始</span>
+                <span class="text-[12px] text-gray-400">未找到分析任务</span>
+                <button @click="doTrigger"
+                  :disabled="currentTriggerLoading || currentPolling || !selectedNodeId || (queryMode === 'vertical' ? !sessionIdInput.trim() : !didInput.trim())"
+                  class="px-3 py-1.5 text-[12px] font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-colors flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <Loader2 v-if="currentTriggerLoading || currentPolling" class="w-3.5 h-3.5 animate-spin" />
+                  <Zap v-else class="w-3.5 h-3.5" /> 触发分析
+                </button>
               </template>
               <template v-else>
                 <Clock class="w-4 h-4 text-gray-400" />
@@ -344,6 +355,7 @@ onMounted(async () => {
           <template v-else>
             <!-- ============ 纵向 ============ -->
             <template v-if="queryMode === 'vertical'">
+              <div v-if="hasQueried" class="space-y-6">
               <!-- Tabs -->
               <div class="flex items-center gap-1 bg-gray-100/60 rounded-xl p-1 flex-wrap">
                 <button v-for="tab in ([
@@ -368,7 +380,7 @@ onMounted(async () => {
               <!-- 分析报告 -->
               <div v-if="activeTab === 'reports'" class="space-y-4">
                 <div v-if="vReports.length === 0" class="text-center py-12 text-gray-400 text-sm">
-                  <div v-if="statusKind !== 'completed'">触发纵向分析后将生成报告</div>
+                  <div v-if="statusKind !== 'completed' && statusKind !== 'uptodate'">触发纵向分析后将生成报告</div>
                   <div v-else>该会话暂无分析报告</div>
                 </div>
                 <AnalysisReportCard v-for="r in vReports" :key="r.id" :report="r" axis="v" @view-dossier="onViewDossier" />
@@ -432,6 +444,8 @@ onMounted(async () => {
                   </div>
                 </div>
               </div>
+              </div>
+              <div v-else class="text-center py-12 text-gray-400 text-sm">输入 Session ID 进行溯源查询</div>
             </template>
 
             <!-- ============ 横向 ============ -->

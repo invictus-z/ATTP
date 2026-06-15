@@ -8,7 +8,7 @@
  *   GET /api/malicious/dossiers?source=&severity=&limit=
  *   GET /api/malicious/dossier/{did}
  */
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch, onScopeDispose } from 'vue'
 import { useRoute } from 'vue-router'
 import {
   UserX, Eye, RefreshCw, CheckCircle2, Loader2, ChevronDown, ChevronRight,
@@ -31,6 +31,16 @@ const sourceFilter = ref('')
 const severityFilter = ref('')
 const dossiersData = ref<{ total: number; dossiers: MaliciousDossier[] } | null>(null)
 const loading = ref(false)
+
+// 自动刷新（可选）
+const autoRefresh = ref(false)
+const refreshIntervalSec = ref(60) // 60 / 180 / 300
+const lastUpdated = ref<number | null>(null) // ms 时间戳
+let refreshTimer: ReturnType<typeof setInterval> | null = null
+
+const lastUpdatedLabel = computed(() =>
+  lastUpdated.value ? new Date(lastUpdated.value).toLocaleTimeString('zh-CN', { hour12: false }) : '未更新',
+)
 
 const selectedDid = ref<string | null>(null)
 const detailOpen = ref(false)
@@ -55,13 +65,32 @@ async function fetchDossiers() {
     const qs = params.toString()
     const url = buildUrl(`/api/malicious/dossiers${qs ? '?' + qs : ''}`)
     const res = await apiFetch(url)
-    if (res.ok) dossiersData.value = res.data
+    if (res.ok) {
+      dossiersData.value = res.data
+      lastUpdated.value = Date.now()
+    }
   } catch {
     showToast('获取恶意档案失败', 'error')
   } finally {
     loading.value = false
   }
 }
+
+function startAutoRefresh() {
+  stopAutoRefresh()
+  refreshTimer = setInterval(() => { void fetchDossiers() }, refreshIntervalSec.value * 1000)
+}
+function stopAutoRefresh() {
+  if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null }
+}
+
+// 开关或间隔变化 → 重排定时器
+watch([autoRefresh, refreshIntervalSec], ([on]) => {
+  if (on) startAutoRefresh()
+  else stopAutoRefresh()
+})
+
+onScopeDispose(() => stopAutoRefresh())
 
 async function fetchDossierDetail(did: string) {
   if (!selectedNode.value) return
@@ -152,8 +181,26 @@ onMounted(() => {
                 <option value="banned">Banned</option>
               </select>
             </div>
-            <div class="ml-auto text-[11px] text-gray-400">
-              共 {{ dossiersData?.total ?? 0 }} 个档案
+            <div class="ml-auto flex items-center gap-3 text-[11px] text-gray-400">
+              <span class="flex items-center gap-1">
+                <RefreshCw class="w-3 h-3" :class="loading ? 'animate-spin' : ''" />
+                最近更新 {{ lastUpdatedLabel }}
+              </span>
+              <select v-model="refreshIntervalSec" :disabled="!autoRefresh"
+                class="px-2 py-1 text-[11px] border border-gray-200 rounded-lg bg-white disabled:opacity-40 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+              >
+                <option :value="60">1 分钟</option>
+                <option :value="180">3 分钟</option>
+                <option :value="300">5 分钟</option>
+              </select>
+              <button @click="autoRefresh = !autoRefresh"
+                :class="['px-3 py-1 rounded-full text-[11px] font-medium border transition-colors flex items-center gap-1',
+                  autoRefresh ? 'bg-indigo-50 text-indigo-600 border-indigo-200' : 'bg-gray-50 text-gray-500 border-gray-200']"
+              >
+                <span class="w-1.5 h-1.5 rounded-full" :class="autoRefresh ? 'bg-indigo-500' : 'bg-gray-300'"></span>
+                自动刷新{{ autoRefresh ? '已开' : '' }}
+              </button>
+              <span>共 {{ dossiersData?.total ?? 0 }} 个档案</span>
             </div>
           </div>
         </div>
