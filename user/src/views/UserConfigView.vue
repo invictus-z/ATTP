@@ -108,12 +108,12 @@ onMounted(() => { loadUserConfig() })
           </div>
         </div>
 
-        <!-- Protocol Nodes（协议节点 / 溯源节点） -->
+        <!-- Protocol Nodes（协议节点） -->
         <div>
           <div class="flex items-center gap-2 text-[11px] font-semibold text-gray-400 tracking-wider uppercase mb-3 px-1">
             <Shield class="w-3.5 h-3.5" />
             <span>协议节点</span>
-            <span class="text-[10px] font-normal text-gray-300 normal-case tracking-normal">（Protocol / 溯源节点）</span>
+            <span class="text-[10px] font-normal text-gray-300 normal-case tracking-normal">（Protocol / 协议节点）</span>
           </div>
           <div class="bg-white p-5 rounded-xl border border-gray-100 space-y-4">
             <div class="space-y-2">

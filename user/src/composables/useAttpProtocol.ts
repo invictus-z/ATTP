@@ -314,7 +314,7 @@ async function removeAgent(index: number): Promise<boolean> {
   return saveUserConfig()
 }
 
-// ---- Protocol Node Management（协议节点 = 溯源节点）----
+// ---- Protocol Node Management----
 
 async function addProtocolNode(name: string, url: string): Promise<boolean> {
   const exists = userConfig.protocolNodes.some(n => n.url === url)
@@ -374,7 +374,7 @@ export function useAttpProtocol() {
     addAgent,
     removeAgent,
 
-    // Protocol Node Management（协议节点 = 溯源节点）
+    // Protocol Node Management
     addProtocolNode,
     updateProtocolNode,
     removeProtocolNode,

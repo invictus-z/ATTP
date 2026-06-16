@@ -153,7 +153,7 @@ function resetData() {
 }
 
 async function doQuery() {
-  if (!selectedNode.value) { showToast('请先选择溯源节点', 'error'); return }
+  if (!selectedNode.value) { showToast('请先选择协议节点', 'error'); return }
   resetData()
   loading.value = true
   try {
@@ -258,7 +258,7 @@ onMounted(async () => {
     <header class="bg-white border-b border-gray-100 shrink-0 px-8 py-6 shadow-[0_4px_20px_-15px_rgba(0,0,0,0.05)] z-10">
       <div class="max-w-5xl mx-auto">
         <h2 class="text-xl font-semibold text-gray-900 tracking-tight mb-1.5">溯源查询</h2>
-        <p class="text-sm text-gray-500">行为溯源链 · 纵向语义污点分析 · 横向跨会话分析</p>
+        <p class="text-sm text-gray-500">消息固化 · 纵向意图追踪 · 横向意图追踪</p>
       </div>
     </header>
 
@@ -319,7 +319,7 @@ onMounted(async () => {
 
         <!-- ── 未选节点 ── -->
         <div v-if="!selectedNodeId" class="flex flex-col items-center justify-center py-20 text-gray-400">
-          <p class="text-sm">请先选择一个溯源节点</p>
+          <p class="text-sm">请先选择一个协议节点</p>
         </div>
 
         <template v-else>

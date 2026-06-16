@@ -1,5 +1,5 @@
 /**
- * useProtocolNodes — 溯源节点（协议节点）共享状态与 CRUD。
+ * useProtocolNodes — 协议节点共享状态与 CRUD。
  *
  * 模块级单例：三个视图共享同一份节点列表与当前选中节点。
  * 节点持久化经 useAttpProtocol 的 protocolNodes 配置。

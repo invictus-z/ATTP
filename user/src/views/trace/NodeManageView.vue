@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * 视图1 — 溯源节点管理。
+ * 视图1 — 协议节点管理。
  * 节点 CRUD + 在线状态检测（/api/status）。
  */
 import { onMounted, ref } from 'vue'
@@ -27,7 +27,7 @@ const editingNodeId = ref<string | null>(null)
 const doAdd = async () => {
   const ok = await addNode(newNodeName.value, newNodeUrl.value)
   if (ok) {
-    showToast(`溯源节点「${newNodeName.value.trim()}」已添加`)
+    showToast(`协议节点「${newNodeName.value.trim()}」已添加`)
     newNodeName.value = ''
     newNodeUrl.value = 'http://localhost:9000'
     showAddModal.value = false
@@ -47,7 +47,7 @@ const doEdit = async () => {
   if (!editingNodeId.value) return
   const ok = await updateNode(editingNodeId.value, editNodeName.value, editNodeUrl.value)
   if (ok) {
-    showToast(`溯源节点「${editNodeName.value.trim()}」已更新`)
+    showToast(`协议节点「${editNodeName.value.trim()}」已更新`)
     showEditModal.value = false
     editingNodeId.value = null
   } else {
@@ -57,7 +57,7 @@ const doEdit = async () => {
 
 const doRemove = async (id: string, name: string) => {
   const ok = await removeNode(id)
-  if (ok) showToast(`溯源节点「${name}」已移除`)
+  if (ok) showToast(`协议节点「${name}」已移除`)
 }
 
 const doTest = async (name: string, node: { url: string }) => {
@@ -81,7 +81,7 @@ onMounted(() => {
     <header class="bg-white border-b border-gray-100 shrink-0 px-8 py-6 shadow-[0_4px_20px_-15px_rgba(0,0,0,0.05)] z-10">
       <div class="max-w-5xl mx-auto">
         <div class="flex items-center gap-2.5 mb-1.5">
-          <h2 class="text-xl font-semibold text-gray-900 tracking-tight">溯源节点管理</h2>
+          <h2 class="text-xl font-semibold text-gray-900 tracking-tight">协议节点管理</h2>
           <span class="px-2 py-0.5 rounded-full text-[10px] font-medium text-gray-500 bg-gray-100 border border-gray-200">{{ traceNodes.length }} 节点</span>
         </div>
         <p class="text-sm text-gray-500">添加 · 编辑 · 删除 · 在线检测溯源（协议）节点</p>
@@ -103,7 +103,7 @@ onMounted(() => {
         <!-- Node Grid -->
         <div v-if="traceNodes.length === 0" class="bg-white rounded-2xl border border-dashed border-gray-200 py-16 text-center">
           <Shield class="w-10 h-10 text-gray-300 mx-auto mb-3" />
-          <p class="text-sm text-gray-400">暂无溯源节点，点击「添加节点」开始</p>
+          <p class="text-sm text-gray-400">暂无协议节点，点击「添加节点」开始</p>
         </div>
 
         <div v-else class="grid grid-cols-2 gap-4">
@@ -147,7 +147,7 @@ onMounted(() => {
     <div v-if="showAddModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" @click.self="showAddModal = false">
       <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
         <div class="flex items-center justify-between mb-4">
-          <h3 class="text-sm font-semibold text-gray-900">添加溯源节点</h3>
+          <h3 class="text-sm font-semibold text-gray-900">添加协议节点</h3>
           <button @click="showAddModal = false" class="p-1 text-gray-400 hover:text-gray-600"><X class="w-4 h-4" /></button>
         </div>
         <div class="space-y-3">
@@ -171,7 +171,7 @@ onMounted(() => {
     <div v-if="showEditModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" @click.self="showEditModal = false">
       <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
         <div class="flex items-center justify-between mb-4">
-          <h3 class="text-sm font-semibold text-gray-900">编辑溯源节点</h3>
+          <h3 class="text-sm font-semibold text-gray-900">编辑协议节点</h3>
           <button @click="showEditModal = false" class="p-1 text-gray-400 hover:text-gray-600"><X class="w-4 h-4" /></button>
         </div>
         <div class="space-y-3">

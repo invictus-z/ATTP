@@ -69,7 +69,7 @@ const protocolNodes = computed(() => attpUserConfig.protocolNodes || [])
 /** 响应式触发器：每次绑定后递增，让 boundProtocolUrl computed 重新计算 */
 const protocolBindTrigger = ref(0)
 
-/** 当前 session 绑定的溯源节点 URL（只读） */
+/** 当前 session 绑定的协议节点 URL（只读） */
 const boundProtocolUrl = computed(() => {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const _trigger = protocolBindTrigger.value // 依赖触发器以实现响应式
@@ -77,21 +77,21 @@ const boundProtocolUrl = computed(() => {
   return getSessionProtocolUrl(currentSession.value.id)
 })
 
-/** 当前 session 绑定的溯源节点名称 */
+/** 当前 session 绑定的协议节点名称 */
 const boundProtocolName = computed(() => {
   if (!boundProtocolUrl.value) return null
   const node = protocolNodes.value.find(n => n.url === boundProtocolUrl.value)
   return node?.name || boundProtocolUrl.value.replace(/^https?:\/\//, '')
 })
 
-// ---- 溯源节点选择弹窗 ----
+// ---- 协议节点选择弹窗 ----
 
 const showNodeSelectModal = ref(false)
 const selectedNodeUrl = ref<string | null>(null)
 /** 标记是否为"新建会话"模式（选择后创建新 session），还是"补选"模式（绑定到当前 session） */
 const isCreateMode = ref(false)
 
-/** 打开新会话的溯源节点选择弹窗 */
+/** 打开新会话的协议节点选择弹窗 */
 const handleNewChat = () => {
   if (protocolNodes.value.length === 0) return
   if (protocolNodes.value.length === 1) {
@@ -105,7 +105,7 @@ const handleNewChat = () => {
   showNodeSelectModal.value = true
 }
 
-/** 确认选择溯源节点 */
+/** 确认选择协议节点 */
 const confirmNodeSelection = () => {
   if (!selectedNodeUrl.value) return
 
@@ -182,7 +182,7 @@ onMounted(() => { scrollToBottom() })
           </div>
 
           <!-- New Chat Button -->
-          <button @click="handleNewChat" :disabled="protocolNodes.length === 0" class="p-2 bg-gray-50 text-gray-600 hover:bg-gray-100 hover:text-gray-900 rounded-lg transition-colors border border-gray-200 shadow-sm flex items-center gap-2 text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed" :title="protocolNodes.length === 0 ? '请先在 User Config 中添加溯源节点' : 'New Chat'">
+          <button @click="handleNewChat" :disabled="protocolNodes.length === 0" class="p-2 bg-gray-50 text-gray-600 hover:bg-gray-100 hover:text-gray-900 rounded-lg transition-colors border border-gray-200 shadow-sm flex items-center gap-2 text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed" :title="protocolNodes.length === 0 ? '请先在 User Config 中添加协议节点' : 'New Chat'">
             <Plus class="w-4 h-4" />
             New Chat
           </button>
@@ -203,7 +203,7 @@ onMounted(() => { scrollToBottom() })
               <MessageSquare class="w-8 h-8 text-gray-300" />
               </div>
               <p class="text-sm">开始新的对话</p>
-              <p class="text-xs text-gray-300 mt-1">点击 New Chat 选择溯源节点后开始</p>
+              <p class="text-xs text-gray-300 mt-1">点击 New Chat 选择协议节点后开始</p>
             </div>
 
             <!-- Message Groups -->
@@ -226,7 +226,7 @@ onMounted(() => { scrollToBottom() })
             <div v-if="boundProtocolUrl" class="flex items-center gap-2">
               <div class="flex items-center gap-1.5 text-gray-400">
                 <Shield class="w-3.5 h-3.5" />
-                <span class="text-[11px] font-medium">溯源节点</span>
+                <span class="text-[11px] font-medium">协议节点</span>
               </div>
               <div class="flex items-center gap-1.5 text-[12px] text-emerald-600 bg-emerald-50 border border-emerald-100 rounded-lg px-2.5 py-1.5 max-w-[320px] truncate">
                 <Lock class="w-3 h-3 shrink-0" />
@@ -238,14 +238,14 @@ onMounted(() => { scrollToBottom() })
             <div v-else-if="protocolNodes.length > 0" class="flex items-center gap-2">
               <div class="flex items-center gap-1.5 text-amber-500">
                 <AlertCircle class="w-3.5 h-3.5" />
-                <span class="text-[11px] font-medium">请先选择溯源节点</span>
+                <span class="text-[11px] font-medium">请先选择协议节点</span>
               </div>
               <button @click="showNodeSelectModal = true; isCreateMode = false; selectedNodeUrl = null" class="text-[11px] font-medium text-indigo-600 hover:text-indigo-700 underline underline-offset-2">选择节点</button>
             </div>
             <!-- 无可用节点 -->
             <div v-else class="flex items-center gap-1.5 text-gray-300">
               <Shield class="w-3.5 h-3.5" />
-              <span class="text-[11px]">未配置溯源节点 — 请在 User Config 中添加 Protocol Node</span>
+              <span class="text-[11px]">未配置协议节点 — 请在 User Config 中添加 Protocol Node</span>
             </div>
           </div>
 
@@ -261,7 +261,7 @@ onMounted(() => { scrollToBottom() })
               rows="1"
               class="w-full bg-transparent border-none focus:ring-0 text-[14px] text-gray-800 placeholder-gray-400 resize-none py-3 px-2 mx-1 max-h-32"
               style="outline: none;"
-              :placeholder="boundProtocolUrl ? 'Command Local Agent...' : '请先选择溯源节点...'"
+              :placeholder="boundProtocolUrl ? 'Command Local Agent...' : '请先选择协议节点...'"
               :disabled="!boundProtocolUrl"
             ></textarea>
             <button @click="handleSend" :disabled="!boundProtocolUrl" class="p-2.5 bg-gray-900 text-white rounded-xl hover:bg-gray-800 transition-colors shadow-sm shrink-0 disabled:opacity-40 disabled:cursor-not-allowed">
@@ -296,7 +296,7 @@ onMounted(() => { scrollToBottom() })
         <div class="flex items-center justify-between mb-5">
           <div>
             <h3 class="text-sm font-semibold text-gray-800">
-              {{ isCreateMode ? '选择溯源节点以开始新会话' : '为当前会话绑定溯源节点' }}
+              {{ isCreateMode ? '选择协议节点以开始新会话' : '为当前会话绑定协议节点' }}
             </h3>
             <p class="text-[11px] text-gray-400 mt-1">选择后不可更改，该节点将全程记录此会话的行为溯源</p>
           </div>
@@ -338,7 +338,7 @@ onMounted(() => { scrollToBottom() })
         </div>
 
         <div v-if="protocolNodes.length === 0" class="text-center py-8 text-gray-400 text-sm">
-          暂无溯源节点，请先在 User Config 中添加
+          暂无协议节点，请先在 User Config 中添加
         </div>
 
         <div class="flex justify-end gap-2 mt-5 pt-4 border-t border-gray-100">

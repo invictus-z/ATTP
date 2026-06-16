@@ -15,7 +15,7 @@ export interface UserAttpConfig {
   did: string;
   didDocPath: string;
   didKeyPath: string;
-  /** Protocol Nodes（协议节点 / 溯源节点，同一概念） */
+  /** Protocol Nodes（协议节点） */
   protocolNodes: TraceNodeEntry[];
   /** Tool Nodes（工具节点） */
   toolNodes: TraceNodeEntry[];

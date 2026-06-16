@@ -207,7 +207,7 @@ onMounted(() => {
 
         <!-- ── 未选节点 ── -->
         <div v-if="!selectedNodeId" class="flex flex-col items-center justify-center py-20 text-gray-400">
-          <p class="text-sm">请先选择一个溯源节点</p>
+          <p class="text-sm">请先选择一个协议节点</p>
         </div>
 
         <template v-else>
