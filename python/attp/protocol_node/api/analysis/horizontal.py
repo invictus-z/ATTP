@@ -1,11 +1,13 @@
 """横向分析 API 路由 — Cross-Session / DID 级全局行为分析。
 
 端点（prefix `/api/analysis/h`）：
-    POST /api/analysis/h/trigger/{did}   — 手动触发横向分析
-    GET  /api/analysis/h/status/{did}     — 查询横向分析任务状态
-    GET  /api/analysis/h/report/{did}     — 获取DID全部横向分析报告
-    GET  /api/analysis/h/state/{did}      — 获取DID横向累积状态
+    POST /api/analysis/h/trigger/{did}     — 手动触发横向分析
+    GET  /api/analysis/h/llm-status/{did}  — 查询LLM横向分析任务状态
+    GET  /api/analysis/h/report/{did}      — 获取DID全部横向分析报告
+    GET  /api/analysis/h/state/{did}       — 获取DID横向累积状态（含已生成报告数）
 """
+
+import json
 
 from fastapi import APIRouter
 
@@ -31,9 +33,9 @@ def get_horizontal_analysis_router(
             return {"triggered": False, "reason": "analysis_disabled"}
         return await _coordinator.trigger_horizontal_async(did)
 
-    @router.get("/status/{did}")
+    @router.get("/llm-status/{did}")
     async def get_horizontal_status(did: str):
-        """查询横向分析任务状态。"""
+        """查询LLM横向分析任务状态。"""
         _coordinator = _coord_ref[0]
         if not _coordinator:
             return {"status": "not_found", "did": did}
@@ -67,7 +69,7 @@ def get_horizontal_analysis_router(
 
     @router.get("/state/{did}")
     async def get_horizontal_state(did: str):
-        """获取DID横向分析累积状态。"""
+        """获取DID横向分析累积状态（batch_index 即已生成报告批次/次数）。"""
         canonical = _normalise_did(did)
         try:
             state = await tracer.storage.load_horizontal_state(canonical)
@@ -81,9 +83,9 @@ def get_horizontal_analysis_router(
                 }
             return {
                 "did": canonical,
-                "accumulated_count": state.get("accumulated_count", 0),
-                "last_trace_id": state.get("last_trace_id", 0),
-                "batch_index": state.get("batch_index", 0),
+                "accumulated_count": state.get("accumulated_count", 0), # 当前未分析行为的数量
+                "last_trace_id": state.get("last_trace_id", 0), # 已分析的最新位置
+                "batch_index": state.get("batch_index", 0), # 已生成的报告总数
                 "node_type": state.get("node_type", ""),
                 "has_context": bool(state.get("context")),
             }

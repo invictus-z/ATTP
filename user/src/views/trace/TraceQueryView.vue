@@ -21,7 +21,7 @@ import {
   transformChainToNodes, verdictBadge, severityBadgeCls, formatTime, formatDid,
 } from '../../composables/useTraceFormat'
 import type {
-  HopNode, AnalysisReport, Alert, AnalysisStatus, HorizontalState, SuspiciousNode,
+  HopNode, AnalysisReport, Alert, AnalysisStatus, HorizontalState, VerticalState, SuspiciousNode,
 } from './types'
 import NodeSelector from './components/NodeSelector.vue'
 import BehaviorChain from './components/BehaviorChain.vue'
@@ -44,6 +44,7 @@ const behaviorNodes = ref<HopNode[]>([])
 const vReports = ref<AnalysisReport[]>([])
 const hReports = ref<AnalysisReport[]>([])
 const hState = ref<HorizontalState | null>(null)
+const vState = ref<VerticalState | null>(null)
 
 // 从纵向报告派生告警（与后端 aggregate 提取逻辑一致）
 const vAlerts = computed<Alert[]>(() =>
@@ -72,8 +73,9 @@ const vAlerts = computed<Alert[]>(() =>
 )
 
 // ─── 引导式分析流程（纵/横各一） ───
-const vFlow = useAnalysisFlow('v', (sid) => { void fetchVerticalReport(sid) })
-const hFlow = useAnalysisFlow('h', (did) => { void fetchHorizontalReport(did) })
+// LLM「工作中 → 完成」转换时，后端累计状态与报告均已更新，重拉刷新页面
+const vFlow = useAnalysisFlow('v', (sid) => { void fetchVerticalState(sid); void fetchVerticalReport(sid) })
+const hFlow = useAnalysisFlow('h', (did) => { void fetchHorizontalState(did); void fetchHorizontalReport(did) })
 
 const currentStatus = computed<AnalysisStatus | null>(() =>
   queryMode.value === 'vertical' ? vFlow.status.value : hFlow.status.value,
@@ -135,11 +137,19 @@ async function fetchHorizontalState(did: string) {
   hState.value = res.ok ? res.data : null
 }
 
+async function fetchVerticalState(sid: string) {
+  if (!selectedNode.value || !sid) return
+  const url = buildUrl(`/api/analysis/v/state/${encodeURIComponent(sid)}`)
+  const res = await apiFetch(url)
+  vState.value = res.ok ? res.data : null
+}
+
 function resetData() {
   behaviorNodes.value = []
   vReports.value = []
   hReports.value = []
   hState.value = null
+  vState.value = null
 }
 
 async function doQuery() {
@@ -153,10 +163,11 @@ async function doQuery() {
       hasQueried.value = true
       await Promise.all([
         fetchBehavior(sid),
+        fetchVerticalState(sid),
         vFlow.refreshStatus(sid),
       ])
-      // 已完成则直接取报告（含「已是最新」态——旧报告仍应展示；仅真正失败时不取）
-      if (vFlow.status.value?.status === 'completed' && statusKind.value !== 'failed') {
+      // batch_index 即报告数量；有报告则拉取展示，触发后新完成的报告由轮询 onCompleted 回调拉取
+      if (vState.value && vState.value.analysis_state.batch_index > 0) {
         await fetchVerticalReport(sid)
       }
     } else {
@@ -167,7 +178,8 @@ async function doQuery() {
         fetchHorizontalState(did),
         hFlow.refreshStatus(did),
       ])
-      if (hFlow.status.value?.status === 'completed' && statusKind.value !== 'failed') {
+      // 累计状态显示有报告则拉取展示（横向以 batch_index 为报告批次/次数）；触发后新完成的报告由轮询 onCompleted 回调拉取
+      if (hState.value && hState.value.batch_index > 0) {
         await fetchHorizontalReport(did)
       }
     }
@@ -209,6 +221,15 @@ function onViewDossier(did: string) {
 function switchMode(mode: 'vertical' | 'horizontal') {
   queryMode.value = mode
   hasQueried.value = false
+}
+
+/** 意图风险等级徽章（low / medium / high） */
+function riskBadge(level: string) {
+  const l = (level || '').toLowerCase()
+  if (l === 'high') return { text: '高风险', cls: 'bg-red-100 text-red-600 border-red-200' }
+  if (l === 'medium') return { text: '中风险', cls: 'bg-amber-100 text-amber-600 border-amber-200' }
+  if (l === 'low') return { text: '低风险', cls: 'bg-emerald-100 text-emerald-600 border-emerald-200' }
+  return { text: level || '--', cls: 'bg-gray-100 text-gray-500 border-gray-200' }
 }
 
 // ─── 生命周期 ───
@@ -312,7 +333,7 @@ onMounted(async () => {
             <div class="flex items-center gap-2">
               <template v-if="statusKind === 'running'">
                 <Loader2 class="w-4 h-4 text-blue-500 animate-spin" />
-                <span class="text-[12px] text-blue-600 font-medium">分析进行中</span>
+                <span class="text-[12px] text-blue-600 font-medium">LLM 分析中</span>
                 <span v-if="currentStatus.phase" class="text-[11px] text-gray-400">{{ currentStatus.phase }}</span>
               </template>
               <template v-else-if="statusKind === 'completed'">
@@ -356,6 +377,48 @@ onMounted(async () => {
             <!-- ============ 纵向 ============ -->
             <template v-if="queryMode === 'vertical'">
               <div v-if="hasQueried" class="space-y-6">
+              <!-- 累计状态 + 意图 -->
+              <div v-if="vState" class="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
+                <div class="flex items-center gap-2">
+                  <BarChart3 class="w-4 h-4 text-indigo-500" />
+                  <span class="text-[13px] font-semibold text-gray-800">累计状态</span>
+                </div>
+                <div class="grid grid-cols-3 gap-4">
+                  <div class="bg-gray-50 rounded-lg p-3 text-center">
+                    <div class="text-[11px] text-gray-400 mb-1">总报告数</div>
+                    <div class="text-xl font-semibold text-gray-800">{{ vState.analysis_state.batch_index }}</div>
+                  </div>
+                  <div class="bg-gray-50 rounded-lg p-3 text-center">
+                    <div class="text-[11px] text-gray-400 mb-1">累计未分析行为数</div>
+                    <div class="text-xl font-semibold text-gray-800">{{ vState.analysis_state.report_count }}</div>
+                  </div>
+                  <div class="bg-gray-50 rounded-lg p-3 text-center">
+                    <div class="text-[11px] text-gray-400 mb-1">最后 Trace ID</div>
+                    <div class="text-xl font-semibold text-gray-800">{{ vState.analysis_state.last_trace_id }}</div>
+                  </div>
+                </div>
+                <!-- 意图 (intent) -->
+                <div v-if="vState.intent" class="border-t border-gray-100 pt-4">
+                  <div class="flex items-center gap-2 mb-2">
+                    <Crosshair class="w-4 h-4 text-indigo-500" />
+                    <span class="text-[13px] font-semibold text-gray-800">意图 (Intent)</span>
+                    <span v-if="vState.intent.risk_level" :class="['px-1.5 py-0.5 rounded-md text-[10px] font-bold border', riskBadge(vState.intent.risk_level).cls]">{{ riskBadge(vState.intent.risk_level).text }}</span>
+                  </div>
+                  <div class="space-y-2 text-[12px] text-gray-600">
+                    <p v-if="vState.intent.original_task"><span class="text-gray-400">原始任务：</span>{{ vState.intent.original_task }}</p>
+                    <p v-if="vState.intent.core_objective"><span class="text-gray-400">核心目标：</span>{{ vState.intent.core_objective }}</p>
+                    <div v-if="vState.intent.constraints?.length">
+                      <span class="text-gray-400">约束：</span>
+                      <span v-for="(c, i) in vState.intent.constraints" :key="i" class="inline-block bg-gray-100 rounded px-1.5 py-0.5 mr-1 mb-1 text-[11px] text-gray-600">{{ c }}</span>
+                    </div>
+                    <div v-if="vState.intent.involved_capabilities?.length">
+                      <span class="text-gray-400">涉及能力：</span>
+                      <span v-for="(cap, i) in vState.intent.involved_capabilities" :key="i" class="inline-block bg-indigo-50 text-indigo-600 rounded px-1.5 py-0.5 mr-1 mb-1 text-[11px]">{{ cap }}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               <!-- Tabs -->
               <div class="flex items-center gap-1 bg-gray-100/60 rounded-xl p-1 flex-wrap">
                 <button v-for="tab in ([
@@ -451,28 +514,28 @@ onMounted(async () => {
             <!-- ============ 横向 ============ -->
             <template v-else>
               <div class="space-y-5">
-                <!-- 累积状态 -->
+                <!-- 累计状态 -->
                 <div v-if="hState" class="bg-white rounded-xl border border-gray-200 p-5">
                   <div class="flex items-center gap-2 mb-3">
                     <BarChart3 class="w-4 h-4 text-purple-500" />
-                    <span class="text-[13px] font-semibold text-gray-800">累积状态</span>
+                    <span class="text-[13px] font-semibold text-gray-800">累计状态</span>
                   </div>
                   <div class="grid grid-cols-4 gap-4">
                     <div class="bg-gray-50 rounded-lg p-3 text-center">
-                      <div class="text-[11px] text-gray-400 mb-1">累积次数</div>
+                      <div class="text-[11px] text-gray-400 mb-1">节点类型</div>
+                      <div class="text-xl font-semibold text-gray-800">{{ hState.node_type || '--' }}</div>
+                    </div>
+                    <div class="bg-gray-50 rounded-lg p-3 text-center">
+                      <div class="text-[11px] text-gray-400 mb-1">总报告数</div>
+                      <div class="text-xl font-semibold text-gray-800">{{ hState.batch_index }}</div>
+                    </div>
+                    <div class="bg-gray-50 rounded-lg p-3 text-center">
+                      <div class="text-[11px] text-gray-400 mb-1">累计未分析行为数</div>
                       <div class="text-xl font-semibold text-gray-800">{{ hState.accumulated_count }}</div>
                     </div>
                     <div class="bg-gray-50 rounded-lg p-3 text-center">
                       <div class="text-[11px] text-gray-400 mb-1">最后 Trace ID</div>
                       <div class="text-xl font-semibold text-gray-800">{{ hState.last_trace_id }}</div>
-                    </div>
-                    <div class="bg-gray-50 rounded-lg p-3 text-center">
-                      <div class="text-[11px] text-gray-400 mb-1">批次索引</div>
-                      <div class="text-xl font-semibold text-gray-800">{{ hState.batch_index }}</div>
-                    </div>
-                    <div class="bg-gray-50 rounded-lg p-3 text-center">
-                      <div class="text-[11px] text-gray-400 mb-1">节点类型</div>
-                      <div class="text-xl font-semibold text-gray-800">{{ hState.node_type || '--' }}</div>
                     </div>
                   </div>
                 </div>

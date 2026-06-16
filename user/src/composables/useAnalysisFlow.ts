@@ -1,10 +1,14 @@
 /**
  * useAnalysisFlow — 引导式分析流程状态机。
  *
- * 封装「查状态 → 未完成才显示触发 → 触发后轮询 → 完成后取报告」流程，
+ * 封装「查状态 → 未完成才显示触发 → 检测到 running 即轮询 → 完成后刷新累计状态与报告」流程，
  * 纵向（v, session 级）与横向（h, did 级）共用，仅 URL 前缀不同。
  *
- *   GET  /api/analysis/{axis}/status/{id}
+ * 工作模式：refreshStatus 发现 LLM 正在工作（running / already_running）会自动开始轮询
+ * （覆盖"查询时恰好在分析"的场景），直到 running → completed 转换，由 startPolling 内部
+ * 触发 completedHooks —— 视图层据此重拉 state + report 刷新页面。
+ *
+ *   GET  /api/analysis/{axis}/llm-status/{id}
  *   POST /api/analysis/{axis}/trigger/{id}
  *
  * 任务状态词汇（来自后端 orchestrator）：running | completed | not_found。
@@ -40,9 +44,17 @@ export function useAnalysisFlow(
   async function refreshStatus(id: string): Promise<void> {
     if (!id) { status.value = null; return }
     try {
-      const url = buildUrl(`/api/analysis/${axis}/status/${encodeURIComponent(id)}`)
+      const url = buildUrl(`/api/analysis/${axis}/llm-status/${encodeURIComponent(id)}`)
       const result = await apiFetch(url)
-      if (result.ok) status.value = result.data as AnalysisStatus
+      if (result.ok) {
+        status.value = result.data as AnalysisStatus
+        // 工作模式：LLM 正在工作且未轮询时自动开始轮询（覆盖查询时恰好在分析的场景）；
+        // running → completed 转换由 startPolling 内部触发 completedHooks 刷新数据。
+        const s = status.value?.status
+        if ((s === 'running' || s === 'already_running') && !polling.value) {
+          startPolling(id)
+        }
+      }
     } catch {
       /* keep last known status */
     }

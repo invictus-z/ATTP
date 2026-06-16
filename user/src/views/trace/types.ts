@@ -119,6 +119,18 @@ export interface HorizontalState {
   has_context: boolean
 }
 
+/** 纵向分析累计状态（意图 + 分析状态，与后端 /state 嵌套结构对齐） */
+export interface VerticalState {
+  session_id: string
+  intent: IntentDescriptor | null
+  analysis_state: {
+    batch_index: number
+    last_trace_id: number
+    report_count: number
+    has_context: boolean
+  }
+}
+
 /** 意图描述 */
 export interface IntentDescriptor {
   original_task: string

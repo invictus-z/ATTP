@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Callable, Awaitable
 from attp.app.logging import get_logger
 from attp.core.analysis.base_models import IntentDescriptor
 from attp.core.analysis.vertical.analyzer import _derive_node_type
-from attp.core.analysis.vertical.models import VerticalTaintReport
+from attp.core.analysis.vertical.models import NodeTaintVerdict, VerticalTaintReport
 
 if TYPE_CHECKING:
     from attp.core.analysis.vertical.analyzer import VerticalTaintAnalyzer
@@ -246,6 +246,78 @@ class VerticalOrchestrator:
     # Internal helpers
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _merge_verdicts_by_did(
+        verdicts: list[NodeTaintVerdict],
+    ) -> list[tuple[NodeTaintVerdict, list[list[int]]]]:
+        """将同一 DID 的多条 verdict 合并为一条，按 DID 去重但不丢失证据。
+
+        合并策略：
+        - severity / taint_score：取最严重那条（high > medium）
+        - deviation_type / influence_type：取最高分 verdict 的值（代表最核心偏离类型）
+        - evidence（描述）：全部合并，每条标注其 hop，体现多个通信上下文
+        - evidence_items：全部合并去重（按 description），保留所有 trace_ids
+          —— trace_ids 即为具体犯错地点，一条不漏
+        - hop_count：记录所有涉及 hop，随返回值一并输出（存入 raw_evidence.hops_involved）
+
+        Returns:
+            [(merged_verdict, hops_involved), ...]，每个 DID 一项
+        """
+        severity_rank = {"none": 0, "low": 1, "medium": 2, "high": 3}
+
+        grouped: dict[str, list[NodeTaintVerdict]] = {}
+        for v in verdicts:
+            grouped.setdefault(v.node_did, []).append(v)
+
+        merged: list[tuple[NodeTaintVerdict, list[list[int]]]] = []
+        for did, did_verdicts in grouped.items():
+            # 最高分（最严重）的 verdict 作为基础，决定 severity / deviation_type 等
+            primary = max(
+                did_verdicts,
+                key=lambda v: (severity_rank.get(v.severity, 0), v.taint_score),
+            )
+
+            # 收集该 DID 涉及的所有 hop（去重）
+            all_hops: list[list[int]] = []
+            for v in did_verdicts:
+                hc = list(v.hop_count)
+                if hc not in all_hops:
+                    all_hops.append(hc)
+
+            # 合并 evidence 描述，每条标注来源 hop，体现多个通信上下文
+            evidence_parts: list[str] = []
+            seen_evidence: set[str] = set()
+            for v in did_verdicts:
+                if v.evidence and v.evidence not in seen_evidence:
+                    evidence_parts.append(f"hop={list(v.hop_count)}: {v.evidence}")
+                    seen_evidence.add(v.evidence)
+            merged_evidence = " | ".join(evidence_parts) if evidence_parts else primary.evidence
+
+            # 合并 evidence_items（按 description 去重），保留所有 trace_ids（具体犯错地点）
+            merged_items = []
+            seen_desc: set[str] = set()
+            for v in did_verdicts:
+                for ei in v.evidence_items:
+                    if ei.description not in seen_desc:
+                        merged_items.append(ei)
+                        seen_desc.add(ei.description)
+
+            merged_v = NodeTaintVerdict(
+                node_did=did,
+                hop_count=list(primary.hop_count),
+                aligned=primary.aligned,
+                deviation_type=primary.deviation_type,
+                influence_detected=primary.influence_detected,
+                influence_type=primary.influence_type,
+                evidence=merged_evidence,
+                evidence_items=merged_items,
+                severity=primary.severity,
+                taint_score=primary.taint_score,
+            )
+            merged.append((merged_v, all_hops))
+
+        return merged
+
     async def _notify_analysis_result(
         self,
         session_id: str,
@@ -253,31 +325,44 @@ class VerticalOrchestrator:
         report_row_id: int,
         traces: list[dict],
     ) -> None:
-        """记录纵向分析发现的恶意节点：写入 malicious_reports + 更新 dossier。"""
+        """记录纵向分析发现的恶意节点：写入 malicious_reports + 更新 dossier。
+
+        按 DID 去重：同一 batch 内一个 DID 只产生一条 malicious_report，
+        但合并该 DID 所有 hop 的 evidence_items（含全部 trace_ids），确保具体犯错地点不丢失。
+        """
         malicious_verdicts = [
             v for v in report.node_verdicts
             if v.severity in ("medium", "high")
         ]
-        for v in malicious_verdicts:
-            node_type = _derive_node_type(traces, v.node_did)
+        # 按 DID 合并：同一节点的多条 hop-verdict 合为一条
+        merged = self._merge_verdicts_by_did(malicious_verdicts)
+
+        for merged_v, hops_involved in merged:
+            node_type = _derive_node_type(traces, merged_v.node_did)
 
             await self._tracer.storage.save_malicious_report({
                 "source": "vertical_analysis",
-                "target_did": v.node_did,
+                "target_did": merged_v.node_did,
                 "node_type": node_type,
                 "session_id": session_id,
-                "evidence_type": v.deviation_type,
-                "severity": v.severity,
-                "taint_score": v.taint_score,
-                "evidence_description": v.evidence,
+                "evidence_type": merged_v.deviation_type,
+                "severity": merged_v.severity,
+                "taint_score": merged_v.taint_score,
+                "evidence_description": merged_v.evidence,
                 "nonce": "",
                 "report_id": report_row_id,
-                "raw_evidence": {"evidence_items": [e.to_dict() for e in v.evidence_items]},
+                "raw_evidence": {
+                    "evidence_items": [e.to_dict() for e in merged_v.evidence_items],
+                    "hops_involved": hops_involved,
+                    "verdict_count_merged": len(
+                        [v for v in malicious_verdicts if v.node_did == merged_v.node_did]
+                    ),
+                },
                 "timestamp": report.timestamp,
             })
 
         logger.warning(
             "Vertical Security Alert: session={}, verdict={}, malicious_nodes={}",
             session_id, report.overall_verdict,
-            [v.node_did for v in malicious_verdicts],
+            [v.node_did for v, _ in merged],
         )
