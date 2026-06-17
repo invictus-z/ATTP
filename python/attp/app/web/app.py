@@ -1,4 +1,4 @@
-"""Web UI channel implementation — WebSocket + 通用 API（config/node_status）+ SPA。
+"""Web UI channel implementation — WebSocket + 通用 API（config/node_status）。
 
 协议相关 API（trace/analysis）已迁移至 ProtocolNode ApiPort。
 """
@@ -8,14 +8,11 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
-from pathlib import Path
 import uvicorn
 from typing import TYPE_CHECKING
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
 from attp.app.logging import get_logger, UVICORN_SILENT_LOG_CONFIG
 from attp.core.message.event import NodeMessage, RecordedHop
 from attp.core.message.back_sender import send_back_message
@@ -174,23 +171,6 @@ class WebApp():
         self._app.include_router(node_status.get_api_router(attp_client))
         self._app.include_router(config_setting.get_api_router(attp_config_manager, reload_callback))
         # Note: trace/analysis API routes are served by ProtocolNode ApiPort
-
-        # Serve frontend static files from package-internal static/ directory
-        static_dir = Path(__file__).resolve().parent / "static"
-        if static_dir.is_dir():
-            assets_dir = static_dir / "assets"
-            if assets_dir.is_dir():
-                self._app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="frontend-assets")
-
-            @self._app.get("/{full_path:path}")
-            async def serve_spa(full_path: str):
-                """Serve index.html for all non-API, non-asset routes (SPA fallback)."""
-                file_path = static_dir / full_path
-                if file_path.is_file():
-                    return FileResponse(str(file_path))
-                return FileResponse(str(static_dir / "index.html"))
-
-            logger.info("Frontend static files mounted from {}", static_dir)
 
     async def send_message_to_user(self, content: str, session_id: str) -> None:
         """构建 A2U NodeMessage 并发送给 User。
