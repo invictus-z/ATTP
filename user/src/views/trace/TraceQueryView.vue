@@ -10,8 +10,8 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
-  Loader2, Search, Crosshair, Zap, RefreshCw, GitMerge, FileText,
-  AlertTriangle, CheckCircle2, XCircle, Clock, AlertOctagon, BarChart3,
+  Loader2, Search, Crosshair, GitMerge, FileText,
+  AlertTriangle, CheckCircle2, AlertOctagon, BarChart3,
 } from 'lucide-vue-next'
 import { apiFetch } from '../../transport'
 import { useProtocolNodes } from '../../composables/useProtocolNodes'
@@ -26,6 +26,7 @@ import type {
 import NodeSelector from './components/NodeSelector.vue'
 import BehaviorChain from './components/BehaviorChain.vue'
 import AnalysisReportCard from './components/AnalysisReportCard.vue'
+import AnalysisStatusBar from './components/AnalysisStatusBar.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -80,12 +81,6 @@ const hFlow = useAnalysisFlow('h', (did) => { void fetchHorizontalState(did); vo
 const currentStatus = computed<AnalysisStatus | null>(() =>
   queryMode.value === 'vertical' ? vFlow.status.value : hFlow.status.value,
 )
-const currentPolling = computed(() =>
-  queryMode.value === 'vertical' ? vFlow.polling.value : hFlow.polling.value,
-)
-const currentTriggerLoading = computed(() =>
-  queryMode.value === 'vertical' ? vFlow.triggerLoading.value : hFlow.triggerLoading.value,
-)
 
 /** 状态展示：running | completed | failed | not_found | uptodate | idle */
 const statusKind = computed<'idle' | 'running' | 'completed' | 'failed' | 'not_found' | 'uptodate'>(() => {
@@ -104,6 +99,18 @@ const statusKind = computed<'idle' | 'running' | 'completed' | 'failed' | 'not_f
   if (s.status === 'not_found') return 'not_found'
   return 'idle'
 })
+
+// 触发分析按钮禁用：累计未分析行为数为 0 时无需分析
+const vTriggerDisabled = computed(() =>
+  vFlow.triggerLoading.value || vFlow.polling.value
+  || !sessionIdInput.value.trim()
+  || !vState.value || vState.value.analysis_state.report_count === 0,
+)
+const hTriggerDisabled = computed(() =>
+  hFlow.triggerLoading.value || hFlow.polling.value
+  || !didInput.value.trim()
+  || !hState.value || hState.value.accumulated_count === 0,
+)
 
 // ─── 数据拉取 ───
 async function fetchBehavior(sid: string) {
@@ -201,16 +208,6 @@ async function doTrigger() {
     const ok = await hFlow.trigger(did)
     if (!ok) showToast('触发分析失败（分析功能未启用？）', 'error')
     else showToast('横向分析已触发')
-  }
-}
-
-function refreshStatusOnly() {
-  if (queryMode.value === 'vertical') {
-    const sid = sessionIdInput.value.trim()
-    if (sid) void vFlow.refreshStatus(sid)
-  } else {
-    const did = didInput.value.trim()
-    if (did) void hFlow.refreshStatus(did)
   }
 }
 
@@ -323,50 +320,6 @@ onMounted(async () => {
         </div>
 
         <template v-else>
-          <!-- ── 分析状态条 ── -->
-          <div v-if="currentStatus" class="bg-white rounded-2xl border border-gray-200 p-4 flex items-center justify-between">
-            <button @click="refreshStatusOnly" :disabled="queryMode === 'vertical' ? !sessionIdInput.trim() : !didInput.trim()"
-              class="px-3 py-2 text-[13px] font-medium text-gray-600 bg-gray-50 border border-gray-200 rounded-xl hover:bg-gray-100 transition-colors flex items-center gap-1.5 disabled:opacity-40"
-            >
-              <RefreshCw class="w-3.5 h-3.5" /> 刷新状态
-            </button>
-            <div class="flex items-center gap-2">
-              <template v-if="statusKind === 'running'">
-                <Loader2 class="w-4 h-4 text-blue-500 animate-spin" />
-                <span class="text-[12px] text-blue-600 font-medium">LLM 分析中</span>
-                <span v-if="currentStatus.phase" class="text-[11px] text-gray-400">{{ currentStatus.phase }}</span>
-              </template>
-              <template v-else-if="statusKind === 'completed'">
-                <CheckCircle2 class="w-4 h-4 text-emerald-500" />
-                <span class="text-[12px] text-emerald-600 font-medium">分析完成</span>
-              </template>
-              <template v-else-if="statusKind === 'uptodate'">
-                <CheckCircle2 class="w-4 h-4 text-gray-400" />
-                <span class="text-[12px] text-gray-500 font-medium">已是最新 · 无新增待分析 trace</span>
-              </template>
-              <template v-else-if="statusKind === 'failed'">
-                <XCircle class="w-4 h-4 text-red-500" />
-                <span class="text-[12px] text-red-600 font-medium">分析失败</span>
-                <span v-if="currentStatus.reason" class="text-[11px] text-gray-400 truncate max-w-[280px]">{{ currentStatus.reason }}</span>
-              </template>
-              <template v-else-if="statusKind === 'not_found'">
-                <Clock class="w-4 h-4 text-gray-400" />
-                <span class="text-[12px] text-gray-400">未找到分析任务</span>
-                <button @click="doTrigger"
-                  :disabled="currentTriggerLoading || currentPolling || !selectedNodeId || (queryMode === 'vertical' ? !sessionIdInput.trim() : !didInput.trim())"
-                  class="px-3 py-1.5 text-[12px] font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-colors flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  <Loader2 v-if="currentTriggerLoading || currentPolling" class="w-3.5 h-3.5 animate-spin" />
-                  <Zap v-else class="w-3.5 h-3.5" /> 触发分析
-                </button>
-              </template>
-              <template v-else>
-                <Clock class="w-4 h-4 text-gray-400" />
-                <span class="text-[12px] text-gray-400">{{ currentStatus.status }}</span>
-              </template>
-            </div>
-          </div>
-
           <!-- ── 加载中 ── -->
           <div v-if="loading" class="flex items-center justify-center py-16 text-gray-400">
             <Loader2 class="w-5 h-5 animate-spin mr-2" />
@@ -397,6 +350,15 @@ onMounted(async () => {
                     <div class="text-xl font-semibold text-gray-800">{{ vState.analysis_state.last_trace_id }}</div>
                   </div>
                 </div>
+                <!-- ── 分析状态条 ── -->
+                <AnalysisStatusBar
+                  v-if="currentStatus"
+                  :status="currentStatus" :status-kind="statusKind"
+                  :polling="vFlow.polling.value" :trigger-loading="vFlow.triggerLoading.value"
+                  :refresh-disabled="!sessionIdInput.trim()" :trigger-disabled="vTriggerDisabled"
+                  @refresh="vFlow.refreshStatus(sessionIdInput.trim())"
+                  @trigger="doTrigger"
+                />
                 <!-- 意图 (intent) -->
                 <div v-if="vState.intent" class="border-t border-gray-100 pt-4">
                   <div class="flex items-center gap-2 mb-2">
@@ -538,6 +500,15 @@ onMounted(async () => {
                       <div class="text-xl font-semibold text-gray-800">{{ hState.last_trace_id }}</div>
                     </div>
                   </div>
+                  <!-- ── 分析状态条 ── -->
+                  <AnalysisStatusBar
+                    v-if="currentStatus"
+                    :status="currentStatus" :status-kind="statusKind"
+                    :polling="hFlow.polling.value" :trigger-loading="hFlow.triggerLoading.value"
+                    :refresh-disabled="!didInput.trim()" :trigger-disabled="hTriggerDisabled"
+                    @refresh="hFlow.refreshStatus(didInput.trim())"
+                    @trigger="doTrigger"
+                  />
                 </div>
 
                 <!-- 横向报告 -->
