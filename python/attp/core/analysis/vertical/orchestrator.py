@@ -95,8 +95,19 @@ class VerticalOrchestrator:
             await self._state_mgr.set_intent(session_id, extracted.to_dict())
             logger.info("Intent extracted for session={}", session_id)
         else:
+            # 兜底：LLM 意图提取失败时，用 U2A 原文构造最小意图，
+            # 避免后续 run_analysis 因 no_intent 静默放弃整段会话分析（导致漏检）。
+            from attp.core.analysis.base_models import IntentDescriptor
+            fallback = IntentDescriptor(
+                original_task=content,
+                core_objective=content[:200],
+                constraints=[],
+                involved_capabilities=[],
+                risk_level="medium",
+            )
+            await self._state_mgr.set_intent(session_id, fallback.to_dict())
             logger.warning(
-                "Intent extraction failed for session={}, will retry on next trigger",
+                "Intent extraction failed for session={}, applied fallback intent from raw U2A",
                 session_id,
             )
 
