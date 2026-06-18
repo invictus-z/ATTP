@@ -187,7 +187,14 @@ class ChainManager:
         elif step1_ok and step2_ok and not step3_ok:
             error = "上一节点签名和内容不匹配 (Previous node signature/content mismatch)"
         else:
-            error = "未知验证失败 (Unknown verification failure)"
+            # step1_ok 且 not step2_ok：prev 副本的签名在发送方公钥下有效，却与 stored 不同。
+            # 只有发送方私钥持有者能产生该有效签名 ⇒ 发送方对两条消息分别签名（栽赃/内容置换）。
+            # 该情形已由 malicious_detector.evaluate_dual_back_prop 的 Step 4b 归因为发送方
+            # 并写入恶意报告；此处为防御性诊断，正常 Branch B 流程不会到达。
+            error = (
+                f"发送方双签/栽赃 (Sender {prev_sender_did} produced multiple "
+                f"distinct valid signatures)"
+            )
 
         logger.error("Back-prop verification FAILED: session={}, error={}", session_id, error)
         return False, error
