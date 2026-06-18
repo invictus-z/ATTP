@@ -368,7 +368,7 @@ onAgentSwitch(() => {
           <User class="w-4 h-4 mr-2.5 opacity-70" />
           <span>用户配置</span>
         </button>
-        <div class="text-[10px] text-gray-300 text-center pt-1">v0.2.0-alpha</div>
+        <div class="text-[10px] text-gray-300 text-center pt-1">v0.2.0-alpha.2</div>
       </div>
     </aside>
 

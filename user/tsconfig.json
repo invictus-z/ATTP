@@ -9,7 +9,6 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,
-    "ignoreDeprecations": "6.0",
     "strict": true,
     "noUnusedLocals": false,
     "noUnusedParameters": false,
