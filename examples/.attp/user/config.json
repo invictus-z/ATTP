@@ -1,0 +1,25 @@
+{
+    "mode": "demo",
+    "did": "did:wba:attp-diting.cn:test:user:dashboard:e1_3mg8jiSh4lIDcGm98lFrtIeQBCy6dU_MX2oYZRmatSE",
+    "didDocPath": "~/.attp/user/did/did.json",
+    "didKeyPath": "~/.attp/user/did/key-1_private.pem",
+    "protocolNodes": [
+        {
+            "name": "diting-pn",
+            "url": "http://localhost:9000"
+        }
+    ],
+    "agents": [
+        {
+            "name": "diting-agent",
+            "baseUrl": "http://localhost:8001",
+            "did": "did:wba:attp-diting.cn:test:agent:nanobot:e1_jrd7uiR2w6wEPDOe-_JtNpvrJjokOdz9Io_hZExLsKw"
+        }
+    ],
+    "toolNodes": [
+        {
+            "name": "diting-tool",
+            "url": "http://localhost:9999"
+        }
+    ]
+}

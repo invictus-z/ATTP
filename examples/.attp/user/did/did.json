@@ -1,0 +1,58 @@
+{
+  "@context": [
+    "https://www.w3.org/ns/did/v1",
+    "https://w3id.org/security/data-integrity/v2",
+    "https://w3id.org/security/multikey/v1",
+    "https://w3id.org/security/suites/x25519-2019/v1"
+  ],
+  "id": "did:wba:attp-diting.cn:test:user:dashboard:e1_3mg8jiSh4lIDcGm98lFrtIeQBCy6dU_MX2oYZRmatSE",
+  "verificationMethod": [
+    {
+      "id": "did:wba:attp-diting.cn:test:user:dashboard:e1_3mg8jiSh4lIDcGm98lFrtIeQBCy6dU_MX2oYZRmatSE#key-1",
+      "type": "Multikey",
+      "controller": "did:wba:attp-diting.cn:test:user:dashboard:e1_3mg8jiSh4lIDcGm98lFrtIeQBCy6dU_MX2oYZRmatSE",
+      "publicKeyMultibase": "z6Mkou6nrYpuNWJ2wannJLKU1DFun8x5HtmQZMhbXScUvwXY"
+    },
+    {
+      "id": "did:wba:attp-diting.cn:test:user:dashboard:e1_3mg8jiSh4lIDcGm98lFrtIeQBCy6dU_MX2oYZRmatSE#key-2",
+      "type": "EcdsaSecp256r1VerificationKey2019",
+      "controller": "did:wba:attp-diting.cn:test:user:dashboard:e1_3mg8jiSh4lIDcGm98lFrtIeQBCy6dU_MX2oYZRmatSE",
+      "publicKeyJwk": {
+        "kty": "EC",
+        "crv": "P-256",
+        "x": "JsptkY-da02VSBZXQeLtbM31P5fBJryOG38QFeL7WQk",
+        "y": "bnFe2hrXcko64h2_G8mgBKLNgUWUkI2g0WYeuAuf84s"
+      }
+    },
+    {
+      "id": "did:wba:attp-diting.cn:test:user:dashboard:e1_3mg8jiSh4lIDcGm98lFrtIeQBCy6dU_MX2oYZRmatSE#key-3",
+      "type": "X25519KeyAgreementKey2019",
+      "controller": "did:wba:attp-diting.cn:test:user:dashboard:e1_3mg8jiSh4lIDcGm98lFrtIeQBCy6dU_MX2oYZRmatSE",
+      "publicKeyMultibase": "zHpWLD8Rf3U6TPPESrL47KcqBift4w3WPnSBs7JHEG1pn"
+    }
+  ],
+  "authentication": [
+    "did:wba:attp-diting.cn:test:user:dashboard:e1_3mg8jiSh4lIDcGm98lFrtIeQBCy6dU_MX2oYZRmatSE#key-1"
+  ],
+  "assertionMethod": [
+    "did:wba:attp-diting.cn:test:user:dashboard:e1_3mg8jiSh4lIDcGm98lFrtIeQBCy6dU_MX2oYZRmatSE#key-1"
+  ],
+  "keyAgreement": [
+    "did:wba:attp-diting.cn:test:user:dashboard:e1_3mg8jiSh4lIDcGm98lFrtIeQBCy6dU_MX2oYZRmatSE#key-3"
+  ],
+  "service": [
+    {
+      "id": "did:wba:attp-diting.cn:test:user:dashboard:e1_3mg8jiSh4lIDcGm98lFrtIeQBCy6dU_MX2oYZRmatSE#node-type",
+      "type": "ATTPNodeType",
+      "serviceEndpoint": "attp:type:user"
+    }
+  ],
+  "proof": {
+    "type": "DataIntegrityProof",
+    "created": "2026-06-18T12:43:34Z",
+    "verificationMethod": "did:wba:attp-diting.cn:test:user:dashboard:e1_3mg8jiSh4lIDcGm98lFrtIeQBCy6dU_MX2oYZRmatSE#key-1",
+    "proofPurpose": "assertionMethod",
+    "cryptosuite": "eddsa-jcs-2022",
+    "proofValue": "Czn5nYl3o26EAzBDW_Mx_1OlgXF_5FsB2o-XH52ec-v81OLgStafupSrABowr4dlCpeKJi5YGksQAp-xsGuwAw"
+  }
+}

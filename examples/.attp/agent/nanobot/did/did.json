@@ -1,0 +1,58 @@
+{
+  "@context": [
+    "https://www.w3.org/ns/did/v1",
+    "https://w3id.org/security/data-integrity/v2",
+    "https://w3id.org/security/multikey/v1",
+    "https://w3id.org/security/suites/x25519-2019/v1"
+  ],
+  "id": "did:wba:attp-diting.cn:test:agent:nanobot:e1_jrd7uiR2w6wEPDOe-_JtNpvrJjokOdz9Io_hZExLsKw",
+  "verificationMethod": [
+    {
+      "id": "did:wba:attp-diting.cn:test:agent:nanobot:e1_jrd7uiR2w6wEPDOe-_JtNpvrJjokOdz9Io_hZExLsKw#key-1",
+      "type": "Multikey",
+      "controller": "did:wba:attp-diting.cn:test:agent:nanobot:e1_jrd7uiR2w6wEPDOe-_JtNpvrJjokOdz9Io_hZExLsKw",
+      "publicKeyMultibase": "z6Mku2J3dgfNyH15Bm2D2Ro6VnN4wdSEUT9Zv8Qha3RtHfQr"
+    },
+    {
+      "id": "did:wba:attp-diting.cn:test:agent:nanobot:e1_jrd7uiR2w6wEPDOe-_JtNpvrJjokOdz9Io_hZExLsKw#key-2",
+      "type": "EcdsaSecp256r1VerificationKey2019",
+      "controller": "did:wba:attp-diting.cn:test:agent:nanobot:e1_jrd7uiR2w6wEPDOe-_JtNpvrJjokOdz9Io_hZExLsKw",
+      "publicKeyJwk": {
+        "kty": "EC",
+        "crv": "P-256",
+        "x": "Vm7dUle0UW7N6Zxmlp3UQEcl0qrxe4Q0UqreGe7b1vw",
+        "y": "RZgcn4qVhhX_p3CRIUDUsJkfymd_0kmzUhmcXB_Qs4M"
+      }
+    },
+    {
+      "id": "did:wba:attp-diting.cn:test:agent:nanobot:e1_jrd7uiR2w6wEPDOe-_JtNpvrJjokOdz9Io_hZExLsKw#key-3",
+      "type": "X25519KeyAgreementKey2019",
+      "controller": "did:wba:attp-diting.cn:test:agent:nanobot:e1_jrd7uiR2w6wEPDOe-_JtNpvrJjokOdz9Io_hZExLsKw",
+      "publicKeyMultibase": "zFxAzUsD5qE2KY6tCAjrUSZtWBHUANssbvMUUaJcM5SZF"
+    }
+  ],
+  "authentication": [
+    "did:wba:attp-diting.cn:test:agent:nanobot:e1_jrd7uiR2w6wEPDOe-_JtNpvrJjokOdz9Io_hZExLsKw#key-1"
+  ],
+  "assertionMethod": [
+    "did:wba:attp-diting.cn:test:agent:nanobot:e1_jrd7uiR2w6wEPDOe-_JtNpvrJjokOdz9Io_hZExLsKw#key-1"
+  ],
+  "keyAgreement": [
+    "did:wba:attp-diting.cn:test:agent:nanobot:e1_jrd7uiR2w6wEPDOe-_JtNpvrJjokOdz9Io_hZExLsKw#key-3"
+  ],
+  "service": [
+    {
+      "id": "did:wba:attp-diting.cn:test:agent:nanobot:e1_jrd7uiR2w6wEPDOe-_JtNpvrJjokOdz9Io_hZExLsKw#node-type",
+      "type": "ATTPNodeType",
+      "serviceEndpoint": "attp:type:agent"
+    }
+  ],
+  "proof": {
+    "type": "DataIntegrityProof",
+    "created": "2026-06-18T12:43:33Z",
+    "verificationMethod": "did:wba:attp-diting.cn:test:agent:nanobot:e1_jrd7uiR2w6wEPDOe-_JtNpvrJjokOdz9Io_hZExLsKw#key-1",
+    "proofPurpose": "assertionMethod",
+    "cryptosuite": "eddsa-jcs-2022",
+    "proofValue": "Eq52BifeDKTM420nnLgN4_kaQEoDrdFt4H32k3Gn6RLKanEy03KUDfu-tcdda3SACzljeOZlLuF5KK6N8l0OCw"
+  }
+}

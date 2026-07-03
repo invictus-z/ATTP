@@ -12,3 +12,7 @@ user/node_modules/
 
 typescript/dist/
 typescript/node_modules/
+
+docker/release/
+
+.env
