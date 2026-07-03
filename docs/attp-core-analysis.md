@@ -305,8 +305,8 @@ class DIDResolver:
 
 ```
 did:wba:<domain>:<path>[:<key_identifier>]
-→ http://<domain>/<path>/did.json
-→ http://<domain>/.well-known/did.json (无 path 时)
+→ https://<domain>/<path>/did.json
+→ https://<domain>/.well-known/did.json (无 path 时)
 ```
 
 ---

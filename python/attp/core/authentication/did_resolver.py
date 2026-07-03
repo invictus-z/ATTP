@@ -214,22 +214,24 @@ def _find_verification_method(
 
 
 def _did_base_id(did: str) -> str:
-    """返回 DID 的基础标识（前4段），去除末尾的 key identifier。
+    """返回 DID 的基础标识（去除末尾的 key identifier）。
 
-    did:wba:host:path:key_id → did:wba:host:path
-    did:wba:host:path        → did:wba:host:path（无变化）
+    did:wba:host:p1:p2:key_id → did:wba:host:p1:p2
+    did:wba:host:key_id       → did:wba:host
     """
     parts = did.split(":")
-    return ":".join(parts[:4])
+    return ":".join(parts[:-1])
 
 
 def build_did_resolution_url(
     did: str, base_url_override: Optional[str] = None
 ) -> str:
-    """构建 DID 文档的 HTTP 解析 URL。
+    """构建 DID 文档的 HTTPS 解析 URL。
 
-    DID 格式: did:wba:<domain>:<path>[:<key_identifier>]
-    第5段（key identifier）不参与 URL 路径构建。
+    DID 格式: did:wba:<domain>[:<path>...]:<key_identifier>
+    末段为 key identifier，不参与 URL 路径构建；中间各段拼为路径。
+    - did:wba:host:p1:p2:key → https://host/p1/p2/did.json
+    - did:wba:host:key       → https://host/.well-known/did.json
     """
     parts = did.split(":")
     if len(parts) < 3 or parts[0] != "did":
@@ -240,8 +242,8 @@ def build_did_resolution_url(
         raise ValueError(f"Unsupported DID method: {method}")
 
     domain = urllib.parse.unquote(parts[2])
-    path_segments = parts[3:4]  # 只取第4段，忽略第5段起（key identifier）
-    base_url = (base_url_override or f"http://{domain}").rstrip("/")
+    path_segments = parts[3:-1]  # 第4段起到倒数第2段为路径，末段为 key identifier
+    base_url = (base_url_override or f"https://{domain}").rstrip("/")
     if path_segments:
         encoded_path = "/".join(
             urllib.parse.unquote(seg) for seg in path_segments
@@ -310,7 +312,7 @@ class DIDResolver:
                 
                 async with aiohttp.ClientSession(timeout=timeout) as session:
                     async with session.get(
-                        url, headers=headers, ssl=False
+                        url, headers=headers
                     ) as response:
                         last_http_status = response.status
                         logger.debug(

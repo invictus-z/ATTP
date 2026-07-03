@@ -48,12 +48,12 @@ examples/
 跨节点签名验证时，`DIDResolver` 会按以下 URL 拉取对端 DID 文档，需在 `attp-diting.cn` 上**按路径托管**对应的 `did.json`（即各 `did/did.json` 的内容）：
 
 ```
-http://attp-diting.cn/test/agent/nanobot/did.json
-http://attp-diting.cn/test/tool/add/did.json
-http://attp-diting.cn/test/user/dashboard/did.json
+https://attp-diting.cn/test/agent/nanobot/did.json
+https://attp-diting.cn/test/tool/add/did.json
+https://attp-diting.cn/test/user/dashboard/did.json
 ```
 
-> 解析器默认走 `http://`；若启用 HTTPS，需在 `DIDResolver` 调用处覆盖 `base_url`。
+> 解析器默认走 `https://`，并强制开启证书校验。DID 文档服务器必须部署受信任的 TLS 证书，否则解析失败。
 
 ## 使用方式
 
