@@ -182,8 +182,6 @@ class WebApp():
           4. 更新 session trace
           5. 通过 WS 发送 NodeMessage 给 User
         """
-        logger.warning("[DEBUG-DUP] send_message_to_user called: session={}, content_len={}, ws_clients={}",
-                       session_id, len(content), len(self._clients))
         try:
             if self._session_manager:
                 async with self._session_manager.locked_session(session_id, create=False) as session:
