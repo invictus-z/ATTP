@@ -3,7 +3,7 @@
  * Handles app lifecycle, window creation, and IPC registration.
  */
 
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, Menu, session } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { registerIpcHandlers, closeAllConnections } from './ipc/index.js';
@@ -46,7 +46,24 @@ function createWindow() {
   registerIpcHandlers(mainWindow);
 }
 
+// CSP 经响应头下发：frame-ancestors 等指令无法经 <meta> 生效，必须走 header（Electron 官方推荐）
+const CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none';";
+
 app.whenReady().then(() => {
+  // 去除顶部默认菜单栏
+  // Menu.setApplicationMenu(null);
+
+  // 仅对顶层文档注入 CSP（非文档响应上的 CSP 头会被浏览器忽略，过滤掉避免无谓开销）
+  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    if (details.responseHeaders && details.resourceType === 'mainFrame') {
+      callback({
+        responseHeaders: { ...details.responseHeaders, 'Content-Security-Policy': [CSP] },
+      });
+    } else {
+      callback({});
+    }
+  });
+
   createWindow();
 
   app.on('activate', () => {

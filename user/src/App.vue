@@ -1,11 +1,15 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useChat } from './composables/useChat'
 import { useNodes } from './composables/useNodes'
 import { useAttpProtocol } from './composables/useAttpProtocol'
 import { getActiveAgent, getAgents, getActiveAgentId, setActiveAgent, onAgentSwitch, removeAgent, addAgent, loadAgents, renameAgent } from './agent_manager'
-import { Bot, Server, X, MessageSquare, ChevronDown, History, Settings, Pencil, Shield, Wrench, User, Search, AlertTriangle, Plus, MoreVertical } from 'lucide-vue-next'
+import InitView from './views/InitView.vue'
+import { Bot, Server, X, MessageSquare, ChevronDown, History, Settings, Pencil, Shield, Wrench, User, Search, AlertTriangle, Plus, MoreVertical, ServerCog } from 'lucide-vue-next'
+
+// 版本号由 vite define 在构建期注入（见 vite.config.ts）；模板中需经 script setup 暴露为绑定
+const appVersion = __APP_VERSION__
 
 const route = useRoute()
 const router = useRouter()
@@ -43,6 +47,7 @@ const onAgentContextMenu = (event: MouseEvent, agent: any) => {
 const closeContextMenu = () => { contextMenu.value.visible = false }
 
 const openEditAgent = () => {
+  if (isDemoMode.value) return  // 演示模式只读
   editAgentName.value = contextMenu.value.agentName
   editAgentUrl.value = contextMenu.value.agentUrl
   showEditAgentModal.value = true
@@ -50,6 +55,7 @@ const openEditAgent = () => {
 }
 
 const saveEditAgent = () => {
+  if (isDemoMode.value) return  // 演示模式只读
   if (editAgentName.value.trim() && editAgentUrl.value.trim()) {
     renameAgent(contextMenu.value.agentId, editAgentName.value.trim())
     // Note: baseUrl change would require reconnecting, just save name for now
@@ -58,6 +64,7 @@ const saveEditAgent = () => {
 }
 
 const removeAgentFromMenu = () => {
+  if (isDemoMode.value) return  // 演示模式只读
   removeAgent(contextMenu.value.agentId)
   closeContextMenu()
 }
@@ -78,7 +85,7 @@ if (typeof window !== 'undefined') {
 }
 
 const { agentNodes, fetchNodes, getNodeIcon } = useNodes()
-const { loadUserConfig } = useAttpProtocol()
+const { loadAppState, needsInit, isDemoMode } = useAttpProtocol()
 
 const activeAgent = computed(() => getActiveAgent())
 const agentList = computed(() => getAgents())
@@ -94,6 +101,7 @@ const activeNav = computed(() => {
   if (route.path.startsWith('/trace')) return 'trace-query'
   if (route.path.startsWith('/tools')) return 'tools'
   if (route.path.startsWith('/user-config')) return 'user-config'
+  if (route.path.startsWith('/backend')) return 'backend'
   return 'home'
 })
 
@@ -103,6 +111,7 @@ const switchToAgent = (agentId: string) => {
 }
 
 const addNewAgent = () => {
+  if (isDemoMode.value) return  // 演示模式只读
   if (newAgentName.value.trim() && newAgentUrl.value.trim()) {
     addAgent(newAgentName.value.trim(), newAgentUrl.value.trim(), newAgentDid.value.trim() || undefined)
     newAgentName.value = ''
@@ -146,15 +155,23 @@ const openCurrentAgentMenu = (event: MouseEvent) => {
   onAgentContextMenu(event, a)
 }
 
-onMounted(async () => {
-  // 1. Load user config first (agents + trace nodes live there now)
-  await loadUserConfig()
-  // 2. Load agents from config
+// 启动后续上下文（agents / 节点 / 连接）；仅在已完成初始化（非 needsInit）时执行
+async function bootstrap() {
   await loadAgents()
-  // 3. Init chat context and connect
   initAgentContext()
   connectAllAgents()
   fetchNodes()
+}
+
+onMounted(async () => {
+  // 1. 加载应用态（mode + llm + userConfig）；mode=null 则进入 needsInit（InitView 引导），暂不 bootstrap
+  await loadAppState()
+  if (!needsInit.value) await bootstrap()
+})
+
+// 用户在 InitView 选定模式（needsInit: true→false）后，执行一次 bootstrap
+watch(needsInit, async (v) => {
+  if (!v) await bootstrap()
 })
 
 onAgentSwitch(() => {
@@ -164,7 +181,9 @@ onAgentSwitch(() => {
 </script>
 
 <template>
-  <div class="flex h-screen w-full overflow-hidden bg-white">
+  <!-- 未初始化时进入模式选择页；否则显示主工作区 -->
+  <InitView v-if="needsInit" />
+  <div v-else class="flex h-screen w-full overflow-hidden bg-white">
     <!-- Left Sidebar - 260px -->
     <aside class="w-[260px] bg-white border-r border-gray-100 flex flex-col shrink-0">
       <!-- Header -->
@@ -173,7 +192,10 @@ onAgentSwitch(() => {
           <Bot class="w-4 h-4 text-gray-600" />
         </div>
         <div class="flex flex-col">
-          <span class="text-sm font-semibold text-gray-800">谛听</span>
+          <div class="flex items-center gap-1.5">
+            <span class="text-sm font-semibold" :class="isDemoMode ? 'text-red-600' : 'text-gray-800'">谛听</span>
+            <span v-if="isDemoMode" class="px-1.5 py-0.5 rounded text-[10px] font-medium text-red-600 bg-red-50 border border-red-100 leading-none">演示模式</span>
+          </div>
           <span class="text-[11px] text-gray-400">基于 ATTP 的多智能体工作区</span>
         </div>
       </div>
@@ -221,7 +243,7 @@ onAgentSwitch(() => {
             </button>
             <div v-if="agentList.length === 0" class="px-3 py-3 text-[11px] text-gray-400 text-center">暂无智能体</div>
             <div class="h-px bg-gray-100 my-1"></div>
-            <button @click="openAddAndClose()" class="w-full flex items-center gap-2.5 px-3 py-2 text-[13px] text-brand-600 hover:bg-brand-50 rounded-lg transition-colors">
+            <button @click="openAddAndClose()" :disabled="isDemoMode" :class="['w-full flex items-center gap-2.5 px-3 py-2 text-[13px] rounded-lg transition-colors', isDemoMode ? 'text-gray-300 cursor-not-allowed' : 'text-brand-600 hover:bg-brand-50']">
               <Plus class="w-3.5 h-3.5" />
               <span>添加智能体</span>
             </button>
@@ -232,7 +254,7 @@ onAgentSwitch(() => {
       <!-- Unified Nav -->
       <nav class="flex-1 overflow-y-auto px-3 pt-3 pb-2">
 
-        <!-- 当前智能体导航：对话/会话历史/配置/对端节点；无 agent 时灰显禁用（不抖动） -->
+        <!-- 当前智能体导航：对话/会话历史/配置/外部智能体节点；无 agent 时灰显禁用（不抖动） -->
         <div
           class="space-y-0.5"
           :class="hasActiveAgent ? '' : 'opacity-50 pointer-events-none'"
@@ -269,12 +291,12 @@ onAgentSwitch(() => {
             <span>配置</span>
           </button>
 
-          <!-- 对端节点 子组（agent 发现的对端服务节点，从属于当前智能体；与溯源“节点管理”=协议节点不同） -->
+          <!-- 外部智能体节点 子组（agent 发现的对端服务节点，从属于当前智能体；与溯源“节点管理”=协议节点不同） -->
           <div>
             <div class="px-2 py-1.5 flex items-center justify-between cursor-pointer select-none rounded-lg hover:bg-gray-50 transition-colors" @click="toggleNodesCollapsed()">
               <span class="flex items-center gap-1.5 text-[12px] font-medium text-gray-500">
                 <ChevronDown :class="['w-3 h-3 transition-transform duration-200', nodesCollapsed ? '-rotate-90' : '']" />
-                对端节点
+                外部智能体节点
               </span>
               <span class="text-[10px] text-gray-300">{{ agentNodes.length }}</span>
             </div>
@@ -293,7 +315,7 @@ onAgentSwitch(() => {
                 <span class="flex-1 text-left truncate">{{ node.name }}</span>
                 <span class="w-1.5 h-1.5 rounded-full shrink-0" :class="node.online ? 'bg-emerald-400' : 'bg-gray-300'"></span>
               </button>
-              <div v-if="agentNodes.length === 0" class="px-2 py-2 text-[11px] text-gray-300 text-center">未发现对端节点</div>
+              <div v-if="agentNodes.length === 0" class="px-2 py-2 text-[11px] text-gray-300 text-center">未发现外部智能体节点</div>
             </div>
           </div>
         </div>
@@ -314,7 +336,7 @@ onAgentSwitch(() => {
                 'nav-btn w-full flex items-center px-2.5 py-2 text-[13px] rounded-lg transition-colors',
                 activeNav === 'trace-nodes' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800'
               ]"
-              title="协议节点 / 溯源后端（与上方对端节点不同）"
+              title="协议节点 - 网络中的信任锚点"
             >
               <Server class="w-4 h-4 mr-2.5 opacity-70" />
               <span>节点管理</span>
@@ -325,7 +347,7 @@ onAgentSwitch(() => {
                 'nav-btn w-full flex items-center px-2.5 py-2 text-[13px] rounded-lg transition-colors',
                 activeNav === 'trace-query' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800'
               ]"
-              title="溯源查询（行为溯源 + 纵/横向分析）"
+              title="溯源查询（通信链路 + 纵横向分析）"
             >
               <Search class="w-4 h-4 mr-2.5 opacity-70" />
               <span>溯源查询</span>
@@ -368,7 +390,20 @@ onAgentSwitch(() => {
           <User class="w-4 h-4 mr-2.5 opacity-70" />
           <span>用户配置</span>
         </button>
-        <div class="text-[10px] text-gray-300 text-center pt-1">v0.2.0-alpha.2</div>
+        <!-- 后端服务（仅演示模式显示，琥珀色区分） -->
+        <button
+          v-if="isDemoMode"
+          @click="navigate('/backend')"
+          :class="[
+            'nav-btn w-full flex items-center px-2.5 py-2 text-[13px] rounded-lg transition-colors',
+            activeNav === 'backend' ? 'bg-amber-50 text-amber-700 font-medium' : 'text-amber-600/80 hover:bg-amber-50 hover:text-amber-700'
+          ]"
+          title="后端服务（演示模式：一键拉起镜像）"
+        >
+          <ServerCog class="w-4 h-4 mr-2.5 opacity-80" />
+          <span>[演示模式] 启动后端服务</span>
+        </button>
+        <div class="text-[10px] text-gray-300 text-center pt-1">v{{ appVersion }}</div>
       </div>
     </aside>
 

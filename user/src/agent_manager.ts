@@ -167,9 +167,9 @@ export async function testAgentConnection(baseUrl: string): Promise<{ ok: boolea
 
 async function persist(): Promise<void> {
   try {
-    const configResult = await window.electronAPI.readUserConfig();
-    const config: UserAttpConfig = configResult.ok && configResult.data
-      ? { ...configResult.data }
+    const state = await window.electronAPI.readAppState();
+    const config: UserAttpConfig = state.ok && state.userConfig
+      ? { ...state.userConfig }
       : { did: '', didDocPath: '', didKeyPath: '', protocolNodes: [], toolNodes: [], agents: [] };
     // Deep-clone to strip Vue reactive proxies (not serializable through Electron IPC)
     config.agents = JSON.parse(JSON.stringify(agents.value.map(a => ({ name: a.name, baseUrl: a.baseUrl, did: a.did }))));
@@ -182,10 +182,10 @@ async function persist(): Promise<void> {
 export async function loadAgents(): Promise<void> {
   console.log('[DEBUG-CONN][loadAgents] Loading agents from user config...');
   try {
-    const configResult = await window.electronAPI.readUserConfig();
-    console.log('[DEBUG-CONN][loadAgents] readUserConfig result:', configResult.ok ? 'OK' : 'FAIL', configResult.error || '');
-    if (configResult.ok && configResult.data?.agents) {
-      agents.value = configResult.data.agents.map((a: any, i: number) => ({
+    const state = await window.electronAPI.readAppState();
+    console.log('[DEBUG-CONN][loadAgents] readAppState result:', state.ok ? 'OK' : 'FAIL', state.error || '');
+    if (state.ok && state.userConfig?.agents) {
+      agents.value = state.userConfig.agents.map((a: any, i: number) => ({
         id: 'agent_' + i + '_' + a.baseUrl.replace(/[^a-zA-Z0-9]/g, '_'),
         name: a.name,
         baseUrl: a.baseUrl,

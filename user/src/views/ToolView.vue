@@ -29,7 +29,7 @@ interface ToolAd {
 
 // ─── State ───────────────────────────────────────────────────────────
 
-const { userConfig, saveToolNodes: configSaveToolNodes } = useAttpProtocol()
+const { userConfig, saveToolNodes: configSaveToolNodes, isDemoMode } = useAttpProtocol()
 
 const toolNodes = ref<ToolNode[]>([])
 const nodePanelOpen = ref(false)
@@ -92,6 +92,7 @@ const checkAllNodes = () => {
 }
 
 const addNode = async () => {
+  if (isDemoMode.value) return  // 演示模式只读
   const name = newNodeName.value.trim()
   const url = newNodeUrl.value.trim().replace(/\/$/, '')
   if (!name || !url) return
@@ -107,6 +108,7 @@ const addNode = async () => {
 }
 
 const openEditModal = (node: ToolNode) => {
+  if (isDemoMode.value) return  // 演示模式只读
   editingNodeId.value = node.id
   editNodeName.value = node.name
   editNodeUrl.value = node.url
@@ -131,6 +133,7 @@ const saveEditNode = async () => {
 }
 
 const removeNode = async (id: string) => {
+  if (isDemoMode.value) return  // 演示模式只读
   const node = toolNodes.value.find(n => n.id === id)
   toolNodes.value = toolNodes.value.filter(n => n.id !== id)
   await saveNodes()
@@ -223,8 +226,9 @@ onMounted(() => {
               <span class="text-[11px] text-gray-400">{{ toolNodes.filter(n => n.status === 'online').length }} / {{ toolNodes.length }} 在线</span>
             </div>
             <button
-              @click.stop="showAddModal = true"
-              class="px-3 py-1.5 text-[12px] font-medium text-gray-600 bg-gray-50 border border-gray-200 rounded-lg hover:bg-gray-100 hover:border-gray-300 transition-colors flex items-center gap-1"
+              @click.stop="!isDemoMode && (showAddModal = true)"
+              :disabled="isDemoMode"
+              :class="['px-3 py-1.5 text-[12px] font-medium border rounded-lg transition-colors flex items-center gap-1', isDemoMode ? 'text-gray-300 bg-gray-50 border-gray-200 cursor-not-allowed' : 'text-gray-600 bg-gray-50 border-gray-200 hover:bg-gray-100 hover:border-gray-300']"
             >
               <Plus class="w-3.5 h-3.5" /> 添加
             </button>
@@ -256,8 +260,8 @@ onMounted(() => {
               <div class="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
                 <button @click="testConnection(node)" class="p-1.5 text-gray-400 hover:text-cyan-600 hover:bg-cyan-50 rounded-lg transition-colors" title="测试"><ExternalLink class="w-3.5 h-3.5" /></button>
                 <button @click="fetchAd(node)" class="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors" title="查看描述"><Search class="w-3.5 h-3.5" /></button>
-                <button @click="openEditModal(node)" class="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors" title="编辑"><Pencil class="w-3.5 h-3.5" /></button>
-                <button @click="removeNode(node.id)" class="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors" title="删除"><Trash2 class="w-3.5 h-3.5" /></button>
+                <button @click="openEditModal(node)" :disabled="isDemoMode" class="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent" title="编辑"><Pencil class="w-3.5 h-3.5" /></button>
+                <button @click="removeNode(node.id)" :disabled="isDemoMode" class="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent" title="删除"><Trash2 class="w-3.5 h-3.5" /></button>
               </div>
             </div>
             <div v-if="toolNodes.length === 0" class="text-center py-6 text-gray-400 text-[13px]">

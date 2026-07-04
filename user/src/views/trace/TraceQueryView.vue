@@ -115,8 +115,10 @@ const hTriggerDisabled = computed(() =>
 // ─── 数据拉取 ───
 async function fetchBehavior(sid: string) {
   if (!selectedNode.value || !sid) return
-  const pna = encodeURIComponent(selectedNode.value.url)
-  const url = buildUrl(`/api/behavior/${encodeURIComponent(sid)}?protocol_node_address=${pna}`)
+  // 不带 protocol_node_address 过滤：docker 下该地址随发送方视角变化
+  // （agent→protocol:9000，宿主→localhost:9000），过滤会漏掉其他视角的 hop。
+  // 后端按 session_id 返回完整链（trace_repo 的 None 分支）。
+  const url = buildUrl(`/api/behavior/${encodeURIComponent(sid)}`)
   const res = await apiFetch(url)
   if (res.ok) {
     behaviorNodes.value = transformChainToNodes(res.data.chain || [])
@@ -255,7 +257,7 @@ onMounted(async () => {
     <header class="bg-white border-b border-gray-100 shrink-0 px-8 py-6 shadow-[0_4px_20px_-15px_rgba(0,0,0,0.05)] z-10">
       <div class="max-w-5xl mx-auto">
         <h2 class="text-xl font-semibold text-gray-900 tracking-tight mb-1.5">溯源查询</h2>
-        <p class="text-sm text-gray-500">消息固化 · 纵向意图追踪 · 横向意图追踪</p>
+        <p class="text-sm text-gray-500">查询通信链路 / 手动触发横纵向分析</p>
       </div>
     </header>
 

@@ -42,8 +42,6 @@ const groupedMessages = computed(() => {
   return groups
 })
 
-const rtLogs = computed(() => currentSession.value?.rtLogs || [])
-
 const scrollToBottom = () => {
   nextTick(() => {
     if (chatContainer.value) {
@@ -143,12 +141,6 @@ const autoResize = (e: Event) => {
 }
 
 watch(() => currentSession.value?.messages?.length, () => { scrollToBottom() })
-watch(() => currentSession.value?.rtLogs?.length, () => {
-  nextTick(() => {
-    const rtContainer = document.getElementById('rt-log-container')
-    if (rtContainer) rtContainer.scrollTop = rtContainer.scrollHeight
-  })
-})
 onMounted(() => { scrollToBottom() })
 </script>
 
@@ -177,7 +169,7 @@ onMounted(() => { scrollToBottom() })
                   </template>
                 </span>
               </div>
-              <p class="text-sm text-gray-500">{{ activeAgent?.baseUrl ? `Agent backend at ${activeAgent.baseUrl}` : '你本机的主控 Agent，负责调度全网节点、分配任务及执行本地脚本。' }}</p>
+              <p class="text-sm text-gray-500">{{ activeAgent?.baseUrl ? `智能体运行于 ${activeAgent.baseUrl.replace(/^(https?:)?\/\//, '')}` : '' }}</p>
             </div>
           </div>
 
@@ -271,23 +263,6 @@ onMounted(() => { scrollToBottom() })
         </div>
       </div>
 
-      <!-- Right Panel: Real-time Network -->
-      <div class="w-80 border-l border-gray-100 bg-gray-50 flex-col h-full hidden lg:flex">
-        <div class="p-6 border-b border-gray-100 bg-white">
-          <h3 class="text-sm font-semibold text-gray-900">Real-time Network</h3>
-        </div>
-        <div class="flex-1 overflow-y-auto p-6 space-y-4">
-          <div class="bg-white p-4 rounded-xl border border-gray-100">
-            <div class="text-[11px] font-medium text-gray-400 uppercase mb-3">Logs</div>
-            <div id="rt-log-container" class="space-y-3">
-              <div v-if="rtLogs.length === 0" class="text-xs text-gray-300 text-center py-4">暂无日志</div>
-              <div v-for="(log, idx) in rtLogs" :key="idx" class="text-xs text-gray-600 mb-1">
-                <span class="font-semibold text-gray-700">[{{ log.senderName }}]</span> {{ log.text }}
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
     </div>
 
     <!-- ── Protocol Node Selection Modal ── -->

@@ -15,6 +15,7 @@ const router = createRouter({
     { path: '/trace/malicious', name: 'trace-malicious', component: () => import('./views/trace/MaliciousView.vue') },
     { path: '/tools', name: 'tools', component: () => import('./views/ToolView.vue') },
     { path: '/user-config', name: 'user-config', component: () => import('./views/UserConfigView.vue') },
+    { path: '/backend', name: 'backend', component: () => import('./views/BackendPanel.vue') },
   ],
 })
 

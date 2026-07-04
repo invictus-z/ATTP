@@ -5,8 +5,8 @@
  * 配置文件存储于 ~/.attp/user/config.json，通过 Electron IPC 读写。
  */
 
-import { ref, reactive } from 'vue'
-import type { UserAttpConfig } from '../transport'
+import { ref, reactive, computed } from 'vue'
+import type { UserAttpConfig, LlmConfig } from '../transport'
 import { importPrivateKeyFromPem, type SignableKey } from '../attp/key_helper'
 import { buildNodeMessage, sendBackMessage, parseIncomingNodeMessage } from '../attp/protocol'
 import { UserSessionManager } from '@attp/core'
@@ -15,6 +15,7 @@ import type { RecordedHop } from '@attp/core'
 // ---- Singleton State ----
 
 const userConfig = reactive<UserAttpConfig>({
+  mode: null,
   did: '',
   didDocPath: '',
   didKeyPath: '',
@@ -31,6 +32,21 @@ const initialized = ref(false)
 const privateKeyLoaded = ref(false)
 const loading = ref(false)
 const saving = ref(false)
+
+/** 尚未初始化（mode=null）→ 前端进入模式选择页 */
+const needsInit = ref(false)
+/** LLM 配置（持久于 app-state.llm，两模式共用；用于注入 docker compose） */
+const llm = ref<LlmConfig>({ apiKey: '', baseUrl: 'https://api.deepseek.com', model: 'deepseek-chat' })
+/** 当前是否为演示模式 */
+const isDemoMode = computed(() => userConfig.mode === 'demo')
+
+/** 演示模式下把宿主侧协议节点 url 改写为 docker 服务名，供容器内 agent 回传。
+ *  仅替换 host（localhost/127.0.0.1 → protocol），保留端口与路径；
+ *  非 localhost 的地址（如自由模式里用户配的远程地址）原样返回。
+ *  user 节点自己访问协议节点仍用宿主侧 url（localhost），不受此改写影响。 */
+function toDockerServiceUrl(url: string): string {
+  return url.replace(/\/\/(localhost|127\.0\.0\.1)([:\/]|$)/, '//protocol$2')
+}
 
 // ---- Session Manager（基于 @attp/core UserSessionManager）----
 
@@ -62,40 +78,59 @@ export function clearSessionProtocolUrl(sessionId: string) {
   attpSessionManager.saveToStorage()
 }
 
-// ---- Config I/O ----
+// ---- Config I/O（基于 app-state：mode + llm + 按模式分流的 userConfig）----
 
-/** 从 ~/.attp/user/config.json 加载配置 */
-async function loadUserConfig(): Promise<boolean> {
-  loading.value = true
-  console.log('[DEBUG-CONN][loadUserConfig] Loading user config from ~/.attp/user/config.json...')
-  try {
-    const result = await window.electronAPI.readUserConfig()
-    if (result.ok && result.data) {
-      Object.assign(userConfig, result.data)
-      initialized.value = true
-
-      console.log(`[DEBUG-CONN][loadUserConfig] ✓ Config loaded: did="${userConfig.did}", didKeyPath="${userConfig.didKeyPath}"`)
-      console.log(`[DEBUG-CONN][loadUserConfig]   protocolNodes (${userConfig.protocolNodes.length}):`, userConfig.protocolNodes.map(n => `"${n.name}"=${n.url}`))
-      console.log(`[DEBUG-CONN][loadUserConfig]   agents (${userConfig.agents.length}):`, userConfig.agents.map(a => `"${a.name}"=${a.baseUrl}`))
-
-      // 如果密钥路径变了，清除缓存的私钥
-      if (cachedKeyPath !== userConfig.didKeyPath) {
-        cachedPrivateKey = null
-        privateKeyLoaded.value = false
-        console.log('[DEBUG-CONN][loadUserConfig]   Key path changed — cleared cached private key')
-      }
-
-      return true
-    } else {
-      console.warn(`[DEBUG-CONN][loadUserConfig] ✗ Failed: ${result.error || 'no data'}`)
-      return false
+/** 把 read-app-state / set-app-mode 返回应用到内存 */
+function applyState(result: {
+  ok: boolean; mode?: 'demo' | 'free' | null;
+  llm?: LlmConfig; userConfig?: UserAttpConfig | null; needsInit?: boolean;
+}) {
+  if (result.llm) llm.value = { ...llm.value, ...result.llm }
+  if (result.userConfig) {
+    if (cachedKeyPath !== result.userConfig.didKeyPath) {
+      cachedPrivateKey = null
+      privateKeyLoaded.value = false
     }
+    Object.assign(userConfig, result.userConfig)
+    initialized.value = true
+    needsInit.value = false
+  } else {
+    initialized.value = false
+    needsInit.value = !!result.needsInit
+  }
+}
+
+/** 启动：读 app-state（mode + llm + 按模式分流的 userConfig） */
+async function loadAppState(): Promise<boolean> {
+  loading.value = true
+  try {
+    const result = await window.electronAPI.readAppState()
+    if (!result.ok) { console.warn('[ATTP] readAppState failed:', result.error); return false }
+    applyState(result)
+    return !needsInit.value
   } catch (e) {
-    console.error('[DEBUG-CONN][loadUserConfig] !!! Exception:', e)
+    console.error('[ATTP] loadAppState exception:', e)
     return false
   } finally {
     loading.value = false
   }
+}
+
+/** 设置模式：首启选择 + 演示↔自由双向切换统一入口；完成后重读 state */
+async function setMode(mode: 'demo' | 'free'): Promise<boolean> {
+  const result = await window.electronAPI.setAppMode(mode)
+  if (!result.ok) { console.warn('[ATTP] setAppMode failed:', result.error); return false }
+  applyState(result)
+  return true
+}
+
+/** 保存 LLM 配置（持久于 app-state.llm，两模式共用） */
+async function saveLlm(): Promise<boolean> {
+  // 浅拷贝剥离 Vue reactive proxy（llm.value 是 Proxy，不可经 Electron IPC 结构化克隆，否则报 "An object could not be cloned"）
+  const result = await window.electronAPI.saveLlm({ ...llm.value })
+  if (!result.ok) { console.warn('[ATTP] saveLlm failed:', result.error); return false }
+  if (result.data) llm.value = { ...llm.value, ...(result.data as LlmConfig) }
+  return true
 }
 
 /** 保存配置到 ~/.attp/user/config.json */
@@ -198,9 +233,12 @@ async function handleReceivedNodeMessage(incomingData: any): Promise<boolean> {
     return false
   }
 
-  // 发送 BackMessage，等待协议节点确认收到
+  // 发送 BackMessage，等待协议节点确认收到。
+  // 用 session 绑定的宿主侧 protocolUrl（演示模式下 agent 响应里回填的是 docker 服务名
+  // protocol:9000，宿主解析不了）；自由模式下与 nodeMessage.protocolUrl 等价。
+  const sessionProtocolUrl = getSessionProtocolUrl(nodeMessage.recordedHop.sessionId) || nodeMessage.protocolUrl
   const backOk = await sendBackMessage({
-    protocolUrl: nodeMessage.protocolUrl,
+    protocolUrl: sessionProtocolUrl,
     userDid: userConfig.did,
     nonce: nodeMessage.nonce,
     recordedHop: nodeMessage.recordedHop,
@@ -259,6 +297,12 @@ async function sendMessageWithAttp(
   }
 
   // 1. 构造 NodeMessage + 签名
+  //    塞进 NodeMessage 的 protocolUrl 是「容器内 agent 回传用的地址」：
+  //    演示模式 → docker 服务名（agent 容器内可达，localhost 在容器里指它自己）；
+  //    自由模式 → 原样透传用户配置的 url（通常为远程真实地址，host 与容器都可达）。
+  //    注意：user 自己的 sendBack（step 2）仍用宿主侧 protocolUrl，与此处无关。
+  const embeddedProtocolUrl = isDemoMode.value ? toDockerServiceUrl(protocolUrl) : protocolUrl
+
   let nodeMessageDict: Record<string, unknown>
   let nonce: string
   let recordedHop: RecordedHop
@@ -269,7 +313,7 @@ async function sendMessageWithAttp(
       userDid: userConfig.did,
       targetDid,
       content,
-      protocolUrl,
+      protocolUrl: embeddedProtocolUrl,
       privateKey,
       sessionManager: attpSessionManager,  // 传递 sessionManager
     })
@@ -357,10 +401,15 @@ export function useAttpProtocol() {
     privateKeyLoaded,
     loading,
     saving,
+    needsInit,
+    isDemoMode,
+    llm,
 
-    // Config I/O
-    loadUserConfig,
+    // Config I/O（app-state）
+    loadAppState,
     saveUserConfig,
+    setMode,
+    saveLlm,
 
     // Key Management
     loadPrivateKey,

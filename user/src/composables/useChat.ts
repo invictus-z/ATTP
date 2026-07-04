@@ -16,7 +16,6 @@ export interface ChatSession {
   id: string
   title: string
   messages: ChatMessage[]
-  rtLogs?: { senderName: string; text: string }[]
   nodeHistories?: { [targetNode: string]: { role: 'user' | 'agent'; text: string; timeStr: string }[] }
   updatedAt: number
   isPinned?: boolean
@@ -119,7 +118,6 @@ export function useChat() {
       id: 'sess_' + Date.now().toString(),
       title: initialTitle,
       messages: [],
-      rtLogs: [],
       nodeHistories: {},
       updatedAt: Date.now(),
     }
@@ -246,7 +244,7 @@ export function useChat() {
         session = {
           id: sessionId,
           title: `Message from ${senderName}`,
-          messages: [], rtLogs: [], nodeHistories: {},
+          messages: [], nodeHistories: {},
           updatedAt: Date.now(), isUnread: false, unreadCount: 0, senderName,
         }
         agentSessions.unshift(session)
@@ -255,7 +253,7 @@ export function useChat() {
         session = {
           id: 'sess_' + Date.now().toString(),
           title: content.length > 20 ? content.slice(0, 20) + '...' : content,
-          messages: [], rtLogs: [], nodeHistories: {},
+          messages: [], nodeHistories: {},
           updatedAt: Date.now(),
         }
         agentSessions.unshift(session)
@@ -291,7 +289,7 @@ export function useChat() {
     const timeStr = new Date().toLocaleTimeString()
     let sess = agentSessions.find(s => s.id === targetSessionId)
     if (!sess) {
-      sess = { id: targetSessionId, title: `Message from ${targetNode}`, messages: [], rtLogs: [], nodeHistories: {}, updatedAt: Date.now(), isUnread: false, unreadCount: 0, senderName: targetNode }
+      sess = { id: targetSessionId, title: `Message from ${targetNode}`, messages: [], nodeHistories: {}, updatedAt: Date.now(), isUnread: false, unreadCount: 0, senderName: targetNode }
       agentSessions.unshift(sess)
     }
     if (!sess.senderName) sess.senderName = targetNode
@@ -313,7 +311,6 @@ export function useChat() {
           id: sessionId,
           title: `Message from ${senderName}`,
           messages: [],
-          rtLogs: [],
           nodeHistories: {},
           updatedAt: Date.now(),
           isUnread: false,
@@ -351,7 +348,7 @@ export function useChat() {
     if (targetSessionId && targetNode) {
       let sess = sessions.value.find(s => s.id === targetSessionId)
       if (!sess) {
-        sess = { id: targetSessionId, title: `Message from ${targetNode}`, messages: [], rtLogs: [], nodeHistories: {}, updatedAt: Date.now(), isUnread: false, unreadCount: 0, senderName: targetNode }
+        sess = { id: targetSessionId, title: `Message from ${targetNode}`, messages: [], nodeHistories: {}, updatedAt: Date.now(), isUnread: false, unreadCount: 0, senderName: targetNode }
         sessions.value.unshift(sess)
       }
       if (!sess.senderName) sess.senderName = targetNode
@@ -408,30 +405,10 @@ export function useChat() {
         // 添加到聊天会话
         addMessageToAgentSession(agentId, sessionId, 'agent', content, agent.name)
 
-        // rtLog
-        const rtLogSenderName = senderDid
-          ? `${senderDid.split(':').pop()} → User`
-          : agent.name
-        const safeText = content.slice(0, 50).replace(/\n/g, ' ')
-
         if (agentId === activeAgentId) {
-          let sess = sessions.value.find(s => s.id === sessionId)
-          if (!sess) {
-            sess = { id: sessionId, title: `Message from ${agent.name}`, messages: [], rtLogs: [], nodeHistories: {}, updatedAt: Date.now(), isUnread: false, unreadCount: 0, senderName: agent.name }
-            sessions.value.unshift(sess)
-          }
-          if (!sess.rtLogs) sess.rtLogs = []
-          sess.rtLogs.push({ senderName: rtLogSenderName, text: safeText })
           saveSessions()
         } else {
           const agentSessions = getSessionsForAgent(agentId)
-          let sess = agentSessions.find(s => s.id === sessionId)
-          if (!sess) {
-            sess = { id: sessionId, title: `Message from ${agent.name}`, messages: [], rtLogs: [], nodeHistories: {}, updatedAt: Date.now(), isUnread: false, unreadCount: 0, senderName: agent.name }
-            agentSessions.unshift(sess)
-          }
-          if (!sess.rtLogs) sess.rtLogs = []
-          sess.rtLogs.push({ senderName: rtLogSenderName, text: safeText })
           saveSessionsForAgent(agentId, agentSessions)
         }
 

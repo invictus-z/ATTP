@@ -12,6 +12,8 @@ export interface TraceNodeEntry {
 }
 
 export interface UserAttpConfig {
+  /** 初始化模式："demo" | "free" | null（未初始化） */
+  mode?: 'demo' | 'free' | null;
   did: string;
   didDocPath: string;
   didKeyPath: string;
@@ -28,10 +30,31 @@ interface IpcFileResult {
   error?: string;
 }
 
-interface IpcUserConfigResult {
+/** LLM 配置（持久于 app-state.llm，两模式共用） */
+export interface LlmConfig {
+  apiKey: string;
+  baseUrl: string;
+  model: string;
+}
+
+/** read-app-state 返回：mode + llm + 按模式分流的 userConfig */
+interface IpcAppStateResult {
   ok: boolean;
-  data?: UserAttpConfig;
+  mode?: 'demo' | 'free' | null;
+  llm?: LlmConfig;
+  userConfig?: UserAttpConfig | null;
+  needsInit?: boolean;
+  data?: any;
   error?: string;
+}
+
+/** 通用 IPC 结果（set-app-mode / save-llm / docker-compose / load-images-tarball） */
+interface IpcAnyResult {
+  ok: boolean;
+  needsInit?: boolean;
+  data?: any;
+  error?: string;
+  code?: number;
 }
 
 declare global {
@@ -48,9 +71,15 @@ declare global {
       onWsClose: (cb: (data: WsCloseEvent) => void) => void;
       onWsError: (cb: (data: WsErrorEvent) => void) => void;
       readFile: (filepath: string) => Promise<IpcFileResult>;
-      readUserConfig: () => Promise<IpcUserConfigResult>;
       saveUserConfig: (config: UserAttpConfig) => Promise<IpcFileResult>;
       getHomeDir: () => Promise<string>;
+      // 应用运行态 / 模式切换 / LLM / 后端编排
+      readAppState: () => Promise<IpcAppStateResult>;
+      setAppMode: (mode: 'demo' | 'free') => Promise<IpcAppStateResult>;
+      saveLlm: (llm: LlmConfig) => Promise<IpcAnyResult>;
+      dockerCompose: (action: 'pull' | 'up' | 'down' | 'logs', env?: Record<string, string>) => Promise<IpcAnyResult>;
+      loadImagesTarball: () => Promise<IpcAnyResult>;
+      onDockerComposeOutput: (cb: (data: string) => void) => () => void;
     };
   }
 }

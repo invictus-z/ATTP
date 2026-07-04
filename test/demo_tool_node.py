@@ -32,10 +32,12 @@ from attp.sdk.tools import ATTPToolNode
 
 # ── 固定配置 ──────────────────────────────────────────────────────────
 
-DID = "did:wba:did-server.test:demo-tool:e1_T_6Vqfl0tgFr0SDndYUTwucnrvxsOM_RDRMkU-oi_Ec"
-NAME = "demo-tool"
+DID = "did:wba:attp-diting.cn:test:tool:add:e1_PqnyqzB9PTK4SvW3HHyxm-6xYMTexMo1rABMgGpfc1Y"
+NAME = "diting-tool"
 HOST = "0.0.0.0"
 PORT = 9999
+# 与 examples/.attp/tool/did/ 下生成的密钥对齐（容器内即 ~/.attp/tool/did/）。
+PRIVATE_KEY_PATH = "~/.attp/tool/did/key-1_private.pem"
 
 
 async def main():
@@ -44,6 +46,7 @@ async def main():
         name=NAME,
         host=HOST,
         port=PORT,
+        private_key_path=PRIVATE_KEY_PATH,
     )
 
     @node.tool(

@@ -60,7 +60,7 @@ const toastIcon = computed(() => {
           <h2 class="text-xl font-semibold text-gray-900 tracking-tight">Settings</h2>
           <span :class="statusBadgeClass">{{ statusLabel }}</span>
         </div>
-        <p class="text-sm text-gray-500">管理 ATTP 网络配置，包括 DID 身份、客户端连接、服务器设置及其他服务配置。</p>
+        <p class="text-sm text-gray-500">管理 当前智能体 配置，包括 DID 身份、端口设置及其他服务配置。</p>
       </div>
     </header>
 

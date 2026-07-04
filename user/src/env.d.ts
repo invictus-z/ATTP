@@ -7,6 +7,8 @@ declare module '*.vue' {
 }
 
 declare global {
+  // 构建期由 vite define 注入（见 vite.config.ts），等于 package.json 的 version
+  const __APP_VERSION__: string;
   interface Window {
     electronAPI: {
       platform: string;

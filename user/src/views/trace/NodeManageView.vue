@@ -10,11 +10,13 @@ import {
 } from 'lucide-vue-next'
 import { useProtocolNodes } from '../../composables/useProtocolNodes'
 import { useToast } from '../../composables/useToast'
+import { useAttpProtocol } from '../../composables/useAttpProtocol'
 
 const {
   traceNodes, loadNodes, checkAllNodes, addNode, updateNode, removeNode, testConnection,
 } = useProtocolNodes()
 const { showToast, toastVisible, toastMessage, toastType } = useToast()
+const { isDemoMode } = useAttpProtocol()
 
 const showAddModal = ref(false)
 const showEditModal = ref(false)
@@ -25,6 +27,7 @@ const editNodeUrl = ref('')
 const editingNodeId = ref<string | null>(null)
 
 const doAdd = async () => {
+  if (isDemoMode.value) return  // 演示模式只读
   const ok = await addNode(newNodeName.value, newNodeUrl.value)
   if (ok) {
     showToast(`协议节点「${newNodeName.value.trim()}」已添加`)
@@ -37,6 +40,7 @@ const doAdd = async () => {
 }
 
 const openEdit = (id: string, name: string, url: string) => {
+  if (isDemoMode.value) return  // 演示模式只读
   editingNodeId.value = id
   editNodeName.value = name
   editNodeUrl.value = url
@@ -56,6 +60,7 @@ const doEdit = async () => {
 }
 
 const doRemove = async (id: string, name: string) => {
+  if (isDemoMode.value) return  // 演示模式只读
   const ok = await removeNode(id)
   if (ok) showToast(`协议节点「${name}」已移除`)
 }
@@ -84,7 +89,7 @@ onMounted(() => {
           <h2 class="text-xl font-semibold text-gray-900 tracking-tight">协议节点管理</h2>
           <span class="px-2 py-0.5 rounded-full text-[10px] font-medium text-gray-500 bg-gray-100 border border-gray-200">{{ traceNodes.length }} 节点</span>
         </div>
-        <p class="text-sm text-gray-500">添加 · 编辑 · 删除 · 在线检测溯源（协议）节点</p>
+        <p class="text-sm text-gray-500">添加 / 编辑 / 删除 / 在线检测协议节点</p>
       </div>
     </header>
 
@@ -95,7 +100,7 @@ onMounted(() => {
           <button @click="checkAllNodes" class="px-3.5 py-2 text-[13px] font-medium text-gray-600 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 hover:border-gray-300 transition-colors flex items-center gap-1.5">
             <Activity class="w-4 h-4" /> 检测全部
           </button>
-          <button @click="showAddModal = true" class="px-4 py-2 text-[13px] font-medium text-white bg-gray-900 rounded-xl hover:bg-gray-800 transition-colors flex items-center gap-1.5">
+          <button @click="!isDemoMode && (showAddModal = true)" :disabled="isDemoMode" class="px-4 py-2 text-[13px] font-medium text-white bg-gray-900 rounded-xl hover:bg-gray-800 transition-colors flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed">
             <Plus class="w-4 h-4" /> 添加节点
           </button>
         </div>
@@ -131,10 +136,10 @@ onMounted(() => {
               <button @click="doTest(node.name, node)" class="px-2.5 py-1.5 text-[12px] text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors flex items-center gap-1">
                 <ExternalLink class="w-3.5 h-3.5" /> 测试
               </button>
-              <button @click="openEdit(node.id, node.name, node.url)" class="px-2.5 py-1.5 text-[12px] text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors flex items-center gap-1">
+              <button @click="openEdit(node.id, node.name, node.url)" :disabled="isDemoMode" class="px-2.5 py-1.5 text-[12px] text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors flex items-center gap-1 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent">
                 <Pencil class="w-3.5 h-3.5" /> 编辑
               </button>
-              <button @click="doRemove(node.id, node.name)" class="px-2.5 py-1.5 text-[12px] text-gray-500 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors flex items-center gap-1">
+              <button @click="doRemove(node.id, node.name)" :disabled="isDemoMode" class="px-2.5 py-1.5 text-[12px] text-gray-500 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors flex items-center gap-1 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent">
                 <Trash2 class="w-3.5 h-3.5" /> 删除
               </button>
             </div>

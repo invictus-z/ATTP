@@ -16,8 +16,22 @@ from pathlib import Path
 from anp.authentication import create_did_wba_document
 
 
-def generate_did(hostname: str, name: str, node_type: str, output_dir: Path) -> None:
-    """为单个 Agent 生成 DID 文档和密钥文件。"""
+def generate_did(
+    hostname: str,
+    name: str,
+    node_type: str,
+    output_dir: Path,
+    path_segments: list[str] | None = None,
+) -> None:
+    """为单个 Agent 生成 DID 文档和密钥文件。
+
+    Args:
+        hostname: DID 服务器主机名。
+        name: 输出目录 slug（文件系统安全，仅用于目录名）。
+        node_type: 节点身份角色。
+        output_dir: 输出根目录。
+        path_segments: DID 路径段列表；为 None 时回退到 ``[name]``。
+    """
     attp_service = {
         "id": "#node-type",
         "type": "ATTPNodeType",
@@ -25,7 +39,7 @@ def generate_did(hostname: str, name: str, node_type: str, output_dir: Path) -> 
     }
     did_document, keys = create_did_wba_document(
         hostname=hostname,
-        path_segments=[name],
+        path_segments=path_segments if path_segments is not None else [name],
         services=[attp_service],
     )
 
@@ -45,6 +59,10 @@ def generate_did(hostname: str, name: str, node_type: str, output_dir: Path) -> 
 
 
 def main() -> None:
+    # Windows 默认控制台编码（GBK）无法打印 ✓ 等 Unicode 字符，统一重配为 UTF-8。
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+
     parser = argparse.ArgumentParser(
         description="为 ATTP Agent 批量生成 DID 文档与密钥对",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -57,6 +75,9 @@ def main() -> None:
 示例：
   python scripts/did_creator.py --hostname did-server.test --names userA userB --type agent
   python scripts/did_creator.py --hostname did-server.test --names my-agent --output-dir ~/.attp/agent/nanobot/did
+  # DID 路径与目录名解耦：目录为 did/，DID = did:wba:attp-diting.cn:test:tool:add
+  python scripts/did_creator.py --hostname attp-diting.cn --type tool --names did \
+      --path-segments test tool add --output-dir examples/.attp/tool
 """,
     )
     parser.add_argument(
@@ -77,6 +98,15 @@ def main() -> None:
         help="输出根目录（默认: ./did_output）",
     )
     parser.add_argument(
+        "--path-segments",
+        dest="path_segments",
+        nargs="+",
+        metavar="SEGMENT",
+        default=None,
+        help="DID 路径段列表（如 `test tool add`）；未提供则回退到 --names 的值。"
+        "用于把 DID 路径与目录名解耦（避免 Windows 下路径含 `:`）。",
+    )
+    parser.add_argument(
         "--type",
         dest="node_type",
         choices=["agent", "tool", "user"],
@@ -90,7 +120,7 @@ def main() -> None:
     print(f"生成 DID 文档至: {output_dir}\n")
 
     for name in args.names:
-        generate_did(args.hostname, name, args.node_type, output_dir)
+        generate_did(args.hostname, name, args.node_type, output_dir, args.path_segments)
 
     print(f"\n共生成 {len(args.names)} 个 Agent 的 DID 文档与密钥。")
 

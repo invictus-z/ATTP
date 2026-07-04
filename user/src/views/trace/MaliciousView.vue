@@ -140,7 +140,7 @@ onMounted(() => {
     <header class="bg-white border-b border-gray-100 shrink-0 px-8 py-6 shadow-[0_4px_20px_-15px_rgba(0,0,0,0.05)] z-10">
       <div class="max-w-5xl mx-auto">
         <h2 class="text-xl font-semibold text-gray-900 tracking-tight mb-1.5">恶意报告</h2>
-        <p class="text-sm text-gray-500">恶意节点档案 · 来源筛选 · 违规明细追踪</p>
+        <p class="text-sm text-gray-500">查询已被记录的恶意节点和违规明细</p>
       </div>
     </header>
 
