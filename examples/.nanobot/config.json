@@ -16,5 +16,13 @@
             "enabled": true,
             "config_path": "~/.attp/agent/nanobot/config.json"
         }
+    },
+    "tools": {
+        "mcpServers": {
+            "attp": {
+                "type": "sse",
+                "url": "http://127.0.0.1:8002/sse"
+            }
+        }
     }
 }
