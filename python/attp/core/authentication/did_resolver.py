@@ -213,14 +213,29 @@ def _find_verification_method(
     return None
 
 
-def _did_base_id(did: str) -> str:
-    """返回 DID 的基础标识（去除末尾的 key identifier）。
+# did:wba key identifier 前缀（anp SDK profile：e1=Ed25519、k1=secp256k1；
+# plain_legacy profile 无 key id，末段即普通路径）。本模块不依赖 anp，故硬编码。
+_KEY_ID_PREFIXES = ("e1_", "k1_")
 
-    did:wba:host:p1:p2:key_id → did:wba:host:p1:p2
-    did:wba:host:key_id       → did:wba:host
+
+def _drop_trailing_key_id(parts: list[str]) -> list[str]:
+    """剥离末尾连续的 did:wba key identifier 段（e1_/k1_ 前缀）；无则原样返回。"""
+    result = list(parts)
+    while result and result[-1].startswith(_KEY_ID_PREFIXES):
+        result.pop()
+    return result
+
+
+def _did_base_id(did: str) -> str:
+    """返回 DID 的基础标识（去除末尾的 key identifier，若存在）。
+
+    key identifier 以 e1_/k1_ 前缀识别（anp did:wba profile）；末段无此前缀时
+    视为普通路径段，原样保留。
+    - did:wba:host:p1:p2:e1_key → did:wba:host:p1:p2
+    - did:wba:host:p1:p2        → did:wba:host:p1:p2（无 key id）
     """
     parts = did.split(":")
-    return ":".join(parts[:-1])
+    return ":".join(_drop_trailing_key_id(parts))
 
 
 def build_did_resolution_url(
@@ -228,10 +243,11 @@ def build_did_resolution_url(
 ) -> str:
     """构建 DID 文档的 HTTPS 解析 URL。
 
-    DID 格式: did:wba:<domain>[:<path>...]:<key_identifier>
-    末段为 key identifier，不参与 URL 路径构建；中间各段拼为路径。
-    - did:wba:host:p1:p2:key → https://host/p1/p2/did.json
-    - did:wba:host:key       → https://host/.well-known/did.json
+    DID 格式: did:wba:<domain>[:<path>...][:<key_identifier>]
+    key identifier 可选，按 e1_/k1_ 前缀识别并剥离；其余段 unquote 后拼为路径。
+    - did:wba:host:p1:p2:e1_key → https://host/p1/p2/did.json
+    - did:wba:host:p1:p2        → https://host/p1/p2/did.json（无 key id）
+    - did:wba:host:e1_key       → https://host/.well-known/did.json
     """
     parts = did.split(":")
     if len(parts) < 3 or parts[0] != "did":
@@ -242,12 +258,11 @@ def build_did_resolution_url(
         raise ValueError(f"Unsupported DID method: {method}")
 
     domain = urllib.parse.unquote(parts[2])
-    path_segments = parts[3:-1]  # 第4段起到倒数第2段为路径，末段为 key identifier
+    raw_segments = _drop_trailing_key_id(parts[3:])
+    path_segments = [urllib.parse.unquote(seg) for seg in raw_segments]
     base_url = (base_url_override or f"https://{domain}").rstrip("/")
     if path_segments:
-        encoded_path = "/".join(
-            urllib.parse.unquote(seg) for seg in path_segments
-        )
+        encoded_path = "/".join(path_segments)
         return f"{base_url}/{encoded_path}/did.json"
     return f"{base_url}/.well-known/did.json"
 

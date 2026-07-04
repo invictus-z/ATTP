@@ -29,6 +29,40 @@ if TYPE_CHECKING:
 from attp.app.logging import set_log_level
 set_log_level("DEBUG")
 
+# ---------------------------------------------------------------------------
+# 启动竞态补丁：为 nanobot AgentLoop._connect_mcp 注入重试（不改 nanobot 源码文件）
+# ---------------------------------------------------------------------------
+# 背景：nanobot gateway 里 `agent.run()`（首行即 _connect_mcp，只连一次）与
+# `channels.start_all()`（起 MCPToolBridge → uvicorn 绑 8002）经 asyncio.gather 并发启动。
+# 桥绑定晚几毫秒 → MCP SSE 连接被拒；而 ATTP 总线消息只走 run() 的 bus，不触发 _connect_mcp
+# 重试（重试仅在 process_message 直发路径，loop.py:1338）→ 工具永久不可用。
+# 本模块在 ChannelManager 构造期（先于 gather）被 import，此处 reassign 类方法加轮询重试。
+# 原方法失败时 _mcp_connected 保持 False、_mcp_connecting 由 finally 复位，故重复调用即重试；
+# 一旦任一 MCP 连上，_mcp_connected=True 即停。
+try:
+    from nanobot.agent.loop import AgentLoop as _AgentLoop
+
+    _orig_connect_mcp = _AgentLoop._connect_mcp
+
+    async def _connect_mcp_with_retry(self):  # type: ignore[no-redef]
+        if not getattr(self, "_mcp_servers", None):
+            return  # 无 MCP 配置，等价原行为
+        for _ in range(50):  # 最多约 5s，足够等桥绑定
+            await _orig_connect_mcp(self)
+            if getattr(self, "_mcp_connected", False):
+                return
+            await asyncio.sleep(0.1)
+        logger.warning("ATTP: MCP 连接重试耗尽，MCP 工具将不可用（桥未就绪？）")
+
+    if _connect_mcp_with_retry.__name__ != getattr(
+        _AgentLoop._connect_mcp, "__name__", ""
+    ):
+        _AgentLoop._connect_mcp = _connect_mcp_with_retry
+        logger.debug("ATTP: 已注入 AgentLoop._connect_mcp 重试（消除 MCP 启动竞态）")
+except Exception as _patch_err:  # noqa: BLE001
+    logger.debug("ATTP: 跳过 _connect_mcp 重试补丁：{}", _patch_err)
+
+
 class ATTPConfig(Base):
     """ATTP channel configuration."""
     enabled: bool = False
@@ -165,6 +199,8 @@ class ATTPChannel(BaseChannel):
 
         所有 A2U NodeMessage 构建和回传逻辑由 WebApp.send_message_to_user 内部处理。
         """
+        if not msg.content or not msg.content.strip(): # 去除无效信息
+            return
         await self._web_app.send_message_to_user(msg.content, msg.chat_id)
 
     async def _receive(self, sender: str, chat_id: str, content: str, media: list[str]) -> str:

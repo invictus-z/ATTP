@@ -2,7 +2,7 @@
 
 本目录提供一套**开箱即用的预置演示身份与配置**，目录结构完全贴合运行时的 `~/.attp/`、`~/.nanobot/`，可直接复制到用户主目录使用，也可由 Docker 镜像在构建时 COPY 进容器对应位置。
 
-> ⚠️ **安全提示**：`did/` 下的私钥（`*_private.pem`）是**演示用共享身份**，全网公开、任何人可见，仅供「演示模式」快速体验，**切勿用于生产**。用户端在演示模式下会在标题处标注红色「演示版」徽标以示区分。
+> ⚠️ **安全提示**：`did/` 下的私钥（`*_private.pem`）是**演示用共享身份**，全网公开、任何人可见，仅供「演示模式」快速体验，**切勿用于生产**。用户端在演示模式下会在标题处标注红色「演示模式」徽标以示区分。
 
 ## 目录结构
 
@@ -65,9 +65,9 @@ cp -r examples/.nanobot  ~/
 ```
 
 ### Docker
-各 `Dockerfile` 在构建时 `COPY examples/.attp/<node>/ /root/.attp/<node>/`（及 `examples/.nanobot/ /root/.nanobot/`），agent 容器启动前 `envsubst` 把 `.env` 里的 `LLM_*` 注入 nanobot 配置。详见仓库根 `docker-compose.yml`。
+各 `Dockerfile` 在构建时 `COPY examples/.attp/<node>/ /root/.attp/<node>/`（及 `examples/.nanobot/ /root/.nanobot/`）。`agent` 与 `protocol` 两容器的配置含 `${LLM_*}` 占位，由各自 entrypoint 在启动前 `envsubst` 渲染（agent→nanobot 配置；protocol→`analysis` 配置，驱动意图追踪）。`LLM_*` 经 docker-compose `environment` 注入，来源优先级：用户端「后端服务」面板填的 key（spawn env）> 仓库根 `.env`（dev 回落）。详见仓库根 `docker-compose.yml` 与 `RELEASE.md`。
 
-**镜像分发**：镜像**不打包进客户端**，统一以离线 tarball 形式放 **GitHub Release**。`docker/save-images.sh`（或 `.ps1`）负责 `docker compose build` 后 `docker save` 出 `attp-images-<ver>.tar[.gz]`；评委 `docker load -i <tarball>` 后镜像以 `ghcr.io/invictus-z/attp-*:latest` tag 进本地，`docker compose up` 直接命中本地、无需联网。用户端「后端服务」面板的「导入离线镜像」按钮可一键完成 load。完整发布流程见仓库根 `RELEASE.md`。
+**镜像分发**：镜像**不打包进客户端**，统一以离线 tarball 形式放 **GitHub Release**。`docker/save-images.sh`（或 `.ps1`）负责 `docker compose build` 后 `docker save` 出 `attp-images-<ver>.tar[.gz]`；评委 `docker load -i <tarball>` 后镜像以 `attp-*:latest` tag 进本地，`docker compose up` 直接命中本地、无需联网。用户端「后端服务」面板的「导入离线镜像」按钮可一键完成 load。完整发布流程见仓库根 `RELEASE.md`。
 
 
 ## 重新生成身份

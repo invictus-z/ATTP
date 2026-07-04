@@ -8,10 +8,10 @@
         "dbPath": "attp.db"
     },
     "analysis": {
-        "enabled": false,
-        "apiKey": "",
-        "baseUrl": "https://api.openai.com/v1",
-        "model": "gpt-4o",
+        "enabled": true,
+        "apiKey": "${LLM_API_KEY}",
+        "baseUrl": "${LLM_BASE_URL}",
+        "model": "${LLM_MODEL}",
         "reportBatchSize": 10,
         "horizontalEnabled": true,
         "horizontalThreshold": 5
