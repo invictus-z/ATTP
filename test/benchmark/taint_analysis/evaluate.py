@@ -14,11 +14,11 @@
 运行:
   cd e:/work/ATTP
   # 干跑自测（验证评测逻辑）
-  python test/benchmark/evaluate.py --mode dry
+  python test/benchmark/taint_analysis/evaluate.py --mode dry
   # 真实 LLM 评测（全部50个，并发）
-  python test/benchmark/evaluate.py --mode llm
+  python test/benchmark/taint_analysis/evaluate.py --mode llm
   # 只测部分场景
-  python test/benchmark/evaluate.py --mode llm --scenarios v01,h01,c08,b04
+  python test/benchmark/taint_analysis/evaluate.py --mode llm --scenarios v01,h01,c08,b04
 """
 
 from __future__ import annotations
@@ -33,13 +33,14 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-sys.path.insert(0, str(PROJECT_ROOT / "python"))
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-
 HERE = Path(__file__).resolve().parent
-SCENARIOS_DIR = HERE / "scenarios"
-RESULTS_DIR = HERE / "results"
+BENCH_ROOT = HERE.parent                       # test/benchmark
+PROJECT_ROOT = BENCH_ROOT.parent.parent        # 仓库根（上溯 test → ATTP）
+sys.path.insert(0, str(PROJECT_ROOT / "python"))
+sys.path.insert(0, str(HERE))
+
+SCENARIOS_DIR = BENCH_ROOT / "data" / "scenarios"
+DEFAULT_RESULTS_ROOT = BENCH_ROOT / "data" / "results"
 CONFIG_PATH = Path.home() / ".attp" / "protocol_node" / "config.json"
 
 from openai import AsyncOpenAI
@@ -58,6 +59,30 @@ BATCH_SIZE = 20
 ACCUM_THRESHOLD = 5
 POLL_INTERVAL = 3.0
 POLL_TIMEOUT = 220.0
+
+
+def infer_provider_dir(model: str) -> str:
+    model_lc = (model or "").lower()
+    if model_lc.startswith("gpt-") or model_lc.startswith("chatgpt"):
+        return "chatgpt"
+    if model_lc.startswith("gemini"):
+        return "gemini"
+    if model_lc.startswith("claude"):
+        return "claude"
+    if model_lc.startswith("glm") or model_lc.startswith("zhipu"):
+        return "deepseek"
+    if model_lc.startswith("deepseek"):
+        return "deepseek"
+    return model_lc.replace("/", "_").replace(" ", "_") or "results"
+
+
+def resolve_results_dir(results_root: Path, model: str | None = None, provider_dir: str | None = None) -> Path:
+    root = Path(results_root)
+    if provider_dir:
+        return root / provider_dir
+    if model:
+        return root / infer_provider_dir(model)
+    return root
 
 
 # ── 数据加载 ─────────────────────────────────────────────────────────────────
@@ -144,18 +169,22 @@ async def poll_horiz(coord, did):
 
 
 async def run_scenario_llm(sid: str, db_path: Path, llm_config: dict, client: AsyncOpenAI,
-                          sem: asyncio.Semaphore | None = None) -> LLMResult:
+                          sem: asyncio.Semaphore | None = None,
+                          results_dir: Path | None = None) -> LLMResult:
+    if results_dir is None:
+        results_dir = DEFAULT_RESULTS_ROOT
     if sem is not None:
         async with sem:
-            return await _run_scenario_llm_impl(sid, db_path, llm_config, client)
-    return await _run_scenario_llm_impl(sid, db_path, llm_config, client)
+            return await _run_scenario_llm_impl(sid, db_path, llm_config, client, results_dir)
+    return await _run_scenario_llm_impl(sid, db_path, llm_config, client, results_dir)
 
 
-async def _run_scenario_llm_impl(sid: str, db_path: Path, llm_config: dict, client: AsyncOpenAI) -> LLMResult:
+async def _run_scenario_llm_impl(sid: str, db_path: Path, llm_config: dict, client: AsyncOpenAI,
+                                 results_dir: Path) -> LLMResult:
     res = LLMResult(sid=sid)
     ideal = load_ideal(db_path)
     meta = ideal["meta"]
-    temp_db = str(RESULTS_DIR / f"{sid}_llm.db")
+    temp_db = str(results_dir / f"{sid}_llm.db")
     if os.path.exists(temp_db):
         os.unlink(temp_db)
     coord = await build_coord(temp_db, llm_config, client)
@@ -291,17 +320,19 @@ def evaluate_one(sid: str, llm_res: LLMResult | None, ideal: dict, mode: str) ->
         # 判定级（session 维度的真值 = 该 session 是否含恶意 DID 行为）
         # 简化：clean 场景 ideal_pos=False；非 clean 场景 ideal_pos=True（至少1个恶意session）
         # 用 ideal 报告的 verdict 作为真值
+        # FP 口径：只计明确恶意判定(malicious)；suspicious 是模糊标签，对干净场景视为谨慎提醒，
+        # 不等同于"误判恶意"，计入 TN（仍算恶意场景的检出 TP）。
         if ideal_pos and llm_pos:
             m.vert_tp += 1
         elif ideal_pos and not llm_pos:
             m.vert_fn += 1
-        elif not ideal_pos and llm_pos:
+        elif not ideal_pos and llm_v == "malicious":
             m.vert_fp += 1
         else:
             m.vert_tn += 1
 
-        # 评分级（仅恶意场景）
-        if mal_dids:
+        # 评分级（仅恶意场景，排除 API error 会话——error 无 score，不应拉低校准指标）
+        if mal_dids and llm_v != "error":
             ideal_score = meta["ideal_vert_score"]
             # dry 模式取理想报告里的分数；llm 模式取 LLM 报告里恶意 DID 的分数
             if mode == "dry":
@@ -313,8 +344,8 @@ def evaluate_one(sid: str, llm_res: LLMResult | None, ideal: dict, mode: str) ->
             if _verdict_dir_match(llm_v, ideal_v):
                 m.direction_match += 1
 
-        # 证据级（仅恶意场景，dry 用理想自测=1.0）
-        if mal_dids and ideal_pos:
+        # 证据级（仅恶意场景，排除 error；dry 用理想自测=1.0）
+        if mal_dids and ideal_pos and llm_v != "error":
             ideal_ev = _evidence_trace_ids(ideal_rpt)
             if ideal_ev:
                 if mode == "dry":
@@ -350,7 +381,7 @@ def evaluate_one(sid: str, llm_res: LLMResult | None, ideal: dict, mode: str) ->
                 m.horiz_tp += 1
             elif ideal_pos and not llm_pos:
                 m.horiz_fn += 1
-            elif not ideal_pos and llm_pos:
+            elif not ideal_pos and llm_hv == "malicious":
                 m.horiz_fp += 1
             else:
                 m.horiz_tn += 1
@@ -490,21 +521,25 @@ def print_report(agg: dict, mode: str, n_scenarios: int, wall_time: float, detai
 
 # ── Main ─────────────────────────────────────────────────────────────────────
 
-def load_llm_config() -> dict:
-    if not CONFIG_PATH.exists():
-        print(f"[ERROR] config not found: {CONFIG_PATH}"); sys.exit(1)
-    with open(CONFIG_PATH, encoding="utf-8") as f:
-        data = json.load(f)
+def load_llm_config(override_model: str = "", override_base_url: str = "", override_api_key: str = "") -> dict:
+    if CONFIG_PATH.exists():
+        with open(CONFIG_PATH, encoding="utf-8") as f:
+            data = json.load(f)
+    else:
+        data = {}
     a = data.get("analysis", {})
-    return {"api_key": a.get("apiKey") or a.get("api_key", ""),
-            "base_url": a.get("baseUrl") or a.get("base_url", "https://api.openai.com/v1"),
-            "model": a.get("model", "gpt-4o")}
+    api_key = override_api_key or os.environ.get("BLTCY_API_KEY") or os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        api_key = a.get("apiKey") or a.get("api_key", "")
+    base_url = override_base_url or os.environ.get("BLTCY_BASE_URL") or a.get("baseUrl") or a.get("base_url", "https://api.openai.com/v1")
+    model = override_model or os.environ.get("ATTP_BENCHMARK_MODEL") or os.environ.get("BLTCY_MODEL") or a.get("model", "gpt-4o")
+    return {"api_key": api_key, "base_url": base_url, "model": model}
 
 
-def load_llm_result_from_db(sid: str) -> LLMResult:
+def load_llm_result_from_db(sid: str, results_dir: Path) -> LLMResult:
     """从已有的 {sid}_llm.db 结果库重建 LLMResult（eval-only 模式用）。"""
     res = LLMResult(sid=sid)
-    db_path = RESULTS_DIR / f"{sid}_llm.db"
+    db_path = results_dir / f"{sid}_llm.db"
     if not db_path.exists():
         res.error = f"result db not found: {db_path}"
         return res
@@ -521,9 +556,11 @@ def load_llm_result_from_db(sid: str) -> LLMResult:
     return res
 
 
-def run_eval_only_mode(scenario_filter: list[str] | None):
+def run_eval_only_mode(scenario_filter: list[str] | None, results_root: Path = DEFAULT_RESULTS_ROOT,
+                       provider_dir: str | None = None, model: str | None = None):
     """复用已生成的 {sid}_llm.db，不调 LLM，仅重算指标（用于 harness 修复后快速重评）。"""
     files = all_scenario_files(scenario_filter)
+    results_dir = resolve_results_dir(results_root, model=model, provider_dir=provider_dir)
     print(f"  Scenarios: {len(files)} (eval-only, reusing existing LLM result DBs)")
     t0 = time.time()
     metrics_by_sid = {}
@@ -531,7 +568,7 @@ def run_eval_only_mode(scenario_filter: list[str] | None):
     n_missing = 0
     for sid, dbp in files:
         ideal = load_ideal(dbp)
-        llm_res = load_llm_result_from_db(sid)
+        llm_res = load_llm_result_from_db(sid, results_dir)
         if llm_res.error:
             n_missing += 1
             print(f"  [skip] {sid}: {llm_res.error}")
@@ -544,28 +581,33 @@ def run_eval_only_mode(scenario_filter: list[str] | None):
     print_report(agg, "eval-only", len(files) - n_missing, wall, details)
     if n_missing:
         print(f"\n  [!] {n_missing} scenario(s) had no result DB — run --mode llm first.")
-    out = RESULTS_DIR / "eval_only_report.json"
-    RESULTS_DIR.mkdir(exist_ok=True)
+    out = results_dir / "eval_only_report.json"
+    results_dir.mkdir(parents=True, exist_ok=True)
     with open(out, "w", encoding="utf-8") as f:
         json.dump({"mode": "eval-only", "n_scenarios": len(files) - n_missing,
                    "metrics": agg, "details": details}, f, ensure_ascii=False, indent=2)
     print(f"  Report saved: {out}")
 
 
-async def run_llm_mode(scenario_filter: list[str] | None, concurrency: int = 8):
-    llm_config = load_llm_config()
+async def run_llm_mode(scenario_filter: list[str] | None, concurrency: int = 8,
+                       llm_config: dict | None = None, results_root: Path = DEFAULT_RESULTS_ROOT,
+                       provider_dir: str | None = None):
+    if llm_config is None:
+        llm_config = load_llm_config()
     if not llm_config["api_key"]:
         print("[ERROR] no API key"); sys.exit(1)
-    RESULTS_DIR.mkdir(exist_ok=True)
+    results_dir = resolve_results_dir(results_root, model=llm_config["model"], provider_dir=provider_dir)
+    results_dir.mkdir(parents=True, exist_ok=True)
     client = AsyncOpenAI(api_key=llm_config["api_key"], base_url=llm_config["base_url"])
     print(f"  LLM: {llm_config['model']} @ {llm_config['base_url']}")
+    print(f"  Results: {results_dir}")
 
     files = all_scenario_files(scenario_filter)
     print(f"  Scenarios: {len(files)} (concurrent, max_parallel={concurrency})")
 
     sem = asyncio.Semaphore(concurrency)
     t0 = time.time()
-    tasks = [run_scenario_llm(sid, dbp, llm_config, client, sem) for sid, dbp in files]
+    tasks = [run_scenario_llm(sid, dbp, llm_config, client, sem, results_dir) for sid, dbp in files]
     results = await asyncio.gather(*tasks)
     wall = time.time() - t0
     print(f"  Wall time: {wall:.1f}s")
@@ -585,16 +627,18 @@ async def run_llm_mode(scenario_filter: list[str] | None, concurrency: int = 8):
     print_report(agg, "llm", len(files), wall, details)
 
     # 保存结果
-    out = RESULTS_DIR / "llm_eval_report.json"
+    out = results_dir / "llm_eval_report.json"
     with open(out, "w", encoding="utf-8") as f:
         json.dump({"mode": "llm", "n_scenarios": len(files), "wall_time": wall,
                    "metrics": agg, "details": details}, f, ensure_ascii=False, indent=2)
     print(f"\n  Report saved: {out}")
 
 
-def run_dry_mode(scenario_filter: list[str] | None):
+def run_dry_mode(scenario_filter: list[str] | None, results_root: Path = DEFAULT_RESULTS_ROOT,
+                 provider_dir: str | None = None, model: str | None = None):
     """干跑：用理想数据自测评测逻辑。期望全部指标完美（1.0 / MAE=0）。"""
     files = all_scenario_files(scenario_filter)
+    results_dir = resolve_results_dir(results_root, model=model, provider_dir=provider_dir)
     print(f"  Scenarios: {len(files)} (dry-run self-check)")
     t0 = time.time()
     metrics_by_sid = {}
@@ -610,8 +654,8 @@ def run_dry_mode(scenario_filter: list[str] | None):
     print("\n  注: dry-run 用理想数据自测，期望 Precision/Recall/F1=1.0, MAE=0, Hit=1.0。")
     print("      若不为 1.0，说明评测逻辑或标注有 bug。")
 
-    out = RESULTS_DIR / "dry_eval_report.json"
-    RESULTS_DIR.mkdir(exist_ok=True)
+    out = results_dir / "dry_eval_report.json"
+    results_dir.mkdir(parents=True, exist_ok=True)
     with open(out, "w", encoding="utf-8") as f:
         json.dump({"mode": "dry", "n_scenarios": len(files),
                    "metrics": agg, "details": details}, f, ensure_ascii=False, indent=2)
@@ -626,6 +670,13 @@ def main():
                     help="逗号分隔的 sid 列表，如 v01,h01,c08；空=全部")
     ap.add_argument("--concurrency", type=int, default=8,
                     help="LLM 模式最大并发场景数（防限流）")
+    ap.add_argument("--api-key", default="", help="覆盖 LLM API key（建议通过环境变量设置）")
+    ap.add_argument("--base-url", default="", help="覆盖 LLM base_url")
+    ap.add_argument("--model", default="", help="覆盖 LLM model")
+    ap.add_argument("--results-root", default=str(DEFAULT_RESULTS_ROOT),
+                    help="结果根目录，默认写入 test/benchmark/results")
+    ap.add_argument("--provider-dir", default="",
+                    help="结果子目录名；留空时按模型自动映射为 deepseek/chatgpt/gemini/claude")
     args = ap.parse_args()
 
     print("=" * 80)
@@ -633,12 +684,16 @@ def main():
     print("=" * 80)
 
     sf = [s.strip() for s in args.scenarios.split(",") if s.strip()] or None
+    results_root = Path(args.results_root)
+    provider_dir = args.provider_dir or None
     if args.mode == "dry":
-        run_dry_mode(sf)
+        run_dry_mode(sf, results_root=results_root, provider_dir=provider_dir, model=args.model or None)
     elif args.mode == "eval-only":
-        run_eval_only_mode(sf)
+        run_eval_only_mode(sf, results_root=results_root, provider_dir=provider_dir, model=args.model or None)
     else:
-        asyncio.run(run_llm_mode(sf, concurrency=args.concurrency))
+        llm_config = load_llm_config(args.model, args.base_url, args.api_key)
+        asyncio.run(run_llm_mode(sf, concurrency=args.concurrency, llm_config=llm_config,
+                                 results_root=results_root, provider_dir=provider_dir))
 
 
 if __name__ == "__main__":

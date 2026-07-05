@@ -337,7 +337,7 @@ class MaliciousNodeDetector:
             return _build_report(
                 malicious_dids=list(trusted_list),
                 evidence_type=EvidenceType.TRUSTED_LIST_VIOLATION,
-                description=f"单回传DID({node_did})与最新名单({latest_trusted})不一致，"
+                description=f"单回传DID({node_did})与最新名单({session.get_latest_trusted_did()})不一致，"
                             f"可信名单中的节点为恶意，一起通报: {trusted_list}",
                 session_id=session_id,
                 nonce=nonce,

@@ -378,6 +378,9 @@ did:wba:<domain>:<path>[:<key_identifier>]
 | ✗ | ✓ | ✗ | 当前节点篡改 pre_content |
 | ✗ | ✓ | ✓ | 上一节点栽赃下一节点 |
 | ✓ | ✓ | ✗ | 上一节点签名和内容不匹配 |
+| ✓ | ✗ | * | **发送方双签/栽赃**：prev 副本签名在发送方公钥下有效却与 stored 不同，仅发送方私钥持有者可做到 ⇒ 发送方恶意 |
+
+> 注：`Step 1=✓ ∧ Step 2=✗`（发送方双签）情形已由 `malicious_detector.evaluate_dual_back_prop` 的 **Step 4b** 在进入本函数前归因为发送方并写入恶意报告，正常 Branch B 流程不会进入本表的最后一行；此处保留为防御性诊断。
 
 ---
 

@@ -1,6 +1,6 @@
 """生成全部 50 个场景数据库。
 
-运行: cd e:/work/ATTP && python test/benchmark/generate_all.py
+运行: cd e:/work/ATTP && python test/benchmark/taint_analysis/generate_all.py
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ sys.path.insert(0, str(HERE))
 from benchmark_lib import ScenarioDB
 from registry import ALL_SCENARIOS, VERTICAL, HORIZONTAL, CLEAN, BOUNDARY
 
-SCENARIOS_DIR = HERE / "scenarios"
+SCENARIOS_DIR = HERE.parent / "data" / "scenarios"
 
 # Windows 非法文件名字符
 _ILLEGAL = re.compile(r'[<>:"/\\|?*]')

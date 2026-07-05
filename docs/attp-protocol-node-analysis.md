@@ -245,10 +245,10 @@ ProtocolPort._mount_routes()
   │
   ├── /api/analysis              → vertical analysis router (api/analysis/vertical.py)
   │     ├── GET  /api/analysis/{session_id}   — 纵向分析报告
-  │     ├── GET  /api/analysis/intent/{session_id}   — 意图状态
+  │     ├── GET  /api/analysis/v/state/{session_id}      — 意图与累计状态
   │     ├── GET  /api/analysis/aggregate/{session_id} — 聚合查询（traces+reports+alerts）
   │     ├── POST /api/analysis/trigger/{session_id}  — 手动触发纵向分析
-  │     └── GET  /api/analysis/status/{session_id}   — 纵向分析任务状态
+  │     └── GET  /api/analysis/v/llm-status/{session_id}  — 纵向LLM分析任务状态
   │
   ├── /api/horizontal            → horizontal analysis router (api/analysis/horizontal.py)
   │     ├── GET  /api/horizontal/report/{did}         — DID 横向分析报告
@@ -472,7 +472,7 @@ class MaliciousNodeReport:
 
 #### 3.3.3 双回传判定决策树（evaluate_dual_back_prop）
 
-当同一 nonce 收到两条 BackMessage 时触发双回传判定。完整的 5 步决策树：
+当同一 nonce 收到两条 BackMessage 时触发双回传判定。完整的决策树（Step 0a → 4b）：
 
 ```
 evaluate_dual_back_prop(stored_msg, back_msg_2, session)
@@ -537,9 +537,20 @@ evaluate_dual_back_prop(stored_msg, back_msg_2, session)
   ║  Step 4: 回传2 内容签名交叉验证                                     ║
   ║  用回传1发送者的公钥验证回传2的内容签名                              ║
   ║                                                                    ║
-  ║  → 交叉验证成功: return None（无恶意，双回传验证通过）               ║
   ║  → 交叉验证失败: INDISTINGUISHABLE_PAIR                           ║
   ║    无法区分是发送方伪造还是接收方篡改，两节点一起通报                  ║
+  ║  → 交叉验证成功: 进入 Step 4b                                       ║
+  ╚════════════════════════════════════════════════════════════════════╝
+  │ 交叉验证成功
+  ▼
+  ╔════════════════════════════════════════════════════════════════════╗
+  ║  Step 4b: 发送方双签（栽赃）检测                                    ║
+  ║  比对两条回传的 sig_content 是否一致                                 ║
+  ║                                                                    ║
+  ║  → 不一致: FRAMING                                                ║
+  ║    两条签名均在发送方公钥下有效却互不相同，仅发送方私钥持有者可做到， ║
+  ║    说明发送方分别向协议节点与接收方各签了一份不同内容 ⇒ 发送方恶意   ║
+  ║  → 一致: return None（无恶意，双回传验证通过）                       ║
   ╚════════════════════════════════════════════════════════════════════╝
 ```
 
@@ -555,11 +566,13 @@ evaluate_single_back_prop(pending_msg, session)
   │    session     = ProtocolSession
   │
   ╔════════════════════════════════════════════════════════════════════╗
-  ║  Case A: 身份签名验证失败                                         ║
+  ║  Case A: 身份签名验证失败 → 直接丢弃                               ║
   ║  pending_msg.identity_verified == False?                          ║
   ║                                                                    ║
-  ║  → 有可信名单: IDENTITY_TAMPERING, 通报可信名单                     ║
-  ║  → 无可信名单: IDENTITY_TAMPERING, 报告发送者                       ║
+  ║  → return None（不通报任何节点）                                   ║
+  ║    无主垃圾消息：既未对特定方注入、也非针对具体节点的栽赃，         ║
+  ║    按威胁模型原则不予追究；同时杜绝恶意节点借单回传对可信名单       ║
+  ║    发起广播栽赃洪流（反例 C1）                                     ║
   ╚════════════════════════════════════════════════════════════════════╝
   │ 通过
   ▼
@@ -792,6 +805,7 @@ class BehaviorController:
       │                             │                       2: DID比对│
       │                             │                       3: 回传1内容自检│
       │                             │                       4: 交叉验证│
+      │                             │                       4b: 发送方双签检测│
       │                             │                            │
       │                             │                  [检测到恶意]│
       │                             │                  → 保存恶意报告│
@@ -1027,10 +1041,10 @@ GET /api/analysis/{session_id}
   }
 ```
 
-#### 4.5.2 意图状态查询
+#### 4.5.2 意图与累计状态查询
 
 ```
-GET /api/analysis/intent/{session_id}
+GET /api/analysis/v/state/{session_id}
 → {
     "session_id": "...",
     "intent": {
@@ -1319,18 +1333,18 @@ main()
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/api/analysis/{session_id}` | 纵向分析报告查询 |
-| GET | `/api/analysis/intent/{session_id}` | 意图状态查询 |
+| GET | `/api/analysis/v/state/{session_id}` | 意图与累计状态查询 |
 | GET | `/api/analysis/aggregate/{session_id}` | 聚合查询（traces + reports + alerts） |
 | POST | `/api/analysis/trigger/{session_id}` | 手动触发纵向分析 |
-| GET | `/api/analysis/status/{session_id}` | 纵向分析任务状态 |
+| GET | `/api/analysis/v/llm-status/{session_id}` | 纵向LLM分析任务状态 |
 
 ### 8.4 横向分析
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/api/horizontal/report/{did}` | DID 横向分析报告 |
-| GET | `/api/horizontal/state/{did}` | DID 横向累积状态 |
-| GET | `/api/horizontal/status/{did}` | 横向分析任务状态 |
+| GET | `/api/analysis/h/state/{did}` | DID 横向累积状态（batch_index 即报告批次/次数） |
+| GET | `/api/analysis/h/llm-status/{did}` | 横向LLM分析任务状态 |
 | POST | `/api/horizontal/trigger/{did}` | 手动触发横向分析 |
 | GET | `/api/horizontal/overview` | 横向分析总览 |
 

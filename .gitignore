@@ -16,3 +16,11 @@ typescript/node_modules/
 docker/release/
 
 .env
+
+
+test/benchmark/data/scenarios/
+test/benchmark/data/results/
+test/benchmark/data/compare_config.local.json
+test/benchmark/data/perf_config.local.json
+.attp_benchmark_config.json
+

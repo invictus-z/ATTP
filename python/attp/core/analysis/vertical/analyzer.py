@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from openai import AsyncOpenAI
@@ -28,6 +29,23 @@ FIELD_TYPE_TO_SENDER_NODE_TYPE: dict[str, str] = {
     "U2A": "user",
     "T2A": "tool",
 }
+
+
+def _loads_json_object(raw_content: str, context: str) -> dict[str, Any]:
+    text = (raw_content or "").strip()
+    if not text:
+        raise ValueError(f"empty LLM response for {context}")
+
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.IGNORECASE | re.DOTALL).strip()
+
+    if not text.startswith("{"):
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            text = text[start : end + 1]
+
+    return json.loads(text)
 
 
 def _derive_node_type(traces: list[dict], did: str) -> str:
@@ -88,9 +106,10 @@ class VerticalTaintAnalyzer:
                 ],
                 temperature=0.1,
                 response_format={"type": "json_object"},
+                timeout=120,
             )
             content = response.choices[0].message.content
-            data = json.loads(content)
+            data = _loads_json_object(content or "", f"intent extraction for {original_task[:80]}")
             return IntentDescriptor(
                 original_task=original_task,
                 core_objective=data.get("core_objective", ""),
@@ -140,9 +159,10 @@ class VerticalTaintAnalyzer:
                 ],
                 temperature=0.1,
                 response_format={"type": "json_object"},
+                timeout=120,
             )
             content = response.choices[0].message.content
-            result = json.loads(content)
+            result = _loads_json_object(content or "", f"vertical analysis for session={session_id}")
 
             verdicts = []
             for v in result.get("node_verdicts", []):
