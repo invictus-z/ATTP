@@ -5,7 +5,6 @@
     GET  /api/analysis/v/state/{session_id}       — 获取意图与累计分析状态
     GET  /api/analysis/v/aggregate/{session_id}   — 聚合视图（traces + reports + alerts）
     POST /api/analysis/v/trigger/{session_id}     — 手动触发纵向分析
-    GET  /api/analysis/v/llm-status/{session_id}  — 查询LLM纵向分析任务状态
 """
 
 import json
@@ -217,13 +216,5 @@ def get_vertical_analysis_router(
         if not _coordinator:
             return {"triggered": False, "reason": "analysis_disabled"}
         return await _coordinator.trigger_analysis_async(session_id)
-
-    @router.get("/llm-status/{session_id}")
-    async def get_analysis_status(session_id: str):
-        """Query async vertical LLM analysis task status and phase."""
-        _coordinator = _coord_ref[0]
-        if not _coordinator:
-            return {"status": "not_found", "session_id": session_id}
-        return _coordinator.get_analysis_status(session_id)
 
     return router

@@ -1,9 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onScopeDispose, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useChat } from './composables/useChat'
 import { useNodes } from './composables/useNodes'
-import { useAttpProtocol } from './composables/useAttpProtocol'
+import { useAttpProtocol, getSessionProtocolUrl, protocolBindingsVersion } from './composables/useAttpProtocol'
+import { useProtocolNodes } from './composables/useProtocolNodes'
+import { useToast } from './composables/useToast'
+import { connectNodeEvents, disconnectNodeEvents, onMaliciousDetected, onRecordError } from './composables/nodeEvents'
 import { getActiveAgent, getAgents, getActiveAgentId, setActiveAgent, onAgentSwitch, removeAgent, addAgent, loadAgents, renameAgent } from './agent_manager'
 import { Bot, Server, X, MessageSquare, ChevronDown, History, Settings, Pencil, Shield, Wrench, User, Search, AlertTriangle, Plus, MoreVertical } from 'lucide-vue-next'
 
@@ -79,6 +82,35 @@ if (typeof window !== 'undefined') {
 
 const { agentNodes, fetchNodes, getNodeIcon } = useNodes()
 const { loadUserConfig } = useAttpProtocol()
+const { selectedNode } = useProtocolNodes()
+const { toastVisible, toastMessage, toastType, showToast, dismissToast, pauseToast, resumeToast } = useToast()
+
+// ── 全局告警常驻 SSE ──
+// 跟随「当前会话绑定的协议节点」（用户在对话页为会话选节点时绑定）；
+// 若无（如纯溯源页），回退到溯源节点选择器（useProtocolNodes）。
+onRecordError((d: any) => {
+  showToast(`回传验证失败 · 会话 ${d?.session_id ?? ''} · ${d?.error_message ?? ''}（来自 ${d?.node_did ?? ''}）`, 'error')
+})
+onMaliciousDetected((d: any) => {
+  showToast(`检出恶意节点：${d?.did ?? ''}`, 'error')
+})
+const activeProtocolUrl = computed(() => {
+  protocolBindingsVersion.value  // 绑定变更时重新求值
+  const sid = currentSessionId.value
+  if (sid) {
+    const u = getSessionProtocolUrl(sid)
+    if (u) return u
+  }
+  return selectedNode.value?.url || ''
+})
+watch(activeProtocolUrl, async (url) => {
+  if (url) {
+    await connectNodeEvents(`${url.replace(/\/+$/, '')}/api/events?topics=record,malicious`)
+  } else {
+    await disconnectNodeEvents()
+  }
+}, { immediate: true })
+onScopeDispose(() => { void disconnectNodeEvents() })
 
 const activeAgent = computed(() => getActiveAgent())
 const agentList = computed(() => getAgents())
@@ -438,6 +470,24 @@ onAgentSwitch(() => {
           <button @click="addNewAgent" class="px-4 py-2 text-sm bg-brand-600 text-white rounded-lg hover:bg-brand-700 transition-colors">添加</button>
         </div>
       </div>
+    </div>
+
+    <!-- 全局告警 toast（record.error / malicious.detected）— 中间上方、悬停暂停、× 关闭、文字可选 -->
+    <div class="fixed inset-x-0 top-0 z-[200] flex justify-center pt-10 pointer-events-none">
+      <transition name="toast">
+        <div v-if="toastVisible"
+          @mouseenter="pauseToast"
+          @mouseleave="resumeToast"
+          :class="['pointer-events-auto relative max-w-md px-5 py-4 pr-9 rounded-xl shadow-xl border text-sm',
+            toastType === 'error' ? 'bg-red-50 border-red-200 text-red-700' : 'bg-emerald-50 border-emerald-200 text-emerald-700']"
+        >
+          <button @click="dismissToast"
+            class="absolute top-2 right-2 w-5 h-5 flex items-center justify-center rounded hover:bg-black/5 opacity-60 hover:opacity-100 transition-opacity"
+            title="关闭"
+          ><X class="w-3.5 h-3.5" /></button>
+          <span class="select-text break-all">{{ toastMessage }}</span>
+        </div>
+      </transition>
     </div>
 
   </div>

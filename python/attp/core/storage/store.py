@@ -28,6 +28,11 @@ class SqliteStore:
         self._malicious = MaliciousRepository(self._db)
         self._session_state = ProtocolSessionRepository(self._db)
         self._horizontal = HorizontalRepository(self._db)
+        self._event_broker = None
+
+    def set_event_broker(self, broker) -> None:
+        """注入事件总线，用于在写入点发布 trace/malicious 事件。None-safe。"""
+        self._event_broker = broker
 
     @classmethod
     async def create(cls, db_path: str | Path) -> SqliteStore:
@@ -49,11 +54,27 @@ class SqliteStore:
         content: str = "",
         timestamp: float = 0.0,
         extra: dict[str, Any] | None = None,
-    ) -> None:
-        await self._trace.save_behavior_entry(
+    ) -> int:
+        row_id = await self._trace.save_behavior_entry(
             session_id, protocol_node_address, sender_did, target_did,
             hop_count, field_type, content, timestamp, extra,
         )
+        if self._event_broker:
+            await self._event_broker.publish(
+                "trace.recorded",
+                {
+                    "session_id": session_id,
+                    "trace_id": row_id,
+                    "hop_count": hop_count or [0, 0],
+                    "field_type": field_type,
+                    "sender_did": sender_did,
+                    "target_did": target_did,
+                    "content": (content or "")[:500],
+                    "timestamp": timestamp,
+                },
+                topic="trace",
+            )
+        return row_id
 
     async def recover_behavior_trace(
         self,
@@ -100,7 +121,22 @@ class SqliteStore:
         Returns:
             插入行的 id。
         """
-        return await self._malicious.save_malicious_report(report)
+        row_id = await self._malicious.save_malicious_report(report)
+        if self._event_broker:
+            await self._event_broker.publish(
+                "malicious.detected",
+                {
+                    "did": report.get("target_did", ""),
+                    "severity": report.get("severity", "medium"),
+                    "source": report.get("source", ""),
+                    "session_id": report.get("session_id", ""),
+                    "report_id": row_id,
+                    "evidence_type": report.get("evidence_type", ""),
+                    "evidence_description": report.get("evidence_description", ""),
+                },
+                topic="malicious",
+            )
+        return row_id
 
     async def query_malicious_reports(
         self,

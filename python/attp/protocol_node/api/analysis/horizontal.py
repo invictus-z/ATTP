@@ -2,7 +2,6 @@
 
 端点（prefix `/api/analysis/h`）：
     POST /api/analysis/h/trigger/{did}     — 手动触发横向分析
-    GET  /api/analysis/h/llm-status/{did}  — 查询LLM横向分析任务状态
     GET  /api/analysis/h/report/{did}      — 获取DID全部横向分析报告
     GET  /api/analysis/h/state/{did}       — 获取DID横向累积状态（含已生成报告数）
 """
@@ -32,14 +31,6 @@ def get_horizontal_analysis_router(
         if not _coordinator:
             return {"triggered": False, "reason": "analysis_disabled"}
         return await _coordinator.trigger_horizontal_async(did)
-
-    @router.get("/llm-status/{did}")
-    async def get_horizontal_status(did: str):
-        """查询LLM横向分析任务状态。"""
-        _coordinator = _coord_ref[0]
-        if not _coordinator:
-            return {"status": "not_found", "did": did}
-        return _coordinator.get_horizontal_status(did)
 
     @router.get("/report/{did}")
     async def get_horizontal_reports(did: str):

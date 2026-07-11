@@ -67,8 +67,8 @@ class ProtocolTracer:
                                   hop_count: list[int] | None = None,
                                   field_type: str = "", content: str = "",
                                   timestamp: float = 0.0,
-                                  extra: dict | None = None) -> None:
-        await self._storage.save_behavior_entry(
+                                  extra: dict | None = None) -> int:
+        return await self._storage.save_behavior_entry(
             session_id, protocol_node_address, sender_did, target_did,
             hop_count, field_type, content, timestamp, extra,
         )

@@ -40,6 +40,13 @@ const attpSessionManager = new UserSessionManager()
 // 初始化时从 localStorage 恢复
 attpSessionManager.loadFromStorage()
 
+/**
+ * session↔protocol 绑定的响应式版本号。
+ * attpSessionManager 本身非响应式；bind/clear 时自增以驱动 computed/watch 重新求值
+ * （如 App.vue 的全局 SSE 常驻连接）。
+ */
+export const protocolBindingsVersion = ref(0)
+
 /** 绑定 session 的 protocol URL */
 export function bindSessionProtocolUrl(sessionId: string, protocolUrl: string) {
   console.log(`[ATTP] bindSessionProtocolUrl: session=${sessionId} → protocol=${protocolUrl}`)
@@ -48,6 +55,7 @@ export function bindSessionProtocolUrl(sessionId: string, protocolUrl: string) {
   session.userDid = userConfig.did || undefined
   attpSessionManager.save(session)
   attpSessionManager.saveToStorage()
+  protocolBindingsVersion.value++
 }
 
 /** 获取 session 绑定的 protocol URL，仅返回 session 级别绑定 */
@@ -60,6 +68,7 @@ export function getSessionProtocolUrl(sessionId: string): string | null {
 export function clearSessionProtocolUrl(sessionId: string) {
   attpSessionManager.delete(sessionId)
   attpSessionManager.saveToStorage()
+  protocolBindingsVersion.value++
 }
 
 // ---- Config I/O ----

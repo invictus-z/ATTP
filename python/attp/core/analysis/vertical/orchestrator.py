@@ -19,6 +19,7 @@ from attp.core.analysis.vertical.models import NodeTaintVerdict, VerticalTaintRe
 if TYPE_CHECKING:
     from attp.core.analysis.vertical.analyzer import VerticalTaintAnalyzer
     from attp.core.sessions.protocol_node.management.vertical_state import VerticalAnalysisManager
+    from attp.core.events import EventBroker
     from attp.core.pn_tracer import ProtocolTracer
 
 logger = get_logger("VerticalAnalysis")
@@ -57,17 +58,29 @@ class VerticalOrchestrator:
         tracer: ProtocolTracer,
         batch_size: int = 10,
         horizontal_trigger_callback: Callable[[str, str], Awaitable[None]] | None = None,
+        event_broker: EventBroker | None = None,
     ):
         self._analyzer = analyzer
         self._state_mgr = vertical_state_mgr
         self._tracer = tracer
         self._batch_size = batch_size
         self._horizontal_trigger_callback = horizontal_trigger_callback
+        self._broker = event_broker
         self._locks: dict[str, asyncio.Lock] = {}
         self._restored_sessions: set[str] = set()
         self._running_tasks: dict[str, asyncio.Task] = {}
         self._task_results: dict[str, VerticalAnalysisResult] = {}
         self._task_phases: dict[str, str] = {}
+
+    async def _set_phase(self, session_id: str, phase: str) -> None:
+        """更新任务阶段并发布 ``analysis.progress`` 事件。"""
+        self._task_phases[session_id] = phase
+        if self._broker:
+            await self._broker.publish(
+                "analysis.progress",
+                {"axis": "vertical", "session_id": session_id, "phase": phase},
+                topic="analysis",
+            )
 
     def _get_lock(self, session_id: str) -> asyncio.Lock:
         if session_id not in self._locks:
@@ -143,17 +156,31 @@ class VerticalOrchestrator:
                 "Cannot run vertical analysis for session={}: no intent extracted",
                 session_id,
             )
+            if self._broker:
+                await self._broker.publish(
+                    "analysis.report",
+                    {"axis": "vertical", "session_id": session_id,
+                     "triggered": False, "reason": "no_intent"},
+                    topic="analysis",
+                )
             return VerticalAnalysisResult(triggered=False, reason="no_intent")
 
         intent = IntentDescriptor.from_dict(intent_data)
 
         # Recover unchecked traces
-        self._task_phases[session_id] = "recovering_traces"
+        await self._set_phase(session_id, "recovering_traces")
         last_id = state["last_trace_id"]
         traces, max_id = await self._tracer.recover_traces_since(session_id, last_id)
 
         if not traces:
             await self._state_mgr.reset_report_count(session_id)
+            if self._broker:
+                await self._broker.publish(
+                    "analysis.report",
+                    {"axis": "vertical", "session_id": session_id,
+                     "triggered": False, "reason": "no_unanalyzed_traces"},
+                    topic="analysis",
+                )
             return VerticalAnalysisResult(triggered=False, reason="no_unanalyzed_traces")
 
         batch_index = state["batch_index"] + 1
@@ -164,7 +191,7 @@ class VerticalOrchestrator:
             session_id, batch_index, len(traces), is_final,
         )
 
-        self._task_phases[session_id] = "analyzing"
+        await self._set_phase(session_id, "analyzing")
         report = await self._analyzer.analyze(
             session_id=session_id,
             batch_index=batch_index,
@@ -176,9 +203,23 @@ class VerticalOrchestrator:
         )
 
         # Persist report
-        self._task_phases[session_id] = "saving_results"
+        await self._set_phase(session_id, "saving_results")
         report_json = json.dumps(report.to_dict(), ensure_ascii=False)
         report_row_id = await self._tracer.save_analysis_report(report_json)
+
+        if self._broker:
+            await self._broker.publish(
+                "analysis.report",
+                {
+                    "axis": "vertical",
+                    "session_id": session_id,
+                    "batch_index": batch_index,
+                    "verdict": report.overall_verdict,
+                    "summary": report.summary,
+                    "report_id": report_row_id,
+                },
+                topic="analysis",
+            )
 
         # Update session state
         await self._state_mgr.reset_report_count(session_id)
@@ -230,7 +271,7 @@ class VerticalOrchestrator:
 
         task = asyncio.create_task(_task_body())
         self._running_tasks[session_id] = task
-        self._task_phases[session_id] = "starting"
+        await self._set_phase(session_id, "starting")
 
         def _on_done(t: asyncio.Task):
             self._task_results[session_id] = t.result()

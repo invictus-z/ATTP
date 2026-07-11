@@ -1,10 +1,17 @@
 """Record 接收路由 — 从 DataPort 闭包重构为标准 APIRouter。"""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from attp.app.logging import get_logger
 from attp.core.message.event import BackMessage
+
+if TYPE_CHECKING:
+    from attp.core.events import EventBroker
 
 logger = get_logger("RecordAPI")
 
@@ -36,6 +43,7 @@ def get_record_router(
     behavior_controller,
     malicious_detector,
     orchestrator_holder: list,
+    event_broker: EventBroker | None = None,
 ) -> APIRouter:
     """返回 /record 路由。
 
@@ -43,8 +51,54 @@ def get_record_router(
     ----------
     orchestrator_holder : list
         长度为 1 的可变列表，用于 late-binding 注入 orchestrator。
+    event_broker : EventBroker | None
+        事件总线；非 None 时在回传处理 error 出口发布 ``record.error`` 事件。
     """
     router = APIRouter()
+
+    async def _publish_record_error(
+        *, back_msg: BackMessage | None = None, body: dict | None = None,
+        error_key: str, error_message: str, status_code: int,
+    ) -> None:
+        """发布 record.error 事件（None-safe）。优先用已解析的 back_msg，否则 best-effort 从 raw body 取。"""
+        if not event_broker:
+            return
+        session_id = nonce = node_did = protocol_url = sender_did = target_did = ""
+        hop_count: list = []
+        if back_msg is not None:
+            recorded = back_msg.recorded_hop
+            session_id = recorded.session_id
+            nonce = back_msg.nonce
+            node_did = back_msg.node_did
+            protocol_url = back_msg.protocol_url
+            hop_count = list(recorded.hop_count)
+            sender_did = recorded.sender_did
+            target_did = recorded.target_did
+        elif isinstance(body, dict):
+            rh = body.get("recorded_hop") or {}
+            session_id = rh.get("session_id", "")
+            nonce = body.get("nonce", "")
+            node_did = body.get("node_did", "")
+            protocol_url = body.get("protocol_url", "")
+            hop_count = rh.get("hop_count", [])
+            sender_did = rh.get("sender_did", "")
+            target_did = rh.get("target_did", "")
+        await event_broker.publish(
+            "record.error",
+            {
+                "session_id": session_id,
+                "nonce": nonce,
+                "node_did": node_did,
+                "protocol_url": protocol_url,
+                "hop_count": hop_count,
+                "sender_did": sender_did,
+                "target_did": target_did,
+                "error_key": error_key,
+                "error_message": error_message,
+                "status_code": status_code,
+            },
+            topic="record",
+        )
 
     @router.post("/record")
     async def receive_record(request: Request) -> JSONResponse:
@@ -52,12 +106,19 @@ def get_record_router(
         try:
             body = await request.json()
         except Exception:
+            await _publish_record_error(
+                error_key="invalid_json", error_message="Invalid JSON body", status_code=400,
+            )
             return JSONResponse({"error": "Invalid JSON body"}, status_code=400)
 
         # 解析 BackMessage
         try:
             back_msg = BackMessage.from_dict(body)
         except Exception as e:
+            await _publish_record_error(
+                body=body, error_key="invalid_backmessage",
+                error_message=f"Invalid BackMessage: {e}", status_code=400,
+            )
             return JSONResponse({"error": f"Invalid BackMessage: {e}"}, status_code=400)
 
         session_id = back_msg.recorded_hop.session_id
@@ -74,6 +135,10 @@ def get_record_router(
             )
         except Exception as e:
             logger.error("intercept_record unhandled exception: session={}, error={}", session_id, e)
+            await _publish_record_error(
+                back_msg=back_msg, error_key="internal_error",
+                error_message=f"Internal error: {e}", status_code=500,
+            )
             return JSONResponse({"error": f"Internal error: {e}"}, status_code=500)
 
         if result.status == "error":
@@ -84,6 +149,9 @@ def get_record_router(
             logger.error(
                 "Record rejected: session={}, error_key={}, detail={}",
                 session_id, error_key, result.error,
+            )
+            await _publish_record_error(
+                back_msg=back_msg, error_key=error_key, error_message=msg, status_code=code,
             )
             return JSONResponse({"error": msg}, status_code=code)
 

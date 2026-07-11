@@ -21,6 +21,7 @@ from attp.core.analysis.horizontal.models import HorizontalTaintReport
 if TYPE_CHECKING:
     from attp.core.analysis.horizontal.analyzer import HorizontalTaintAnalyzer
     from attp.core.sessions.protocol_node.management.horizontal_state import HorizontalAnalysisManager
+    from attp.core.events import EventBroker
     from attp.core.pn_tracer import ProtocolTracer
 
 logger = get_logger("HorizontalAnalysis")
@@ -56,15 +57,27 @@ class HorizontalOrchestrator:
         horizontal_state_mgr: HorizontalAnalysisManager,
         tracer: ProtocolTracer,
         accumulation_threshold: int = 5,
+        event_broker: EventBroker | None = None,
     ):
         self._analyzer = analyzer
         self._state_mgr = horizontal_state_mgr
         self._tracer = tracer
         self._threshold = accumulation_threshold
+        self._broker = event_broker
         self._locks: dict[str, asyncio.Lock] = {}
         self._running_tasks: dict[str, asyncio.Task] = {}
         self._task_results: dict[str, HorizontalAnalysisResult] = {}
         self._task_phases: dict[str, str] = {}
+
+    async def _set_phase(self, did: str, phase: str) -> None:
+        """更新任务阶段并发布 ``analysis.progress`` 事件。"""
+        self._task_phases[did] = phase
+        if self._broker:
+            await self._broker.publish(
+                "analysis.progress",
+                {"axis": "horizontal", "did": did, "phase": phase},
+                topic="analysis",
+            )
 
     def _get_lock(self, did: str) -> asyncio.Lock:
         if did not in self._locks:
@@ -128,12 +141,19 @@ class HorizontalOrchestrator:
         previous_context = cursor.get("context", "")
 
         # Step 2: Recover traces
-        self._task_phases[did] = "recovering_traces"
+        await self._set_phase(did, "recovering_traces")
         traces, max_id = await self._tracer.storage.recover_traces_by_did_since(
             did, last_trace_id,
         )
 
         if not traces:
+            if self._broker:
+                await self._broker.publish(
+                    "analysis.report",
+                    {"axis": "horizontal", "did": did,
+                     "triggered": False, "reason": "no_new_traces"},
+                    topic="analysis",
+                )
             return HorizontalAnalysisResult(triggered=False, reason="no_new_traces")
 
         # Step 3: Derive node_type
@@ -147,7 +167,7 @@ class HorizontalOrchestrator:
         )
 
         # Step 4-6: Analyze
-        self._task_phases[did] = "analyzing"
+        await self._set_phase(did, "analyzing")
         report = await self._analyzer.analyze(
             did=did,
             node_type=node_type,
@@ -159,9 +179,23 @@ class HorizontalOrchestrator:
         )
 
         # Step 7: Persist report
-        self._task_phases[did] = "saving_results"
+        await self._set_phase(did, "saving_results")
         report_json = json.dumps(report.to_dict(), ensure_ascii=False)
         report_row_id = await self._tracer.storage.save_horizontal_report(report_json)
+
+        if self._broker:
+            await self._broker.publish(
+                "analysis.report",
+                {
+                    "axis": "horizontal",
+                    "did": did,
+                    "batch_index": batch_index,
+                    "verdict": report.overall_verdict,
+                    "summary": report.summary,
+                    "report_id": report_row_id,
+                },
+                topic="analysis",
+            )
 
         # Step 8: Update cursor and reset accumulation
         await self._state_mgr.update_cursor(
@@ -203,7 +237,7 @@ class HorizontalOrchestrator:
 
         task = asyncio.create_task(_task_body())
         self._running_tasks[did] = task
-        self._task_phases[did] = "starting"
+        await self._set_phase(did, "starting")
 
         def _on_done(t: asyncio.Task):
             self._task_results[did] = t.result()

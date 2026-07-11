@@ -47,6 +47,7 @@ class ProtocolNode:
         self._orchestrator: CrossLockCoordinator | None = None
         self._sweep_task: asyncio.Task | None = None
         self._malicious_detector: MaliciousNodeDetector | None = None
+        self._broker = None
 
     @property
     def config(self) -> ProtocolNodeConfigFile:
@@ -69,6 +70,12 @@ class ProtocolNode:
         # 1. 创建 ProtocolTracer
         db_path = cfg.get_db_path()
         self._tracer = await ProtocolTracer.create(db_path=db_path)
+
+        # 1.5 创建事件总线并注入 storage（用于 trace/malicious 事件发布）
+        from attp.core.events import EventBroker
+
+        self._broker = EventBroker()
+        self._tracer.storage.set_event_broker(self._broker)
 
         # 2. 创建 SessionManager（注入 storage 以启用验证状态持久化）
         self._session_manager = ProtocolSessionManager(storage=self._tracer.storage)
@@ -93,6 +100,7 @@ class ProtocolNode:
             did_resolver=did_resolver,
             behavior_controller=behavior_controller,
             malicious_detector=malicious_detector,
+            event_broker=self._broker,
         )
 
         # 5. 可选：创建 CrossLockCoordinator
@@ -220,6 +228,7 @@ class ProtocolNode:
             vertical_state_mgr=vertical_state_mgr,
             tracer=self._tracer,
             batch_size=analysis_cfg.report_batch_size,
+            event_broker=self._broker,
         )
 
         # --- 横轴 ---
@@ -232,6 +241,7 @@ class ProtocolNode:
                 horizontal_state_mgr=horizontal_state_mgr,
                 tracer=self._tracer,
                 accumulation_threshold=getattr(analysis_cfg, "horizontal_threshold", 5),
+                event_broker=self._broker,
             )
             logger.info(
                 "Cross-Lock horizontal axis enabled (accumulation_threshold={})",
