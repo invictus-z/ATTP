@@ -9,9 +9,10 @@ from fastapi.responses import JSONResponse
 
 from attp.app.logging import get_logger
 from attp.core.message.event import BackMessage
+from attp.core.sse import EventType, Topic
 
 if TYPE_CHECKING:
-    from attp.core.events import EventBroker
+    from attp.core.sse import EventBroker
 
 logger = get_logger("RecordAPI")
 
@@ -84,7 +85,7 @@ def get_record_router(
             sender_did = rh.get("sender_did", "")
             target_did = rh.get("target_did", "")
         await event_broker.publish(
-            "record.error",
+            EventType.RECORD_ERROR,
             {
                 "session_id": session_id,
                 "nonce": nonce,
@@ -97,7 +98,7 @@ def get_record_router(
                 "error_message": error_message,
                 "status_code": status_code,
             },
-            topic="record",
+            topic=Topic.RECORD,
         )
 
     @router.post("/record")

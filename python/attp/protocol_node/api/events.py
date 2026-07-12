@@ -1,29 +1,33 @@
-"""协议节点 SSE 端点 — ``GET /api/events``。
+"""协议节点 SSE 端点 — ``GET /api/events``（FastAPI 适配层）。
 
-向用户端推送 trace/analysis/malicious 实时事件，替代前端轮询。
+向用户端推送 trace/analysis/malicious/record 实时事件，替代前端轮询。
+
+本模块只负责 **HTTP 接线**（``StreamingResponse`` + 心跳循环）；事件总线与
+SSE 帧序列化在 ``attp.core.sse``，从而保持 ``core/`` 框架无关、SSE 机理集中。
 
 事件帧格式（标准 SSE）::
 
     id: <单调递增 id>
-    event: <analysis.progress | analysis.report | malicious.detected | trace.recorded>
+    event: <analysis.progress | analysis.report | malicious.detected | trace.recorded | ...>
     data: <JSON payload>
 
-空闲时每 15 秒发送 ``: ping`` 心跳，防止反向代理关闭空闲连接。
+空闲时每 ``HEARTBEAT_SECONDS`` 秒发送 ``: ping`` 心跳，防止反向代理关闭空闲连接。
+
+查询参数：
+    session_id: 仅接收该 session 的事件（trace / 纵向 analysis）。
+    did:        仅接收该 DID 的事件（横向 analysis / malicious）。
+    topics:     逗号分隔的 topic 列表，如 ``trace,analysis,malicious``。
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
-from typing import TYPE_CHECKING
 
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 
 from attp.app.logging import get_logger
-
-if TYPE_CHECKING:
-    from attp.core.events import EventBroker
+from attp.core.sse import EventBroker, HEARTBEAT, format_event_frame
 
 logger = get_logger("SseApi")
 
@@ -31,7 +35,7 @@ logger = get_logger("SseApi")
 HEARTBEAT_SECONDS = 15.0
 
 
-def get_events_router(broker: "EventBroker") -> APIRouter:
+def get_events_router(broker: EventBroker) -> APIRouter:
     """返回 ``/api/events`` SSE 路由。"""
     router = APIRouter(prefix="/api")
 
@@ -41,13 +45,7 @@ def get_events_router(broker: "EventBroker") -> APIRouter:
         did: str | None = None,
         topics: str | None = None,
     ) -> StreamingResponse:
-        """订阅事件流。
-
-        查询参数：
-            session_id: 仅接收该 session 的事件（trace / 纵向 analysis）。
-            did: 仅接收该 DID 的事件（横向 analysis / malicious）。
-            topics: 逗号分隔的 topic 列表，如 ``trace,analysis,malicious``。
-        """
+        """订阅事件流。"""
         topic_set = (
             {t.strip() for t in topics.split(",") if t.strip()} if topics else None
         )
@@ -61,10 +59,9 @@ def get_events_router(broker: "EventBroker") -> APIRouter:
                             sub.queue.get(), timeout=HEARTBEAT_SECONDS
                         )
                     except asyncio.TimeoutError:
-                        yield ": ping\n\n"
+                        yield HEARTBEAT
                         continue
-                    data = json.dumps(event.payload, ensure_ascii=False)
-                    yield f"id: {event.id}\nevent: {event.type}\ndata: {data}\n\n"
+                    yield format_event_frame(event.id, event.type, event.payload)
             finally:
                 broker.unsubscribe(sub)
 

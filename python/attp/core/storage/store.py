@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from attp.core.sse import EventType, Topic
 from attp.core.storage.database import Database
 from attp.core.storage.repositories import (
     AnalysisRepository,
@@ -61,7 +62,7 @@ class SqliteStore:
         )
         if self._event_broker:
             await self._event_broker.publish(
-                "trace.recorded",
+                EventType.TRACE_RECORDED,
                 {
                     "session_id": session_id,
                     "trace_id": row_id,
@@ -72,7 +73,7 @@ class SqliteStore:
                     "content": (content or "")[:500],
                     "timestamp": timestamp,
                 },
-                topic="trace",
+                topic=Topic.TRACE,
             )
         return row_id
 
@@ -124,7 +125,7 @@ class SqliteStore:
         row_id = await self._malicious.save_malicious_report(report)
         if self._event_broker:
             await self._event_broker.publish(
-                "malicious.detected",
+                EventType.MALICIOUS_DETECTED,
                 {
                     "did": report.get("target_did", ""),
                     "severity": report.get("severity", "medium"),
@@ -134,7 +135,7 @@ class SqliteStore:
                     "evidence_type": report.get("evidence_type", ""),
                     "evidence_description": report.get("evidence_description", ""),
                 },
-                topic="malicious",
+                topic=Topic.MALICIOUS,
             )
         return row_id
 

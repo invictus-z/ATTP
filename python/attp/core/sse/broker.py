@@ -1,6 +1,6 @@
 """ATTP 进程内事件总线 — 协议节点 SSE 推送的基础。
 
-为协议节点的 trace/analysis/malicious 写入点提供发布-订阅能力，
+为协议节点的 trace/analysis/malicious/record 写入点提供发布-订阅能力，
 由 SSE 端点（``/api/events``）订阅并推送给用户端。
 
 设计要点：
@@ -8,6 +8,9 @@
 - 每订阅者一个有界 ``asyncio.Queue``，溢出丢最旧并计数（防慢客户端撑爆内存）。
 - 支持 topic / session_id / did 过滤，避免无关事件入队。
 - None-safe：组件持有 ``broker: EventBroker | None``，未注入时跳过发布。
+
+事件 type / topic 常量见 :mod:`attp.core.sse.schema`；
+SSE 帧序列化见 :mod:`attp.core.sse.frames`。
 """
 
 from __future__ import annotations

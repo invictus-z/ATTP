@@ -72,7 +72,7 @@ class ProtocolNode:
         self._tracer = await ProtocolTracer.create(db_path=db_path)
 
         # 1.5 创建事件总线并注入 storage（用于 trace/malicious 事件发布）
-        from attp.core.events import EventBroker
+        from attp.core.sse import EventBroker
 
         self._broker = EventBroker()
         self._tracer.storage.set_event_broker(self._broker)

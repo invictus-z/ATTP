@@ -15,11 +15,12 @@ from attp.app.logging import get_logger
 from attp.core.analysis.base_models import IntentDescriptor
 from attp.core.analysis.vertical.analyzer import _derive_node_type
 from attp.core.analysis.vertical.models import NodeIntentVerdict, VerticalIntentReport
+from attp.core.sse import EventType, Topic
 
 if TYPE_CHECKING:
     from attp.core.analysis.vertical.analyzer import VerticalIntentAnalyzer
     from attp.core.sessions.protocol_node.management.vertical_state import VerticalAnalysisManager
-    from attp.core.events import EventBroker
+    from attp.core.sse import EventBroker
     from attp.core.pn_tracer import ProtocolTracer
 
 logger = get_logger("VerticalAnalysis")
@@ -77,9 +78,9 @@ class VerticalOrchestrator:
         self._task_phases[session_id] = phase
         if self._broker:
             await self._broker.publish(
-                "analysis.progress",
+                EventType.ANALYSIS_PROGRESS,
                 {"axis": "vertical", "session_id": session_id, "phase": phase},
-                topic="analysis",
+                topic=Topic.ANALYSIS,
             )
 
     def _get_lock(self, session_id: str) -> asyncio.Lock:
@@ -158,10 +159,10 @@ class VerticalOrchestrator:
             )
             if self._broker:
                 await self._broker.publish(
-                    "analysis.report",
+                    EventType.ANALYSIS_REPORT,
                     {"axis": "vertical", "session_id": session_id,
                      "triggered": False, "reason": "no_intent"},
-                    topic="analysis",
+                    topic=Topic.ANALYSIS,
                 )
             return VerticalAnalysisResult(triggered=False, reason="no_intent")
 
@@ -176,10 +177,10 @@ class VerticalOrchestrator:
             await self._state_mgr.reset_pending_count(session_id)
             if self._broker:
                 await self._broker.publish(
-                    "analysis.report",
+                    EventType.ANALYSIS_REPORT,
                     {"axis": "vertical", "session_id": session_id,
                      "triggered": False, "reason": "no_unanalyzed_traces"},
-                    topic="analysis",
+                    topic=Topic.ANALYSIS,
                 )
             return VerticalAnalysisResult(triggered=False, reason="no_unanalyzed_traces")
 
@@ -217,7 +218,7 @@ class VerticalOrchestrator:
 
         if self._broker:
             await self._broker.publish(
-                "analysis.report",
+                EventType.ANALYSIS_REPORT,
                 {
                     "axis": "vertical",
                     "session_id": session_id,
@@ -226,7 +227,7 @@ class VerticalOrchestrator:
                     "summary": report.summary,
                     "report_id": report_row_id,
                 },
-                topic="analysis",
+                topic=Topic.ANALYSIS,
             )
 
         # Notify if suspicious or malicious

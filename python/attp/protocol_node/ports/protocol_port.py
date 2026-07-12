@@ -14,7 +14,7 @@ from attp.app.logging import get_logger, UVICORN_SILENT_LOG_CONFIG
 logger = get_logger("ProtocolPort")
 
 if TYPE_CHECKING:
-    from attp.core.events import EventBroker
+    from attp.core.sse import EventBroker
     from attp.core.pn_tracer import ProtocolTracer
     from attp.core.sessions.protocol_node import ProtocolSessionManager
 

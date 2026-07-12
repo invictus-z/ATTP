@@ -17,11 +17,12 @@ from typing import TYPE_CHECKING
 from attp.app.logging import get_logger
 from attp.core.analysis.horizontal.analyzer import _derive_node_type
 from attp.core.analysis.horizontal.models import HorizontalIntentReport
+from attp.core.sse import EventType, Topic
 
 if TYPE_CHECKING:
     from attp.core.analysis.horizontal.analyzer import HorizontalIntentAnalyzer
     from attp.core.sessions.protocol_node.management.horizontal_state import HorizontalAnalysisManager
-    from attp.core.events import EventBroker
+    from attp.core.sse import EventBroker
     from attp.core.pn_tracer import ProtocolTracer
 
 logger = get_logger("HorizontalAnalysis")
@@ -74,9 +75,9 @@ class HorizontalOrchestrator:
         self._task_phases[did] = phase
         if self._broker:
             await self._broker.publish(
-                "analysis.progress",
+                EventType.ANALYSIS_PROGRESS,
                 {"axis": "horizontal", "did": did, "phase": phase},
-                topic="analysis",
+                topic=Topic.ANALYSIS,
             )
 
     def _get_lock(self, did: str) -> asyncio.Lock:
@@ -105,7 +106,7 @@ class HorizontalOrchestrator:
 
         if self._broker:
             await self._broker.publish(
-                "horizontal.accumulated",
+                EventType.HORIZONTAL_ACCUMULATED,
                 {
                     "axis": "horizontal",
                     "did": did,
@@ -113,7 +114,7 @@ class HorizontalOrchestrator:
                     "pending_count": count,
                     "threshold": self._threshold,
                 },
-                topic="analysis",
+                topic=Topic.ANALYSIS,
             )
 
         if count >= self._threshold:
@@ -165,10 +166,10 @@ class HorizontalOrchestrator:
         if not traces:
             if self._broker:
                 await self._broker.publish(
-                    "analysis.report",
+                    EventType.ANALYSIS_REPORT,
                     {"axis": "horizontal", "did": did,
                      "triggered": False, "reason": "no_new_traces"},
-                    topic="analysis",
+                    topic=Topic.ANALYSIS,
                 )
             return HorizontalAnalysisResult(triggered=False, reason="no_new_traces")
 
@@ -213,7 +214,7 @@ class HorizontalOrchestrator:
 
         if self._broker:
             await self._broker.publish(
-                "analysis.report",
+                EventType.ANALYSIS_REPORT,
                 {
                     "axis": "horizontal",
                     "did": did,
@@ -222,7 +223,7 @@ class HorizontalOrchestrator:
                     "summary": report.summary,
                     "report_id": report_row_id,
                 },
-                topic="analysis",
+                topic=Topic.ANALYSIS,
             )
 
         # Step 9: Update malicious_reports + dossier if malicious
