@@ -30,7 +30,7 @@ def get_horizontal_analysis_router(
         _coordinator = _coord_ref[0]
         if not _coordinator:
             return {"triggered": False, "reason": "analysis_disabled"}
-        return await _coordinator.trigger_horizontal_async(did)
+        return await _coordinator.trigger_horizontal_async(_normalise_did(did))
 
     @router.get("/report/{did}")
     async def get_horizontal_reports(did: str):
