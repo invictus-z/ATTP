@@ -50,8 +50,8 @@ class CrossLockCoordinator:
         result = await self._horizontal.on_vertical_analysis_completed(did, session_id)
         if result.get("triggered"):
             logger.info(
-                "Cross-Lock: 横向分析自动触发 did={}, accumulated={}/{}",
-                did, result["accumulated"], result["threshold"],
+                "Cross-Lock: 横向分析自动触发 did={}, pending={}/{}",
+                did, result["pending_count"], result["threshold"],
             )
 
     # ------------------------------------------------------------------

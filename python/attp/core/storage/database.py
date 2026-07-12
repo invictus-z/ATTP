@@ -88,7 +88,7 @@ class Database:
                 CREATE TABLE IF NOT EXISTS vertical_analysis_states (
                     session_id      TEXT PRIMARY KEY,
                     intent_json     TEXT,
-                    report_count    INTEGER DEFAULT 0,
+                    pending_count   INTEGER DEFAULT 0,
                     last_trace_id   INTEGER DEFAULT 0,
                     batch_index     INTEGER DEFAULT 0,
                     context         TEXT DEFAULT '',
@@ -103,7 +103,7 @@ class Database:
                 CREATE TABLE IF NOT EXISTS horizontal_analysis_states (
                     did                 TEXT PRIMARY KEY,
                     node_type           TEXT NOT NULL DEFAULT 'agent',
-                    accumulated_count   INTEGER NOT NULL DEFAULT 0,
+                    pending_count       INTEGER NOT NULL DEFAULT 0,
                     last_trace_id       INTEGER NOT NULL DEFAULT 0,
                     batch_index         INTEGER NOT NULL DEFAULT 0,
                     context             TEXT NOT NULL DEFAULT '',
@@ -183,6 +183,9 @@ class Database:
 
             # ---- 迁移：malicious_nodes → malicious_reports ----
             await self._migrate_malicious_nodes(db)
+
+            # ---- 迁移：分析状态计数列统一为 pending_count ----
+            await self._migrate_analysis_count_columns(db)
 
             # protocol_session_state — 验证状态持久化
             await db.execute('''
@@ -277,6 +280,35 @@ class Database:
                 "CREATE INDEX IF NOT EXISTS idx_mr_session ON malicious_reports(session_id)"
             )
             logger.info("Migrated: malicious_nodes → malicious_reports")
+
+    @staticmethod
+    async def _migrate_analysis_count_columns(db) -> None:
+        """把分析状态表的计数列统一为 pending_count（幂等）。
+
+        - vertical_analysis_states.report_count        → pending_count
+        - horizontal_analysis_states.accumulated_count → pending_count
+
+        仅当旧列存在且新列不存在时执行 RENAME COLUMN（SQLite ≥ 3.25）。
+        与纵向 VerticalAnalysisState / 横向 HorizontalAccumulationState 字段对称。
+        """
+        async def _column_exists(table: str, column: str) -> bool:
+            cursor = await db.execute(f"PRAGMA table_info({table})")
+            rows = await cursor.fetchall()
+            return any(r[1] == column for r in rows)
+
+        if (await _column_exists("vertical_analysis_states", "report_count")
+                and not await _column_exists("vertical_analysis_states", "pending_count")):
+            await db.execute(
+                "ALTER TABLE vertical_analysis_states RENAME COLUMN report_count TO pending_count"
+            )
+            logger.info("Migrated: vertical_analysis_states.report_count → pending_count")
+
+        if (await _column_exists("horizontal_analysis_states", "accumulated_count")
+                and not await _column_exists("horizontal_analysis_states", "pending_count")):
+            await db.execute(
+                "ALTER TABLE horizontal_analysis_states RENAME COLUMN accumulated_count TO pending_count"
+            )
+            logger.info("Migrated: horizontal_analysis_states.accumulated_count → pending_count")
 
     async def execute(self, sql: str, params: tuple[Any, ...] = ()) -> None:
         """执行写操作并自动 commit。"""

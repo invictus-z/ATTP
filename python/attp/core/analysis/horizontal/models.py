@@ -81,7 +81,7 @@ class DIDVerdict:
 
 
 @dataclass
-class HorizontalTaintReport:
+class HorizontalIntentReport:
     """Cross-session global analysis report for a single DID."""
 
     did: str
@@ -112,7 +112,7 @@ class HorizontalTaintReport:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> HorizontalTaintReport:
+    def from_dict(cls, data: dict[str, Any]) -> HorizontalIntentReport:
         dv = data.get("did_verdict", {})
         verdict = DIDVerdict(
             did=dv.get("did", ""),

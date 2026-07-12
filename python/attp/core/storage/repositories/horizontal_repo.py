@@ -18,13 +18,13 @@ class HorizontalRepository(BaseRepository):
         """INSERT OR REPLACE 横向分析状态。"""
         await self._db.execute(
             """INSERT OR REPLACE INTO horizontal_analysis_states
-               (did, node_type, accumulated_count, last_trace_id,
+               (did, node_type, pending_count, last_trace_id,
                 batch_index, context, updated_at)
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (
                 did,
                 state.get("node_type", "agent"),
-                state.get("accumulated_count", 0),
+                state.get("pending_count", 0),
                 state.get("last_trace_id", 0),
                 state.get("batch_index", 0),
                 state.get("context", ""),
@@ -39,27 +39,27 @@ class HorizontalRepository(BaseRepository):
             (did,),
         )
 
-    async def increment_accumulated_count(self, did: str) -> int:
-        """原子递增累积计数并返回新值。"""
+    async def increment_pending_count(self, did: str) -> int:
+        """原子递增待分析计数并返回新值。"""
         # Load current state
         row = await self.load_horizontal_state(did)
         if row is None:
-            await self.save_horizontal_state(did, {"accumulated_count": 1})
+            await self.save_horizontal_state(did, {"pending_count": 1})
             return 1
-        new_count = row.get("accumulated_count", 0) + 1
+        new_count = row.get("pending_count", 0) + 1
         await self._db.execute(
             """UPDATE horizontal_analysis_states
-               SET accumulated_count = ?, updated_at = ?
+               SET pending_count = ?, updated_at = ?
                WHERE did = ?""",
             (new_count, _time.time(), did),
         )
         return new_count
 
-    async def reset_accumulated_count(self, did: str) -> None:
-        """重置累积计数。"""
+    async def reset_pending_count(self, did: str) -> None:
+        """重置待分析计数。"""
         await self._db.execute(
             """UPDATE horizontal_analysis_states
-               SET accumulated_count = 0, updated_at = ?
+               SET pending_count = 0, updated_at = ?
                WHERE did = ?""",
             (_time.time(), did),
         )

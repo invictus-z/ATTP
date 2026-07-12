@@ -11,9 +11,15 @@ from .pending_message import PendingMessage
 
 @dataclass
 class VerticalAnalysisState:
-    """纵向分析状态 — report 计数、游标、intent。"""
+    """纵向分析状态 — pending 计数、游标、intent。
 
-    report_count: int = 0
+    字段语义（与横向 HorizontalAccumulationState 对称）：
+        pending_count  — 当前批次待分析行为的数量（达阈值触发分析后归零）
+        last_trace_id  — 已分析的最新位置
+        batch_index    — 已生成的报告总数（每分析一批 +1，不重置）
+    """
+
+    pending_count: int = 0
     last_trace_id: int = 0
     batch_index: int = 0
     context: str = ""
@@ -168,20 +174,20 @@ class ProtocolSession:
 
     def get_analysis_state(self) -> dict[str, Any]:
         return {
-            "report_count": self.vertical_analysis.report_count,
+            "pending_count": self.vertical_analysis.pending_count,
             "last_trace_id": self.vertical_analysis.last_trace_id,
             "batch_index": self.vertical_analysis.batch_index,
             "context": self.vertical_analysis.context,
             "intent": self.vertical_analysis.intent,
         }
 
-    def increment_report_count(self) -> int:
-        self.vertical_analysis.report_count += 1
+    def increment_pending_count(self) -> int:
+        self.vertical_analysis.pending_count += 1
         self.updated_at = time.time()
-        return self.vertical_analysis.report_count
+        return self.vertical_analysis.pending_count
 
-    def reset_report_count(self) -> None:
-        self.vertical_analysis.report_count = 0
+    def reset_pending_count(self) -> None:
+        self.vertical_analysis.pending_count = 0
         self.updated_at = time.time()
 
     def update_analysis_cursor(

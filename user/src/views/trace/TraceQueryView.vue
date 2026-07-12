@@ -104,12 +104,12 @@ const statusKind = computed<'idle' | 'running' | 'completed' | 'failed' | 'not_f
 const vTriggerDisabled = computed(() =>
   vFlow.triggerLoading.value || vFlow.running.value
   || !sessionIdInput.value.trim()
-  || !vState.value || vState.value.analysis_state.report_count === 0,
+  || !vState.value || vState.value.analysis_state.pending_count === 0,
 )
 const hTriggerDisabled = computed(() =>
   hFlow.triggerLoading.value || hFlow.running.value
   || !didInput.value.trim()
-  || !hState.value || hState.value.accumulated_count === 0,
+  || !hState.value || hState.value.pending_count === 0,
 )
 
 // ─── 数据拉取 ───
@@ -202,7 +202,7 @@ async function doTrigger() {
     if (!sid) return
     const ok = await vFlow.trigger(sid)
     if (!ok) showToast('触发分析失败（分析功能未启用？）', 'error')
-    else showToast('纵向污点分析已触发')
+    else showToast('纵向意图追踪已触发')
   } else {
     const did = didInput.value.trim()
     if (!did) return
@@ -373,7 +373,7 @@ onMounted(async () => {
                   </div>
                   <div class="bg-gray-50 rounded-lg p-3 text-center">
                     <div class="text-[11px] text-gray-400 mb-1">累计未分析行为数</div>
-                    <div class="text-xl font-semibold text-gray-800">{{ vState.analysis_state.report_count }}</div>
+                    <div class="text-xl font-semibold text-gray-800">{{ vState.analysis_state.pending_count }}</div>
                   </div>
                   <div class="bg-gray-50 rounded-lg p-3 text-center">
                     <div class="text-[11px] text-gray-400 mb-1">最后 Trace ID</div>
@@ -523,7 +523,7 @@ onMounted(async () => {
                     </div>
                     <div class="bg-gray-50 rounded-lg p-3 text-center">
                       <div class="text-[11px] text-gray-400 mb-1">累计未分析行为数</div>
-                      <div class="text-xl font-semibold text-gray-800">{{ hState.accumulated_count }}</div>
+                      <div class="text-xl font-semibold text-gray-800">{{ hState.pending_count }}</div>
                     </div>
                     <div class="bg-gray-50 rounded-lg p-3 text-center">
                       <div class="text-[11px] text-gray-400 mb-1">最后 Trace ID</div>

@@ -1,10 +1,10 @@
-# ATTP 污点分析 Agent 基准数据集规格 (Benchmark Specification)
+# ATTP 意图追踪 Agent 基准数据集规格 (Benchmark Specification)
 
-> 版本: v1.1 | 场景数: 61 | 用途: 评测 Cross-Lock 纵向/横向污点分析 Agent
+> 版本: v1.1 | 场景数: 61 | 用途: 评测 Cross-Lock 纵向/横向意图追踪 Agent
 
 ## 1. 目标
 
-本基准数据集用于**量化评测** ATTP 污点分析 Agent 的 8 项核心能力（见 §2），
+本基准数据集用于**量化评测** ATTP 意图追踪 Agent 的 8 项核心能力（见 §2），
 通过 61 个精心设计的场景（含攻击、干净、边界），给出可自动计算的指标：
 **检出率（召回）、误报率、评分校准（MAE）、证据命中率、归因准确性**。
 

@@ -67,21 +67,21 @@ def get_horizontal_analysis_router(
             if not state:
                 return {
                     "did": canonical,
-                    "accumulated_count": 0,
-                    "last_trace_id": 0,
-                    "batch_index": 0,
+                    "pending_count": 0,        # 当前待分析行为的数量
+                    "last_trace_id": 0,        # 已分析的最新位置
+                    "batch_index": 0,          # 已生成的报告总数
                     "has_context": False,
                 }
             return {
                 "did": canonical,
-                "accumulated_count": state.get("accumulated_count", 0), # 当前未分析行为的数量
+                "pending_count": state.get("pending_count", 0), # 当前待分析行为的数量
                 "last_trace_id": state.get("last_trace_id", 0), # 已分析的最新位置
-                "batch_index": state.get("batch_index", 0), # 已生成的报告总数
+                "batch_index": state.get("batch_index", 0),     # 已生成的报告总数
                 "node_type": state.get("node_type", ""),
                 "has_context": bool(state.get("context")),
             }
         except Exception as e:
             logger.error("Error loading horizontal state for {}: {}", did, e)
-            return {"did": did, "accumulated_count": 0, "error": str(e)}
+            return {"did": did, "pending_count": 0, "error": str(e)}
 
     return router

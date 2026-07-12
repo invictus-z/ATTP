@@ -42,12 +42,12 @@ CREATE TABLE IF NOT EXISTS vertical_analysis_reports (
     batch_index INTEGER NOT NULL, report_json TEXT NOT NULL,
     from_trace_id INTEGER NOT NULL, to_trace_id INTEGER NOT NULL, timestamp REAL);
 CREATE TABLE IF NOT EXISTS vertical_analysis_states (
-    session_id TEXT PRIMARY KEY, intent_json TEXT, report_count INTEGER DEFAULT 0,
+    session_id TEXT PRIMARY KEY, intent_json TEXT, pending_count INTEGER DEFAULT 0,
     last_trace_id INTEGER DEFAULT 0, batch_index INTEGER DEFAULT 0,
     context TEXT DEFAULT '', updated_at REAL);
 CREATE TABLE IF NOT EXISTS horizontal_analysis_states (
     did TEXT PRIMARY KEY, node_type TEXT NOT NULL DEFAULT 'agent',
-    accumulated_count INTEGER NOT NULL DEFAULT 0, last_trace_id INTEGER NOT NULL DEFAULT 0,
+    pending_count INTEGER NOT NULL DEFAULT 0, last_trace_id INTEGER NOT NULL DEFAULT 0,
     batch_index INTEGER NOT NULL DEFAULT 0, context TEXT NOT NULL DEFAULT '', updated_at REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS horizontal_analysis_reports (
     id INTEGER PRIMARY KEY AUTOINCREMENT, did TEXT NOT NULL, node_type TEXT NOT NULL,
@@ -354,7 +354,7 @@ class ScenarioDB:
 
     def _add_vertical_state(self, sid, instruction, lt):
         self.c.execute(
-            "INSERT INTO vertical_analysis_states (session_id,intent_json,report_count,last_trace_id,batch_index,context,updated_at) VALUES (?,?,?,?,?,?,?)",
+            "INSERT INTO vertical_analysis_states (session_id,intent_json,pending_count,last_trace_id,batch_index,context,updated_at) VALUES (?,?,?,?,?,?,?)",
             (sid, json.dumps({"original_task": instruction[:60], "core_objective": instruction[:60],
                               "constraints": [], "involved_capabilities": ["shell_exec", "file_reader"],
                               "risk_level": "medium"}, ensure_ascii=False), 1, lt, 1, "", 0.0))
@@ -362,7 +362,7 @@ class ScenarioDB:
     def _add_horizontal(self, did, ft, tt, n, pattern, score, summary, ev_items, ts):
         verdict = "malicious" if score >= 0.7 else "suspicious"
         self.c.execute(
-            "INSERT INTO horizontal_analysis_states (did,node_type,accumulated_count,last_trace_id,batch_index,context,updated_at) VALUES (?,?,?,?,?,?,?)",
+            "INSERT INTO horizontal_analysis_states (did,node_type,pending_count,last_trace_id,batch_index,context,updated_at) VALUES (?,?,?,?,?,?,?)",
             (did, "agent", n, tt, 1, summary, ts))
         self.c.execute(
             "INSERT INTO horizontal_analysis_reports (did,node_type,batch_index,report_json,from_trace_id,to_trace_id,sessions_scanned,timestamp) VALUES (?,?,?,?,?,?,?,?)",
@@ -376,7 +376,7 @@ class ScenarioDB:
 
     def _add_clean_horizontal(self, did, ft, tt, n, ts):
         self.c.execute(
-            "INSERT INTO horizontal_analysis_states (did,node_type,accumulated_count,last_trace_id,batch_index,context,updated_at) VALUES (?,?,?,?,?,?,?)",
+            "INSERT INTO horizontal_analysis_states (did,node_type,pending_count,last_trace_id,batch_index,context,updated_at) VALUES (?,?,?,?,?,?,?)",
             (did, "agent", n, tt, 0, "跨session行为正常", ts))
         self.c.execute(
             "INSERT INTO horizontal_analysis_reports (did,node_type,batch_index,report_json,from_trace_id,to_trace_id,sessions_scanned,timestamp) VALUES (?,?,?,?,?,?,?,?)",

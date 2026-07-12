@@ -48,13 +48,13 @@ class AnalysisRepository(BaseRepository):
     async def save_analysis_session(self, session_id: str, state: dict) -> None:
         await self._db.execute(
             """INSERT OR REPLACE INTO vertical_analysis_states
-               (session_id, intent_json, report_count, last_trace_id,
+               (session_id, intent_json, pending_count, last_trace_id,
                 batch_index, context, updated_at)
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (
                 session_id,
                 state.get("intent_json"),
-                state.get("report_count", 0),
+                state.get("pending_count", 0),
                 state.get("last_trace_id", 0),
                 state.get("batch_index", 0),
                 state.get("context", ""),

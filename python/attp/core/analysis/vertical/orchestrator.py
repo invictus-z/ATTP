@@ -14,10 +14,10 @@ from typing import TYPE_CHECKING, Callable, Awaitable
 from attp.app.logging import get_logger
 from attp.core.analysis.base_models import IntentDescriptor
 from attp.core.analysis.vertical.analyzer import _derive_node_type
-from attp.core.analysis.vertical.models import NodeTaintVerdict, VerticalTaintReport
+from attp.core.analysis.vertical.models import NodeIntentVerdict, VerticalIntentReport
 
 if TYPE_CHECKING:
-    from attp.core.analysis.vertical.analyzer import VerticalTaintAnalyzer
+    from attp.core.analysis.vertical.analyzer import VerticalIntentAnalyzer
     from attp.core.sessions.protocol_node.management.vertical_state import VerticalAnalysisManager
     from attp.core.events import EventBroker
     from attp.core.pn_tracer import ProtocolTracer
@@ -31,7 +31,7 @@ class VerticalAnalysisResult:
 
     triggered: bool
     reason: str = ""
-    report: VerticalTaintReport | None = None
+    report: VerticalIntentReport | None = None
 
     def to_dict(self) -> dict:
         d: dict = {"triggered": self.triggered, "reason": self.reason}
@@ -53,7 +53,7 @@ class VerticalOrchestrator:
 
     def __init__(
         self,
-        analyzer: VerticalTaintAnalyzer,
+        analyzer: VerticalIntentAnalyzer,
         vertical_state_mgr: VerticalAnalysisManager,
         tracer: ProtocolTracer,
         batch_size: int = 10,
@@ -130,7 +130,7 @@ class VerticalOrchestrator:
         Increments report counter and triggers analysis if batch size reached.
         """
         async with self._get_lock(session_id):
-            count = await self._state_mgr.increment_report_count(session_id)
+            count = await self._state_mgr.increment_pending_count(session_id)
 
             if count >= self._batch_size:
                 logger.info(
@@ -144,7 +144,7 @@ class VerticalOrchestrator:
     # ------------------------------------------------------------------
 
     async def run_analysis(self, session_id: str, is_final: bool = False) -> VerticalAnalysisResult:
-        """Run vertical semantic taint analysis for a session.
+        """Run vertical semantic intent tracking for a session.
 
         IMPORTANT: Caller must hold the per-session lock.
         """
@@ -173,7 +173,7 @@ class VerticalOrchestrator:
         traces, max_id = await self._tracer.recover_traces_since(session_id, last_id)
 
         if not traces:
-            await self._state_mgr.reset_report_count(session_id)
+            await self._state_mgr.reset_pending_count(session_id)
             if self._broker:
                 await self._broker.publish(
                     "analysis.report",
@@ -222,7 +222,7 @@ class VerticalOrchestrator:
             )
 
         # Update session state
-        await self._state_mgr.reset_report_count(session_id)
+        await self._state_mgr.reset_pending_count(session_id)
         await self._state_mgr.update_cursor(
             session_id, batch_index=batch_index,
             last_trace_id=max_id, context=report.context_summary,
@@ -300,8 +300,8 @@ class VerticalOrchestrator:
 
     @staticmethod
     def _merge_verdicts_by_did(
-        verdicts: list[NodeTaintVerdict],
-    ) -> list[tuple[NodeTaintVerdict, list[list[int]]]]:
+        verdicts: list[NodeIntentVerdict],
+    ) -> list[tuple[NodeIntentVerdict, list[list[int]]]]:
         """将同一 DID 的多条 verdict 合并为一条，按 DID 去重但不丢失证据。
 
         合并策略：
@@ -317,11 +317,11 @@ class VerticalOrchestrator:
         """
         severity_rank = {"none": 0, "low": 1, "medium": 2, "high": 3}
 
-        grouped: dict[str, list[NodeTaintVerdict]] = {}
+        grouped: dict[str, list[NodeIntentVerdict]] = {}
         for v in verdicts:
             grouped.setdefault(v.node_did, []).append(v)
 
-        merged: list[tuple[NodeTaintVerdict, list[list[int]]]] = []
+        merged: list[tuple[NodeIntentVerdict, list[list[int]]]] = []
         for did, did_verdicts in grouped.items():
             # 最高分（最严重）的 verdict 作为基础，决定 severity / deviation_type 等
             primary = max(
@@ -354,7 +354,7 @@ class VerticalOrchestrator:
                         merged_items.append(ei)
                         seen_desc.add(ei.description)
 
-            merged_v = NodeTaintVerdict(
+            merged_v = NodeIntentVerdict(
                 node_did=did,
                 hop_count=list(primary.hop_count),
                 aligned=primary.aligned,
@@ -373,7 +373,7 @@ class VerticalOrchestrator:
     async def _notify_analysis_result(
         self,
         session_id: str,
-        report: VerticalTaintReport,
+        report: VerticalIntentReport,
         report_row_id: int,
         traces: list[dict],
     ) -> None:

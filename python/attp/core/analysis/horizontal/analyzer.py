@@ -1,4 +1,4 @@
-"""Horizontal Axis — 横向语义污点分析器。
+"""Horizontal Axis — 横向语义意图追踪器。
 
 按 node_type 选择隔离的 Prompt 模板，对单个 DID 跨所有 Session 的行为进行全局分析。
 """
@@ -16,7 +16,7 @@ from attp.core.analysis.base_models import EvidenceItem
 from attp.core.analysis.horizontal.models import (
     CrossSessionProfile,
     DIDVerdict,
-    HorizontalTaintReport,
+    HorizontalIntentReport,
 )
 from attp.core.analysis.horizontal.prompts import HORIZONTAL_PROMPT_MAP
 
@@ -66,7 +66,7 @@ def _derive_node_type(traces: list[dict], did: str) -> str:
     return "agent"
 
 
-class HorizontalTaintAnalyzer:
+class HorizontalIntentAnalyzer:
     """Analyzes cross-session behavior for a single DID using LLM."""
 
     def __init__(
@@ -91,7 +91,7 @@ class HorizontalTaintAnalyzer:
         to_trace_id: int,
         traces: list[dict],
         previous_context: str = "",
-    ) -> HorizontalTaintReport:
+    ) -> HorizontalIntentReport:
         """Run horizontal analysis for a DID across sessions."""
         profile = self._build_cross_session_profile(traces, did, node_type)
         sessions_scanned = len(profile.sessions_involved)
@@ -145,7 +145,7 @@ class HorizontalTaintAnalyzer:
             elif verdict.taint_score >= 0.3:
                 overall = "suspicious"
 
-            return HorizontalTaintReport(
+            return HorizontalIntentReport(
                 did=did,
                 node_type=node_type,
                 batch_index=batch_index,
@@ -159,7 +159,7 @@ class HorizontalTaintAnalyzer:
             )
         except Exception as e:
             logger.error("Horizontal analysis failed for did={}: {}", did, e)
-            return HorizontalTaintReport(
+            return HorizontalIntentReport(
                 did=did,
                 node_type=node_type,
                 batch_index=batch_index,

@@ -16,10 +16,10 @@ from typing import TYPE_CHECKING
 
 from attp.app.logging import get_logger
 from attp.core.analysis.horizontal.analyzer import _derive_node_type
-from attp.core.analysis.horizontal.models import HorizontalTaintReport
+from attp.core.analysis.horizontal.models import HorizontalIntentReport
 
 if TYPE_CHECKING:
-    from attp.core.analysis.horizontal.analyzer import HorizontalTaintAnalyzer
+    from attp.core.analysis.horizontal.analyzer import HorizontalIntentAnalyzer
     from attp.core.sessions.protocol_node.management.horizontal_state import HorizontalAnalysisManager
     from attp.core.events import EventBroker
     from attp.core.pn_tracer import ProtocolTracer
@@ -33,7 +33,7 @@ class HorizontalAnalysisResult:
 
     triggered: bool
     reason: str = ""
-    report: HorizontalTaintReport | None = None
+    report: HorizontalIntentReport | None = None
 
     def to_dict(self) -> dict:
         d: dict = {"triggered": self.triggered, "reason": self.reason}
@@ -53,7 +53,7 @@ class HorizontalOrchestrator:
 
     def __init__(
         self,
-        analyzer: HorizontalTaintAnalyzer,
+        analyzer: HorizontalIntentAnalyzer,
         horizontal_state_mgr: HorizontalAnalysisManager,
         tracer: ProtocolTracer,
         accumulation_threshold: int = 5,
@@ -95,9 +95,9 @@ class HorizontalOrchestrator:
         Triggers horizontal analysis if threshold reached.
 
         Returns:
-            {"accumulated": int, "threshold": int, "triggered": bool}
+            {"pending_count": int, "threshold": int, "triggered": bool}
         """
-        count = await self._state_mgr.increment_accumulation(did)
+        count = await self._state_mgr.increment_pending_count(did)
         triggered = False
 
         if count >= self._threshold:
@@ -110,7 +110,7 @@ class HorizontalOrchestrator:
             triggered = True
 
         return {
-            "accumulated": count,
+            "pending_count": count,
             "threshold": self._threshold,
             "triggered": triggered,
         }
@@ -205,7 +205,7 @@ class HorizontalOrchestrator:
             context=report.context_summary,
             node_type=node_type,
         )
-        await self._state_mgr.reset_accumulation(did)
+        await self._state_mgr.reset_pending_count(did)
 
         # Step 9: Update malicious_reports + dossier if malicious
         if report.overall_verdict in ("suspicious", "malicious"):
@@ -265,7 +265,7 @@ class HorizontalOrchestrator:
     # ------------------------------------------------------------------
 
     async def _notify_analysis_result(
-        self, did: str, report: HorizontalTaintReport, report_row_id: int,
+        self, did: str, report: HorizontalIntentReport, report_row_id: int,
     ) -> None:
         """记录横向分析发现的恶意节点：写入 malicious_reports + 更新 dossier。"""
         verdict = report.did_verdict

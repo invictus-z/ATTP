@@ -10,7 +10,7 @@
     有能力声明但无结构化任务生命周期；仍看不到内部工具调用。
   - A2A（Google Agent2Agent）：在 ACP 基础上增加结构化任务生命周期（任务状态、Artifacts）。
     有能力卡 + 任务结构 + 交互历史；仍看不到内部工具调用。无签名不可否认。
-  - ATTP：完整 behavior_traces（含 A2T/T2A 内部调用）+ 双签 + PN 固化 + Cross-Lock 污点分析。
+  - ATTP：完整 behavior_traces（含 A2T/T2A 内部调用）+ 双签 + PN 固化 + Cross-Lock 意图追踪。
     本模块不构造 ATTP brief——harness 直接复用生产 Cross-Lock 输出。
 
 关键：ANP / ACP / A2A 的 brief 均【不含】A2T/T2A 内部动作——这正是非 ATTP 协议的可见性盲区，

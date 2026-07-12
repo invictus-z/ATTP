@@ -1,4 +1,4 @@
-"""污点分析 Agent 基准评测器。
+"""意图追踪 Agent 基准评测器。
 
 支持两种模式：
   --mode=dry    : 干跑（不调 LLM），用理想数据自测评测逻辑正确性
@@ -14,11 +14,11 @@
 运行:
   cd e:/work/ATTP
   # 干跑自测（验证评测逻辑）
-  python test/benchmark/taint_analysis/evaluate.py --mode dry
+  python test/benchmark/intent_analysis/evaluate.py --mode dry
   # 真实 LLM 评测（全部50个，并发）
-  python test/benchmark/taint_analysis/evaluate.py --mode llm
+  python test/benchmark/intent_analysis/evaluate.py --mode llm
   # 只测部分场景
-  python test/benchmark/taint_analysis/evaluate.py --mode llm --scenarios v01,h01,c08,b04
+  python test/benchmark/intent_analysis/evaluate.py --mode llm --scenarios v01,h01,c08,b04
 """
 
 from __future__ import annotations
@@ -49,8 +49,8 @@ from attp.core.sessions.protocol_node import ProtocolSessionManager
 from attp.core.sessions.protocol_node.management import (
     HorizontalAnalysisManager, VerticalAnalysisManager,
 )
-from attp.core.analysis.vertical import VerticalTaintAnalyzer, VerticalOrchestrator
-from attp.core.analysis.horizontal import HorizontalTaintAnalyzer, HorizontalOrchestrator
+from attp.core.analysis.vertical import VerticalIntentAnalyzer, VerticalOrchestrator
+from attp.core.analysis.horizontal import HorizontalIntentAnalyzer, HorizontalOrchestrator
 from attp.core.analysis.cross_lock import CrossLockCoordinator
 
 from benchmark_lib import agent, COORD
@@ -139,8 +139,8 @@ async def build_coord(temp_db: str, llm_config: dict, client: AsyncOpenAI) -> Cr
     smgr = ProtocolSessionManager(storage=tracer.storage)
     vstate = VerticalAnalysisManager(smgr, tracer)
     hstate = HorizontalAnalysisManager(tracer.storage)
-    va = VerticalTaintAnalyzer(client=client, model=llm_config["model"])
-    ha = HorizontalTaintAnalyzer(client=client, model=llm_config["model"])
+    va = VerticalIntentAnalyzer(client=client, model=llm_config["model"])
+    ha = HorizontalIntentAnalyzer(client=client, model=llm_config["model"])
     vorch = VerticalOrchestrator(analyzer=va, vertical_state_mgr=vstate, tracer=tracer, batch_size=BATCH_SIZE)
     horch = HorizontalOrchestrator(analyzer=ha, horizontal_state_mgr=hstate, tracer=tracer, accumulation_threshold=ACCUM_THRESHOLD)
     return CrossLockCoordinator(vorch, horch)
@@ -467,7 +467,7 @@ def aggregate(metrics_by_sid: dict[str, Metrics]) -> dict:
 
 def print_report(agg: dict, mode: str, n_scenarios: int, wall_time: float, details: list) -> None:
     print("\n" + "=" * 80)
-    print(f"  ATTP Taint Analysis Benchmark — {mode.upper()} Mode Report")
+    print(f"  ATTP Intent Tracking Benchmark — {mode.upper()} Mode Report")
     print("=" * 80)
     print(f"  Scenarios evaluated: {n_scenarios}  |  Wall time: {wall_time:.1f}s")
 
@@ -680,7 +680,7 @@ def main():
     args = ap.parse_args()
 
     print("=" * 80)
-    print(f"  ATTP Taint Analysis Benchmark Evaluator — {args.mode} mode")
+    print(f"  ATTP Intent Tracking Benchmark Evaluator — {args.mode} mode")
     print("=" * 80)
 
     sf = [s.strip() for s in args.scenarios.split(",") if s.strip()] or None

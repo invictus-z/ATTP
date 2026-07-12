@@ -210,8 +210,8 @@ class ProtocolNode:
 
         from openai import AsyncOpenAI
 
-        from attp.core.analysis.vertical import VerticalTaintAnalyzer, VerticalOrchestrator
-        from attp.core.analysis.horizontal import HorizontalTaintAnalyzer, HorizontalOrchestrator
+        from attp.core.analysis.vertical import VerticalIntentAnalyzer, VerticalOrchestrator
+        from attp.core.analysis.horizontal import HorizontalIntentAnalyzer, HorizontalOrchestrator
         from attp.core.analysis.cross_lock import CrossLockCoordinator
         from attp.core.sessions.protocol_node.management import (
             VerticalAnalysisManager,
@@ -221,7 +221,7 @@ class ProtocolNode:
         llm_client = AsyncOpenAI(api_key=analysis_cfg.api_key, base_url=analysis_cfg.base_url)
 
         # --- 纵轴 ---
-        vertical_analyzer = VerticalTaintAnalyzer(client=llm_client, model=analysis_cfg.model)
+        vertical_analyzer = VerticalIntentAnalyzer(client=llm_client, model=analysis_cfg.model)
         vertical_state_mgr = VerticalAnalysisManager(self._session_manager, self._tracer)
         vertical_orch = VerticalOrchestrator(
             analyzer=vertical_analyzer,
@@ -234,7 +234,7 @@ class ProtocolNode:
         # --- 横轴 ---
         horizontal_orch = None
         if getattr(analysis_cfg, "horizontal_enabled", True):
-            horizontal_analyzer = HorizontalTaintAnalyzer(client=llm_client, model=analysis_cfg.model)
+            horizontal_analyzer = HorizontalIntentAnalyzer(client=llm_client, model=analysis_cfg.model)
             horizontal_state_mgr = HorizontalAnalysisManager(self._tracer.storage)
             horizontal_orch = HorizontalOrchestrator(
                 analyzer=horizontal_analyzer,

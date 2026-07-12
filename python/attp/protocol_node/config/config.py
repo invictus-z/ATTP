@@ -34,7 +34,7 @@ class StorageConfig(PNBase):
 
 
 class AnalysisConfig(PNBase):
-    """语义污点分析（LLM）配置 — 十字锁定（Cross-Lock）架构。"""
+    """语义意图追踪（LLM）配置 — 十字锁定（Cross-Lock）架构。"""
 
     enabled: bool = False
     api_key: str = ""

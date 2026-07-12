@@ -20,10 +20,16 @@ logger = get_logger("HorizontalState")
 
 @dataclass
 class HorizontalAccumulationState:
-    """Per-DID 横向分析累积状态。"""
+    """Per-DID 横向分析累积状态。
+
+    字段语义（与纵向 VerticalAnalysisState 对称）：
+        pending_count  — 当前待分析行为的数量（达阈值触发横向分析后归零）
+        last_trace_id  — 已分析的最新位置
+        batch_index    — 已生成的报告总数（每分析一批 +1，不重置）
+    """
     did: str
     node_type: str = "agent"
-    accumulated_count: int = 0
+    pending_count: int = 0
     last_trace_id: int = 0
     batch_index: int = 0
     context: str = ""
@@ -45,7 +51,7 @@ class HorizontalAnalysisManager:
                 saved = await self._storage.load_horizontal_state(did)
                 if saved:
                     state.node_type = saved.get("node_type", "agent")
-                    state.accumulated_count = saved.get("accumulated_count", 0)
+                    state.pending_count = saved.get("pending_count", 0)
                     state.last_trace_id = saved.get("last_trace_id", 0)
                     state.batch_index = saved.get("batch_index", 0)
                     state.context = saved.get("context", "")
@@ -57,27 +63,27 @@ class HorizontalAnalysisManager:
         """从 SQLite 恢复 DID 的横向状态。"""
         await self._ensure_loaded(did)
 
-    async def increment_accumulation(self, did: str) -> int:
-        """累加 DID 的横向计数器。返回累加后的值。"""
+    async def increment_pending_count(self, did: str) -> int:
+        """累加 DID 的横向待分析计数器。返回累加后的值。"""
         state = await self._ensure_loaded(did)
-        state.accumulated_count += 1
+        state.pending_count += 1
         await self._persist(did)
-        return state.accumulated_count
+        return state.pending_count
 
-    async def reset_accumulation(self, did: str) -> None:
-        """重置 DID 的横向计数器。"""
+    async def reset_pending_count(self, did: str) -> None:
+        """重置 DID 的横向待分析计数器。"""
         state = await self._ensure_loaded(did)
-        state.accumulated_count = 0
+        state.pending_count = 0
         await self._persist(did)
 
     async def get_cursor(self, did: str) -> dict:
         """获取 DID 的横向分析游标。"""
         state = await self._ensure_loaded(did)
         return {
+            "pending_count": state.pending_count,
             "last_trace_id": state.last_trace_id,
             "batch_index": state.batch_index,
             "context": state.context,
-            "accumulated_count": state.accumulated_count,
         }
 
     async def update_cursor(
@@ -99,7 +105,7 @@ class HorizontalAnalysisManager:
             return
         await self._storage.save_horizontal_state(did, {
             "node_type": state.node_type,
-            "accumulated_count": state.accumulated_count,
+            "pending_count": state.pending_count,
             "last_trace_id": state.last_trace_id,
             "batch_index": state.batch_index,
             "context": state.context,

@@ -41,7 +41,7 @@ class VerticalAnalysisManager:
         state = session.get_analysis_state()
         await self._tracer.save_analysis_session(session_id, {
             "intent_json": json.dumps(state["intent"], ensure_ascii=False) if state["intent"] else None,
-            "report_count": state["report_count"],
+            "pending_count": state["pending_count"],
             "last_trace_id": state["last_trace_id"],
             "batch_index": state["batch_index"],
             "context": state["context"],
@@ -67,8 +67,8 @@ class VerticalAnalysisManager:
             last_trace_id=saved.get("last_trace_id", 0),
             context=saved.get("context") or "",
         )
-        for _ in range(saved.get("report_count", 0)):
-            session.increment_report_count()
+        for _ in range(saved.get("pending_count", 0)):
+            session.increment_pending_count()
         await self._save(session)
         self._restored_sessions.add(session_id)
         logger.info("Restored vertical analysis state for session={} from SQLite", session_id)
@@ -79,18 +79,18 @@ class VerticalAnalysisManager:
         session = await self._get_or_create(session_id)
         return session.get_analysis_state()
 
-    async def increment_report_count(self, session_id: str) -> int:
-        """递增纵向报告计数。"""
+    async def increment_pending_count(self, session_id: str) -> int:
+        """递增纵向待分析行为计数。"""
         session = await self._get_or_create(session_id)
-        count = session.increment_report_count()
+        count = session.increment_pending_count()
         await self._save(session)
         await self._persist_state(session_id)
         return count
 
-    async def reset_report_count(self, session_id: str) -> None:
-        """重置纵向报告计数。"""
+    async def reset_pending_count(self, session_id: str) -> None:
+        """重置纵向待分析行为计数。"""
         session = await self._get_or_create(session_id)
-        session.reset_report_count()
+        session.reset_pending_count()
         await self._save(session)
         await self._persist_state(session_id)
 

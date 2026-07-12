@@ -42,7 +42,7 @@ class NodeBehaviorProfile:
 
 
 @dataclass
-class NodeTaintVerdict:
+class NodeIntentVerdict:
     """Analysis verdict for a single node."""
 
     node_did: str
@@ -72,14 +72,14 @@ class NodeTaintVerdict:
 
 
 @dataclass
-class VerticalTaintReport:
+class VerticalIntentReport:
     """Complete vertical analysis report for one batch of records."""
 
     session_id: str
     batch_index: int
     from_trace_id: int
     to_trace_id: int
-    node_verdicts: list[NodeTaintVerdict] = field(default_factory=list)
+    node_verdicts: list[NodeIntentVerdict] = field(default_factory=list)
     overall_verdict: str = "clean"  # clean / suspicious / malicious
     summary: str = ""
     context_summary: str = ""
@@ -103,11 +103,11 @@ class VerticalTaintReport:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> VerticalTaintReport:
+    def from_dict(cls, data: dict[str, Any]) -> VerticalIntentReport:
         verdicts = []
         for v in data.get("node_verdicts", []):
             items = [EvidenceItem.from_dict(e) for e in v.get("evidence_items", [])]
-            verdicts.append(NodeTaintVerdict(
+            verdicts.append(NodeIntentVerdict(
                 node_did=v.get("node_did", ""),
                 hop_count=v.get("hop_count", [0, 0]),
                 aligned=v.get("aligned", True),

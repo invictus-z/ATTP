@@ -1,4 +1,4 @@
-"""Cross-Lock Taint Analysis — 共享基础数据模型。
+"""Cross-Lock Intent Tracking — 共享基础数据模型。
 
 纵横两轴共用的基础类型：IntentDescriptor（纵向专用）、EvidenceItem（纵横共用）。
 """

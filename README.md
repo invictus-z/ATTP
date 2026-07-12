@@ -5,14 +5,14 @@
 
 ## 概述
 
-**Agents Traceability and Trust Protocol（ATTP）** 是一套面向开放互联环境下多 AI Agent 协作的可溯源通信与信任协议。通过结合密码学技术与大模型污点分析，实现通信链路的不可否认复原，并精准追踪与发现试图进行诱导或传播恶意 Prompt 的源头节点，为智能体通信构筑互连互信的数字基座。
+**Agents Traceability and Trust Protocol（ATTP）** 是一套面向开放互联环境下多 AI Agent 协作的可溯源通信与信任协议。通过结合密码学技术与大模型意图追踪，实现通信链路的不可否认复原，并精准追踪与发现试图进行诱导或传播恶意 Prompt 的源头节点，为智能体通信构筑互连互信的数字基座。
 
 协议自底向上分为四层：
 
 - **数据传输层**：负责节点间消息的可靠传递与路由，支持任意拓扑的协作模式
 - **安全通信层**：在 [anp](https://github.com/agent-network-protocol/anp)（Agent Network Protocol）基础上扩展了分布式身份认证（DID），并实现端到端加密通信
 - **消息追踪层**：通过哈希链接与双轮回溯确认机制，构建不可篡改的消息溯源链，确保通信链路的不可否认性
-- **污点分析层**：采用"十字锁定策略"对消息链和节点行为进行纵横双向评估，精准定位恶意 Prompt 的源头
+- **意图追踪层**：采用"十字锁定策略"对消息链和节点行为进行纵横双向评估，精准定位恶意 Prompt 的源头
 
 本项目是 **ATTP 协议的完整实现**，提供开箱即用的四端部署架构：用户端、Agent 端、工具端和协议节点端。Agent 端通过渠道插件接入主流 Agent 框架（目前已支持 [nanobot](https://github.com/HKUDS/nanobot)，将来计划支持 [OpenClaw](https://github.com/openclaw/openclaw)、[Hermes](https://github.com/NousResearch/hermes-agent) 等）。
 
@@ -288,7 +288,7 @@ python scripts/did_creator.py --hostname did-server.test --names my-agent --outp
   | `web.port` | 协议节点监听端口（默认 `8000`） |
   | `data_dir` | 数据存储目录 |
   | `db_path` | 数据库文件名（相对 data_dir） |
-  | `analysis.enabled` | 是否启用语义污点分析 |
+  | `analysis.enabled` | 是否启用语义意图追踪 |
   | `analysis.api_key` | 分析 API Key |
   | `analysis.base_url` | 分析 API 基础 URL |
   | `analysis.model` | 分析模型名称 |
@@ -384,7 +384,7 @@ python scripts/did_creator.py --hostname did-server.test --names my-agent --outp
 
 通过协议节点（溯源节点）追踪消息传递，消息在传输过程中会被签名和记录并进行双向比对，确保通信链路的完整性和不可否认性。系统可以精确追踪每条消息的发送者、接收者、传输路径和时间戳，为后续的审计和责任追溯提供可靠依据。
 
-#### 污点分析
+#### 意图追踪
 
 采用"十字锁定策略"进行综合评估：
 - **纵向评估**：沿着消息链追踪每条消息的传播路径，分析消息内容在传递过程中的变化，识别可能的恶意注入或篡改

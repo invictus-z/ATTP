@@ -11,7 +11,7 @@ message 把调用分类为 intent / vertical / horizontal，记录 token 用量�
 凭证读取顺序：data/perf_config.local.json（gitignore）→ 环境变量。
 运行：
   cd e:/work/ATTP
-  python test/benchmark/taint_analysis/perf_audit_overhead.py --concurrency 4
+  python test/benchmark/intent_analysis/perf_audit_overhead.py --concurrency 4
 """
 from __future__ import annotations
 

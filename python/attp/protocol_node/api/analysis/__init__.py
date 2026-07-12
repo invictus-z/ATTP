@@ -1,6 +1,6 @@
 """Analysis API — 十字锁定（Cross-Lock）分析路由包。
 
-- vertical:   /api/analysis/v/...   (Session 级纵向语义污点分析)
+- vertical:   /api/analysis/v/...   (Session 级纵向语义意图追踪)
 - horizontal: /api/analysis/h/...   (DID 级横向全局行为分析)
 - cross_lock: /api/analysis/cross-lock/{session_id}  (综合视图)
 """

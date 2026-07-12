@@ -898,7 +898,7 @@ handleTrace(id) → router.push(`/trace?sessionId=${id}&protocolNodeUrl=${url}`)
 
 > 文件：`src/views/TraceView.vue`（1079 行）
 
-这是功能最复杂的视图，提供完整的**行为溯源查询、污点分析和告警**展示。
+这是功能最复杂的视图，提供完整的**行为溯源查询、意图追踪和告警**展示。
 
 #### 核心功能
 
@@ -909,7 +909,7 @@ handleTrace(id) → router.push(`/trace?sessionId=${id}&protocolNodeUrl=${url}`)
 | 行为溯源 | 按 hop 分组的详细行为记录（A2T/A2U/U2A/A2A/T2A） |
 | 分析报告 | 分批分析结果 + 节点裁决（verdict + taint_score） |
 | 告警 | 可疑行为告警 + 可疑节点详情 |
-| 污点分析触发 | 手动触发协议节点的污点分析 |
+| 意图追踪触发 | 手动触发协议节点的意图追踪 |
 
 #### 数据结构
 

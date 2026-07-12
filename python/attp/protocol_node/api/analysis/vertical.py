@@ -1,4 +1,4 @@
-"""纵向分析 API 路由 — Session 级语义污点分析。
+"""纵向分析 API 路由 — Session 级语义意图追踪。
 
 端点（prefix `/api/analysis/v`）：
     GET  /api/analysis/v/report/{session_id}      — 获取纵向分析报告
@@ -34,7 +34,7 @@ def get_vertical_analysis_router(
 
     @router.get("/report/{session_id}")
     async def get_analysis_reports(session_id: str):
-        """Return all vertical taint analysis reports for a session."""
+        """Return all vertical intent tracking reports for a session."""
         try:
             reports = await tracer.recover_analysis_reports(session_id)
             parsed = []
@@ -88,9 +88,9 @@ def get_vertical_analysis_router(
                     if saved.get("intent_json"):
                         intent_data = json.loads(saved["intent_json"])
                     state = {
-                        "batch_index": saved.get("batch_index", 0), # 已生成的报告总数
+                        "pending_count": saved.get("pending_count", 0), # 当前待分析行为的数量
                         "last_trace_id": saved.get("last_trace_id", 0), # 已分析的最新位置
-                        "report_count": saved.get("report_count", 0), # 当前未分析行为的数量
+                        "batch_index": saved.get("batch_index", 0), # 已生成的报告总数
                         "context": saved.get("context", ""),
                     }
             except Exception as e:
@@ -100,9 +100,9 @@ def get_vertical_analysis_router(
             "session_id": session_id,
             "intent": intent_data,
             "analysis_state": {
-                "batch_index": state.get("batch_index", 0),
+                "pending_count": state.get("pending_count", 0),
                 "last_trace_id": state.get("last_trace_id", 0),
-                "report_count": state.get("report_count", 0),
+                "batch_index": state.get("batch_index", 0),
                 "has_context": bool(state.get("context")),
             },
         }
@@ -211,7 +211,7 @@ def get_vertical_analysis_router(
 
     @router.post("/trigger/{session_id}")
     async def trigger_analysis(session_id: str):
-        """Manually trigger vertical taint analysis (async, returns immediately)."""
+        """Manually trigger vertical intent tracking (async, returns immediately)."""
         _coordinator = _coord_ref[0]
         if not _coordinator:
             return {"triggered": False, "reason": "analysis_disabled"}

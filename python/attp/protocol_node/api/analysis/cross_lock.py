@@ -76,12 +76,12 @@ def get_cross_lock_router(tracer: ProtocolTracer) -> APIRouter:
                     }
                 horizontal_dids.append({
                     "did": did,
-                    "accumulated_count": h_state.get("accumulated_count", 0) if h_state else 0,
+                    "pending_count": h_state.get("pending_count", 0) if h_state else 0,
                     "last_horizontal_analysis": latest_h_report,
                 })
             except Exception as e:
                 logger.error("Error loading horizontal data for did={}: {}", did, e)
-                horizontal_dids.append({"did": did, "accumulated_count": 0, "last_horizontal_analysis": None})
+                horizontal_dids.append({"did": did, "pending_count": 0, "last_horizontal_analysis": None})
 
         return {
             "session_id": session_id,

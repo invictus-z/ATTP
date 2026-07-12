@@ -112,7 +112,7 @@ export interface MaliciousDossier {
 /** 横向分析累积状态 */
 export interface HorizontalState {
   did: string
-  accumulated_count: number
+  pending_count: number
   last_trace_id: number
   batch_index: number
   node_type?: string
@@ -124,9 +124,9 @@ export interface VerticalState {
   session_id: string
   intent: IntentDescriptor | null
   analysis_state: {
-    batch_index: number
+    pending_count: number
     last_trace_id: number
-    report_count: number
+    batch_index: number
     has_context: boolean
   }
 }

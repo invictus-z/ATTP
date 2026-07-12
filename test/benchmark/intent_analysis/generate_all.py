@@ -1,6 +1,6 @@
 """生成全部 50 个场景数据库。
 
-运行: cd e:/work/ATTP && python test/benchmark/taint_analysis/generate_all.py
+运行: cd e:/work/ATTP && python test/benchmark/intent_analysis/generate_all.py
 """
 
 from __future__ import annotations

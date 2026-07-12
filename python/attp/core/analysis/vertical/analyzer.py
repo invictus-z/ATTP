@@ -1,4 +1,4 @@
-"""Vertical Axis — 纵向语义污点分析器。
+"""Vertical Axis — 纵向语义意图追踪器。
 
 支持 5 种 field_type（A2T/A2U/U2A/A2A/T2A）的差异化风险分区 Prompt。
 """
@@ -16,14 +16,14 @@ from attp.core.analysis.base_models import IntentDescriptor
 from attp.core.analysis.vertical.models import (
     EvidenceItem,
     NodeBehaviorProfile,
-    NodeTaintVerdict,
-    VerticalTaintReport,
+    NodeIntentVerdict,
+    VerticalIntentReport,
 )
 from attp.core.analysis.vertical.prompts import INTENT_EXTRACTION_PROMPT, VERTICAL_ANALYSIS_PROMPT
 
 logger = get_logger("VerticalAnalysis")
 
-# field_type → sender node_type（与 HorizontalTaintAnalyzer 一致）
+# field_type → sender node_type（与 HorizontalIntentAnalyzer 一致）
 FIELD_TYPE_TO_SENDER_NODE_TYPE: dict[str, str] = {
     "A2T": "agent", "A2U": "agent", "A2A": "agent",
     "U2A": "user",
@@ -51,7 +51,7 @@ def _loads_json_object(raw_content: str, context: str) -> dict[str, Any]:
 def _derive_node_type(traces: list[dict], did: str) -> str:
     """从 traces 中推导指定 DID 的 node_type。
 
-    逻辑与 HorizontalTaintAnalyzer._derive_node_type 完全一致：
+    逻辑与 HorizontalIntentAnalyzer._derive_node_type 完全一致：
     1. 优先取 DID 作为 sender (node_did) 的第一条 trace 的 field_type 推导
     2. Fallback: DID 仅作为 target 出现时，从接收视角推导
 
@@ -78,8 +78,8 @@ def _derive_node_type(traces: list[dict], did: str) -> str:
     return "agent"
 
 
-class VerticalTaintAnalyzer:
-    """Analyzes behavior traces using LLM for vertical (session-level) semantic taint detection."""
+class VerticalIntentAnalyzer:
+    """Analyzes behavior traces using LLM for vertical (session-level) semantic intent deviation detection."""
 
     def __init__(
         self,
@@ -130,11 +130,11 @@ class VerticalTaintAnalyzer:
         traces: list[dict],
         intent: IntentDescriptor,
         previous_context: str = "",
-    ) -> VerticalTaintReport:
-        """Run vertical semantic taint analysis on a batch of behavior traces."""
+    ) -> VerticalIntentReport:
+        """Run vertical semantic intent tracking on a batch of behavior traces."""
         profiles = self._reconstruct_profiles(traces)
         if not profiles:
-            return VerticalTaintReport(
+            return VerticalIntentReport(
                 session_id=session_id,
                 batch_index=batch_index,
                 from_trace_id=from_trace_id,
@@ -173,7 +173,7 @@ class VerticalTaintAnalyzer:
                         description=ref.get("reason", evidence_text),
                         trace_ids=[ref.get("trace_id", 0)],
                     ))
-                verdicts.append(NodeTaintVerdict(
+                verdicts.append(NodeIntentVerdict(
                     node_did=v.get("node_did", ""),
                     hop_count=v.get("hop_count", [0, 0]) if isinstance(v.get("hop_count"), list) else [v.get("hop_count", 0), 0],
                     aligned=v.get("aligned", True),
@@ -191,7 +191,7 @@ class VerticalTaintAnalyzer:
                 v.node_did for v in verdicts if v.node_did
             })
 
-            return VerticalTaintReport(
+            return VerticalIntentReport(
                 session_id=session_id,
                 batch_index=batch_index,
                 from_trace_id=from_trace_id,
@@ -204,7 +204,7 @@ class VerticalTaintAnalyzer:
             )
         except Exception as e:
             logger.error("Vertical analysis failed: {}", e)
-            return VerticalTaintReport(
+            return VerticalIntentReport(
                 session_id=session_id,
                 batch_index=batch_index,
                 from_trace_id=from_trace_id,

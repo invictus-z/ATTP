@@ -10,7 +10,7 @@
 - [4. 认证模块（authentication）](#4-认证模块authentication)
 - [5. 溯源模块（provenance）](#5-溯源模块provenance)
 - [6. 消息模块（message）](#6-消息模块message)
-- [7. 分析模块（analysis）— 十字锁定污点分析](#7-分析模块analysis-十字锁定污点分析)
+- [7. 分析模块（analysis）— 十字锁定意图追踪](#7-分析模块analysis-十字锁定意图追踪)
 - [8. 存储模块（storage）](#8-存储模块storage)
 - [9. 会话模块（sessions）](#9-会话模块sessions)
 - [10. 核心数据流](#10-核心数据流)
@@ -27,7 +27,7 @@ ATTP（Agents Traceability and Trust Protocol）Core 层是整个协议的核心
 |--------|--------------|
 | 安全通信层 | `authentication/` — DID 身份认证、密钥管理、签名验证 |
 | 消息追踪层 | `provenance/`、`message/`、`sessions/` — 哈希链构建、双轮回溯确认、会话管理 |
-| 污点分析层 | `analysis/` — LLM 驱动的语义污点检测 |
+| 意图追踪层 | `analysis/` — LLM 驱动的语义意图偏离检测 |
 | 数据持久化 | `storage/` — SQLite 异步存储引擎 |
 
 Core 层同时提供两个**门面（Facade）类**，分别服务于两种不同角色的节点：
@@ -58,18 +58,18 @@ core/
 │   ├── event.py                 # 消息数据结构（RecordedHop / NodeMessage / BackMessage）
 │   └── back_sender.py           # BackMessage 统一发送函数
 │
-├── analysis/                    # 十字锁定污点分析模块
+├── analysis/                    # 十字锁定意图追踪模块
 │   ├── __init__.py              # 模块声明（CrossLockCoordinator 入口）
 │   ├── base_models.py           # 共享基础模型（IntentDescriptor / EvidenceItem）
 │   ├── cross_lock.py            # 十字锁定协调器（串联纵横两轴）
-│   ├── vertical/                # 纵轴 — Session-Level 实时语义污点分析
-│   │   ├── models.py            # VerticalTaintReport / NodeBehaviorProfile 等
-│   │   ├── analyzer.py          # VerticalTaintAnalyzer — LLM 纵向污点分析器
+│   ├── vertical/                # 纵轴 — Session-Level 实时语义意图追踪
+│   │   ├── models.py            # VerticalIntentReport / NodeBehaviorProfile 等
+│   │   ├── analyzer.py          # VerticalIntentAnalyzer — LLM 纵向意图追踪器
 │   │   ├── prompts.py           # 纵向分析 Prompt（5 种 field_type 风险分区）
 │   │   └── orchestrator.py      # VerticalOrchestrator — 纵向分析编排器
 │   └── horizontal/              # 横轴 — Cross-Session / DID-Level 全局行为分析
-│       ├── models.py            # CrossSessionProfile / DIDVerdict / HorizontalTaintReport
-│       ├── analyzer.py          # HorizontalTaintAnalyzer — LLM 横向污点分析器
+│       ├── models.py            # CrossSessionProfile / DIDVerdict / HorizontalIntentReport
+│       ├── analyzer.py          # HorizontalIntentAnalyzer — LLM 横向意图追踪器
 │       ├── prompts.py           # 横向分析 Prompt（按 node_type 隔离: agent/tool/user）
 │       └── orchestrator.py      # HorizontalOrchestrator — 横向分析编排器
 │
@@ -117,11 +117,11 @@ ProtocolTracer ──┬──→ KeyStore
                        └──→ TraceRepository / AnalysisRepository / HorizontalRepository / ...
 
 CrossLockCoordinator ──┬──→ VerticalOrchestrator
-                       │       ├──→ VerticalTaintAnalyzer
+                       │       ├──→ VerticalIntentAnalyzer
                        │       ├──→ VerticalAnalysisManager
                        │       └──→ ProtocolTracer
                        └──→ HorizontalOrchestrator [可选]
-                               ├──→ HorizontalTaintAnalyzer
+                               ├──→ HorizontalIntentAnalyzer
                                ├──→ HorizontalAnalysisManager
                                └──→ ProtocolTracer
 ```
@@ -467,14 +467,14 @@ async def send_back_message(
 
 ---
 
-## 7. 分析模块（analysis）— 十字锁定污点分析
+## 7. 分析模块（analysis）— 十字锁定意图追踪
 
-基于 LLM 的语义污点分析系统，采用**十字锁定（Cross-Lock）架构**，将分析分为**纵轴（Vertical）**和**横轴（Horizontal）**两个独立的维度。
+基于 LLM 的语义意图追踪系统，采用**十字锁定（Cross-Lock）架构**，将分析分为**纵轴（Vertical）**和**横轴（Horizontal）**两个独立的维度。
 
 | 维度 | 分析粒度 | 核心类 | 说明 |
 |------|---------|--------|------|
-| **纵轴（VerticalAxis）** | Session-Level | `VerticalTaintAnalyzer` + `VerticalOrchestrator` | 单次会话内的实时语义污点分析 |
-| **横轴（HorizontalAxis）** | DID-Level (Cross-Session) | `HorizontalTaintAnalyzer` + `HorizontalOrchestrator` | 跨会话的全局行为分析 |
+| **纵轴（VerticalAxis）** | Session-Level | `VerticalIntentAnalyzer` + `VerticalOrchestrator` | 单次会话内的实时语义意图追踪 |
+| **横轴（HorizontalAxis）** | DID-Level (Cross-Session) | `HorizontalIntentAnalyzer` + `HorizontalOrchestrator` | 跨会话的全局行为分析 |
 | **十字锁定** | 纵横联动 | `CrossLockCoordinator` | 纵向分析完成后自动触发横向累积 |
 
 ### 7.1 共享基础模型（`base_models.py`）
@@ -519,7 +519,7 @@ async def send_back_message(
 | `field_d` | A2A | Agent → Agent 消息记录 |
 | `field_e` | T2A | Tool → Agent 返回记录 |
 
-##### NodeTaintVerdict — 节点污点判定
+##### NodeIntentVerdict — 节点意图偏离判定
 
 单个节点的分析判定结果：
 
@@ -529,10 +529,10 @@ async def send_back_message(
 | `deviation_type` | 偏离类型 |
 | `influence_detected` | 是否检测到节点间恶意影响 |
 | `influence_type` | 影响类型 |
-| `taint_score` | 污点分数（0.0 - 1.0） |
+| `taint_score` | 意图偏离分数（0.0 - 1.0） |
 | `severity` | 严重程度（none / low / medium / high） |
 
-##### VerticalTaintReport — 纵向分析报告
+##### VerticalIntentReport — 纵向分析报告
 
 | 字段 | 说明 |
 |------|------|
@@ -543,15 +543,15 @@ async def send_back_message(
 | `context_summary` | 上下文摘要（传递给下一批次分析） |
 | `analyzed_dids` | 本次分析涉及的所有 node_did（用于 Cross-Lock 横向触发） |
 
-#### 7.2.2 VerticalTaintAnalyzer（`vertical/analyzer.py`）
+#### 7.2.2 VerticalIntentAnalyzer（`vertical/analyzer.py`）
 
-基于 LLM 的纵向语义污点分析引擎。
+基于 LLM 的纵向语义意图追踪引擎。
 
 **两阶段分析流程**：
 
 **阶段一：意图提取**（`extract_intent`）— 从用户原始输入提取结构化意图。
 
-**阶段二：语义污点分析**（`analyze`）— 对一批行为 trace 执行按消息类型的风险审查：
+**阶段二：语义意图追踪**（`analyze`）— 对一批行为 trace 执行按消息类型的风险审查：
 
 | 消息类型 | 风险审查维度 |
 |---------|------------|
@@ -571,7 +571,7 @@ profiles (list[NodeBehaviorProfile])
   ↓ _format_behaviors()        — 格式化为 LLM 输入（含 U2A/T2A 字段）
 VERTICAL_ANALYSIS_PROMPT
   ↓ LLM 调用
-VerticalTaintReport（含 analyzed_dids）
+VerticalIntentReport（含 analyzed_dids）
 ```
 
 #### 7.2.3 纵轴 Prompt 模板（`vertical/prompts.py`）
@@ -588,7 +588,7 @@ VerticalTaintReport（含 analyzed_dids）
 1. 意图对齐检查
 2. 按消息类型的风险审查（A2A / A2T / A2U / U2A / T2A 各有独立审查项）
 
-污点评分标准：
+意图偏离评分标准：
 
 | 分数范围 | severity | 含义 |
 |---------|----------|------|
@@ -617,7 +617,7 @@ VerticalTaintReport（含 analyzed_dids）
 ```
 1. 检查 intent 是否已提取
 2. 恢复未分析的 traces（recover_traces_since）
-3. 调用 VerticalTaintAnalyzer.analyze()
+3. 调用 VerticalIntentAnalyzer.analyze()
 4. 持久化报告到 SQLite（返回 report_row_id）
 5. 更新 session 状态（重置计数、移动游标、存储上下文）
 6. 如果判定为 suspicious/malicious：
@@ -666,9 +666,9 @@ await VerticalAnalysisManager._persist_state(session_id) # 保存到 SQLite
 | `threat_pattern` | 威胁模式 |
 | `evidence_items` | 证据列表 |
 | `severity` | 严重程度 |
-| `taint_score` | 污点分数 |
+| `taint_score` | 意图偏离分数 |
 
-##### HorizontalTaintReport — 横向分析报告
+##### HorizontalIntentReport — 横向分析报告
 
 | 字段 | 说明 |
 |------|------|
@@ -680,9 +680,9 @@ await VerticalAnalysisManager._persist_state(session_id) # 保存到 SQLite
 | `overall_verdict` | 总体判定 |
 | `context_summary` | 上下文摘要（传递给下次横向分析） |
 
-#### 7.3.2 HorizontalTaintAnalyzer（`horizontal/analyzer.py`）
+#### 7.3.2 HorizontalIntentAnalyzer（`horizontal/analyzer.py`）
 
-基于 LLM 的横向语义污点分析引擎。按 `node_type` 选择隔离的 Prompt 模板，对单个 DID 跨所有 Session 的行为进行全局分析。
+基于 LLM 的横向语义意图追踪引擎。按 `node_type` 选择隔离的 Prompt 模板，对单个 DID 跨所有 Session 的行为进行全局分析。
 
 **node_type 推导规则**：
 
@@ -704,7 +704,7 @@ CrossSessionProfile
   ↓ _format_profile()               — 格式化为 LLM 输入
 HORIZONTAL_PROMPT_MAP[node_type]
   ↓ LLM 调用
-HorizontalTaintReport
+HorizontalIntentReport
 ```
 
 #### 7.3.3 横轴 Prompt 模板（`horizontal/prompts.py`）
@@ -812,8 +812,8 @@ class CrossLockCoordinator:
 |------|------|
 | `restore_state(session_id)` | 从 SQLite 恢复纵向状态（仅首次） |
 | `get_state(session_id)` | 获取纵向分析状态 |
-| `increment_report_count(session_id)` | 递增纵向报告计数 |
-| `reset_report_count(session_id)` | 重置纵向报告计数 |
+| `increment_pending_count(session_id)` | 递增纵向待分析行为计数 |
+| `reset_pending_count(session_id)` | 重置纵向待分析行为计数 |
 | `update_cursor(session_id, batch_index, last_trace_id, context)` | 更新纵向分析游标 |
 | `set_intent(session_id, intent)` | 设置用户意图 |
 | `get_intent(session_id)` | 获取用户意图 |
@@ -825,8 +825,8 @@ class CrossLockCoordinator:
 | 方法 | 功能 |
 |------|------|
 | `restore_state(did)` | 从 SQLite 恢复 DID 横向状态 |
-| `increment_accumulation(did)` | 累加 DID 的横向计数器 |
-| `reset_accumulation(did)` | 重置 DID 的横向计数器 |
+| `increment_pending_count(did)` | 累加 DID 的横向待分析计数器 |
+| `reset_pending_count(did)` | 重置 DID 的横向待分析计数器 |
 | `get_cursor(did)` | 获取 DID 的横向分析游标 |
 | `update_cursor(did, batch_index, last_trace_id, context, node_type)` | 更新 DID 的横向分析游标 |
 
@@ -905,8 +905,8 @@ class BaseRepository:
 |------|------|
 | `save_horizontal_state(did, state)` | INSERT OR REPLACE 横向分析状态 |
 | `load_horizontal_state(did)` | 加载 DID 横向分析状态 |
-| `increment_accumulated_count(did)` | 原子递增累积计数 |
-| `reset_accumulated_count(did)` | 重置累积计数 |
+| `increment_pending_count(did)` | 原子递增待分析计数 |
+| `reset_pending_count(did)` | 重置待分析计数 |
 | `save_horizontal_report(report_json) -> int` | 保存横向分析报告，返回插入行 ID |
 | `recover_horizontal_reports(did)` | 查询 DID 全部横向分析报告 |
 
@@ -1061,7 +1061,7 @@ class PendingMessage:
 | **Nonce 追踪** | `mark_nonce_completed()`, `has_subsequent_activity_after()`, `has_subsequent_with_different_verified_identity()` |
 | **可信名单** | `add_trusted_did()`, `get_latest_trusted_did()`, `clear_trusted_list()` |
 | **验证便捷方法** | `complete_verification(nonce, hop_count, trusted_did)` — 一次完成所有 Branch B 状态更新 |
-| **纵向分析状态** | `increment_report_count()`, `reset_report_count()`, `update_analysis_cursor()`, `set_intent()`, `get_intent()`（状态存储在 `vertical_analysis` 字段） |
+| **纵向分析状态** | `increment_pending_count()`, `reset_pending_count()`, `update_analysis_cursor()`, `set_intent()`, `get_intent()`（状态存储在 `vertical_analysis` 字段） |
 
 #### ProtocolSessionManager
 
@@ -1147,12 +1147,12 @@ class ToolSession:
 | 内容验证 | — | `verify_back_propagation()` 三步验证 |
 | 行为记录 | — | 保存 `behavior_entry` |
 
-### 10.2 十字锁定污点分析流程
+### 10.2 十字锁定意图追踪流程
 
 #### 10.2.1 纵轴分析流程（Session-Level）
 
 ```
-  DataPort                    CrossLockCoordinator        VerticalOrchestrator        VerticalTaintAnalyzer
+  DataPort                    CrossLockCoordinator        VerticalOrchestrator        VerticalIntentAnalyzer
     │                              │                              │                              │
     │  U2A record                  │                              │                              │
     ├─────────────────────────────→│                              │                              │
@@ -1167,7 +1167,7 @@ class ToolSession:
     ├─────────────────────────────→│                              │                              │
     │                              │  on_record_received()        │                              │
     │                              ├─────────────────────────────→│                              │
-    │                              │                              │  increment_report_count()    │
+    │                              │                              │  increment_pending_count()    │
     │                              │                              │                              │
     │  ... (N records)             │                              │                              │
     │                              │                              │  count >= batch_size?        │
@@ -1182,7 +1182,7 @@ class ToolSession:
     │                              │                              │              LLM 调用        │
     │                              │                              │    （5种field_type风险审查）  │
     │                              │                              │                              │
-    │                              │                              │  VerticalTaintReport         │
+    │                              │                              │  VerticalIntentReport         │
     │                              │                              │  （含 analyzed_dids）         │
     │                              │                              │←─────────────────────────────┤
     │                              │                              │                              │
@@ -1201,14 +1201,14 @@ class ToolSession:
 #### 10.2.2 横轴分析流程（DID-Level，由纵轴自动触发）
 
 ```
-  VerticalOrchestrator         CrossLockCoordinator         HorizontalOrchestrator       HorizontalTaintAnalyzer
+  VerticalOrchestrator         CrossLockCoordinator         HorizontalOrchestrator       HorizontalIntentAnalyzer
     │                              │                              │                              │
     │  纵向分析完成                 │                              │                              │
     │  report.analyzed_dids        │                              │                              │
     ├─────────────────────────────→│                              │                              │
     │                              │  _on_vertical_done(did)      │                              │
     │                              ├─────────────────────────────→│                              │
-    │                              │                              │  increment_accumulation(did) │
+    │                              │                              │  increment_pending_count(did) │
     │                              │                              │                              │
     │                              │                              │  count >= threshold?         │
     │                              │                              │  ──── YES ───→               │
@@ -1224,7 +1224,7 @@ class ToolSession:
     │                              │                              │              LLM 调用        │
     │                              │                              │    （node_type专用Prompt）    │
     │                              │                              │                              │
-    │                              │                              │  HorizontalTaintReport       │
+    │                              │                              │  HorizontalIntentReport       │
     │                              │                              │←─────────────────────────────┤
     │                              │                              │                              │
     │                              │                              │  save_horizontal_report()    │
@@ -1287,7 +1287,7 @@ Database 类在 `initialize()` 中创建 9 张表和对应索引，包含自动�
 |------|------|------|
 | `session_id` | TEXT PK | 会话 ID |
 | `intent_json` | TEXT | 意图 JSON |
-| `report_count` | INTEGER DEFAULT 0 | 当前批次报告计数 |
+| `pending_count` | INTEGER DEFAULT 0 | 当前批次待分析行为计数 |
 | `last_trace_id` | INTEGER DEFAULT 0 | 最后分析的 trace ID |
 | `batch_index` | INTEGER DEFAULT 0 | 当前批次序号 |
 | `context` | TEXT DEFAULT '' | 上下文摘要 |
@@ -1301,7 +1301,7 @@ Database 类在 `initialize()` 中创建 9 张表和对应索引，包含自动�
 |------|------|------|
 | `did` | TEXT PK | 节点 DID |
 | `node_type` | TEXT NOT NULL DEFAULT 'agent' | 节点类型 |
-| `accumulated_count` | INTEGER NOT NULL DEFAULT 0 | 累积计数器 |
+| `pending_count` | INTEGER NOT NULL DEFAULT 0 | 待分析行为计数器 |
 | `last_trace_id` | INTEGER NOT NULL DEFAULT 0 | 最后分析的 trace ID |
 | `batch_index` | INTEGER NOT NULL DEFAULT 0 | 当前批次序号 |
 | `context` | TEXT NOT NULL DEFAULT '' | 上下文摘要 |
@@ -1365,7 +1365,7 @@ Database 类在 `initialize()` 中创建 9 张表和对应索引，包含自动�
 | `session_id` | TEXT NOT NULL DEFAULT '' | 会话 ID |
 | `evidence_type` | TEXT NOT NULL | 证据类型 |
 | `severity` | TEXT NOT NULL DEFAULT 'medium' | 严重程度 |
-| `taint_score` | REAL NOT NULL DEFAULT 0.0 | 污点分数 |
+| `taint_score` | REAL NOT NULL DEFAULT 0.0 | 意图偏离分数 |
 | `evidence_description` | TEXT NOT NULL DEFAULT '' | 证据描述 |
 | `nonce` | TEXT DEFAULT '' | Nonce |
 | `report_id` | INTEGER DEFAULT NULL | 关联的分析报告 ID |
@@ -1413,7 +1413,7 @@ Database 类在 `initialize()` 中创建 9 张表和对应索引，包含自动�
 | `authentication` | DID 身份认证、密钥管理、签名验证 | Agent 端、协议节点端 |
 | `provenance` | 消息溯源链构建、哈希计算、篡改检测 | Agent 端（追加跳）、协议节点（验证） |
 | `message` | 消息数据结构、回传发送 | 所有节点 |
-| `analysis` | 十字锁定污点分析（纵轴 + 横轴 + 协调器） | 协议节点端 |
+| `analysis` | 十字锁定意图追踪（纵轴 + 横轴 + 协调器） | 协议节点端 |
 | `storage` | SQLite 异步持久化（含迁移） | 协议节点端 |
 | `sessions` | 三层会话管理（App/协议节点/工具）+ 分析状态管理 | 对应层次的节点 |
 
@@ -1425,5 +1425,5 @@ Database 类在 `initialize()` 中创建 9 张表和对应索引，包含自动�
 | `aiosqlite` | 异步 SQLite 访问 |
 | `aiohttp` | DID 解析 HTTP 请求、BackMessage 回传 |
 | `base58` | DID 文档中 Multibase/Base58 编码的公钥解析 |
-| `openai`（AsyncOpenAI） | LLM 语义污点分析 |
+| `openai`（AsyncOpenAI） | LLM 语义意图追踪 |
 | `dataclasses` | 数据模型定义 |

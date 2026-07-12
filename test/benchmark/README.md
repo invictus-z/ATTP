@@ -11,7 +11,7 @@
 
 | 子实验 | 目录 | 测什么 | 入口 |
 |--------|------|--------|------|
-| **A. 意图审计** | [taint_analysis/](taint_analysis/) | Cross-Lock 子系统（纵向 + 横向意图审计）的检出 / 误报 / 归因 / 校准能力 | `evaluate.py` |
+| **A. 意图审计** | [intent_analysis/](intent_analysis/) | Cross-Lock 子系统（纵向 + 横向意图审计）的检出 / 误报 / 归因 / 校准能力 | `evaluate.py` |
 | **B. 协议对比** | [protocol_comparison/](protocol_comparison/) | ATTP vs ANP/ACP/A2A 在「用户侧定位恶意节点」能力上的差距 | `compare_protocols.py` |
 
 两者共享 `data/scenarios/`（场景库）与 `data/results/`（测量产物）——协议对比的 ATTP 列直接复用意图审计的 LLM 评测结果。
@@ -24,7 +24,7 @@
 ```
 test/benchmark/
 ├── README.md                      # 本文件
-├── taint_analysis/                # ★ 意图审计代码
+├── intent_analysis/                # ★ 意图审计代码
 │   ├── registry.py                # 63 场景声明式定义（数据集真值来源）
 │   ├── benchmark_lib.py           # 场景构建库（表结构 / ScenarioSpec / trace 模板）
 │   ├── generate_all.py            # 数据集生成器（确定性重建 scenarios/*.db）
@@ -50,7 +50,7 @@ test/benchmark/
 数据集可由代码**重建**——`generate_all.py` 仅依赖 Python 标准库，从 `registry.py` 生成全部 63 个 `data/scenarios/*.db`：
 
 ```bash
-python test/benchmark/taint_analysis/generate_all.py    # → data/scenarios/*.db
+python test/benchmark/intent_analysis/generate_all.py    # → data/scenarios/*.db
 ```
 
 ---
@@ -71,9 +71,9 @@ RESULTS_DIR   = BENCH_ROOT / "data" / "results"
 
 ---
 
-## 5. 子实验 A：意图审计（[taint_analysis/](taint_analysis/)）
+## 5. 子实验 A：意图审计（[intent_analysis/](intent_analysis/)）
 
-量化评测 ATTP 协议节点 **Cross-Lock 意图审计子系统**（纵向 `VerticalTaintAnalyzer` + 横向 `HorizontalTaintAnalyzer` + `CrossLockCoordinator`）。数据集以 **MisActBench** 为基础改编，真实攻击载荷（`rm -rf /etc/security`、`curl ... | bash`、`zip -rm -P` 加密外泄等）按失准类型转译为 ATTP 多智能体协议消息流，并扩展至金融 / 医疗 / DevOps / 电商客服领域。
+量化评测 ATTP 协议节点 **Cross-Lock 意图审计子系统**（纵向 `VerticalIntentAnalyzer` + 横向 `HorizontalIntentAnalyzer` + `CrossLockCoordinator`）。数据集以 **MisActBench** 为基础改编，真实攻击载荷（`rm -rf /etc/security`、`curl ... | bash`、`zip -rm -P` 加密外泄等）按失准类型转译为 ATTP 多智能体协议消息流，并扩展至金融 / 医疗 / DevOps / 电商客服领域。
 
 ### 5.1 数据集概览（63 场景）
 
@@ -91,29 +91,29 @@ RESULTS_DIR   = BENCH_ROOT / "data" / "results"
 
 ```bash
 # 准备数据集（路径 A：本地重建，推荐）
-python test/benchmark/taint_analysis/generate_all.py
+python test/benchmark/intent_analysis/generate_all.py
 
 # (1) dry：不调 LLM，用理想数据自测评测逻辑（秒级，期望全指标 = 1.0 / MAE = 0）
-python test/benchmark/taint_analysis/evaluate.py --mode dry
+python test/benchmark/intent_analysis/evaluate.py --mode dry
 
 # (2) llm：真实 LLM 全量评测（约 66 分钟，并发 8）
-python test/benchmark/taint_analysis/evaluate.py --mode llm --concurrency 8
+python test/benchmark/intent_analysis/evaluate.py --mode llm --concurrency 8
 
 # 指定模型 / API 端点 / 结果目录
-python test/benchmark/taint_analysis/evaluate.py --mode llm --model gpt-5.4 \
+python test/benchmark/intent_analysis/evaluate.py --mode llm --model gpt-5.4 \
     --base-url https://api.bltcy.ai/v1 --api-key <your-key> --provider-dir chatgpt
 
 # (3) eval-only：复用已生成结果，秒级重评
-python test/benchmark/taint_analysis/evaluate.py --mode eval-only
+python test/benchmark/intent_analysis/evaluate.py --mode eval-only
 
 # 批量跑多模型并按目录落盘（data/results/{deepseek,chatgpt,gemini,claude,glm}/）
-python test/benchmark/taint_analysis/run_model_matrix.py --base-url https://api.bltcy.ai/v1 --api-key <key>
+python test/benchmark/intent_analysis/run_model_matrix.py --base-url https://api.bltcy.ai/v1 --api-key <key>
 
 # 统一终评（含 error 宽容，重算混淆矩阵）
-python test/benchmark/taint_analysis/eval_final.py
+python test/benchmark/intent_analysis/eval_final.py
 
 # Cross-Lock 审计开销测量（token 用量 + 端到端延迟）
-python test/benchmark/taint_analysis/perf_audit_overhead.py --concurrency 4
+python test/benchmark/intent_analysis/perf_audit_overhead.py --concurrency 4
 ```
 
 环境：Python ≥ 3.13；依赖 `openai`（AsyncOpenAI）、`aiosqlite` 及本仓库 `python/` 下的 ATTP 核心包。LLM 配置见 [§7](#7-凭证配置)。
@@ -218,15 +218,15 @@ python test/benchmark/protocol_comparison/structural_defense_test.py
 
 ## 9. 如何扩展（新增意图审计场景）
 
-1. 在 [registry.py](taint_analysis/registry.py) 对应类别列表（`VERTICAL` / `HORIZONTAL` / `CLEAN` / `BOUNDARY`）中追加一个 `ScenarioSpec`，填写：
+1. 在 [registry.py](intent_analysis/registry.py) 对应类别列表（`VERTICAL` / `HORIZONTAL` / `CLEAN` / `BOUNDARY`）中追加一个 `ScenarioSpec`，填写：
    - `sid`（如 `v25`）/ `name` / `category` / `attack_type` / `difficulty` / `field_channel`
    - `mal_agent` / `user_name` / `sessions`（用 `S(...)` / `A(...)` / `C(...)` 模板，横向链用 `_chain([...])`）
    - 理想标注：`ideal_vert_score` / `ideal_horiz_score` / `ideal_horiz_pattern` / `should_trigger_horizontal`
-2. 运行 `python test/benchmark/taint_analysis/generate_all.py` 重新生成 DB。
-3. `python test/benchmark/taint_analysis/evaluate.py --mode dry` 自检（应保持全 1.0）。
-4. `python test/benchmark/taint_analysis/evaluate.py --mode llm --scenarios <新sid>` 单场景真实评测。
+2. 运行 `python test/benchmark/intent_analysis/generate_all.py` 重新生成 DB。
+3. `python test/benchmark/intent_analysis/evaluate.py --mode dry` 自检（应保持全 1.0）。
+4. `python test/benchmark/intent_analysis/evaluate.py --mode llm --scenarios <新sid>` 单场景真实评测。
 
-模板与字段语义参见 [benchmark_lib.py](taint_analysis/benchmark_lib.py) 与 [SPEC.md §6–§7](docs/SPEC.md)。
+模板与字段语义参见 [benchmark_lib.py](intent_analysis/benchmark_lib.py) 与 [SPEC.md §6–§7](docs/SPEC.md)。
 
 ---
 
