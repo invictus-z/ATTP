@@ -77,17 +77,30 @@ const vAlerts = computed<Alert[]>(() =>
 // LLM「工作中 → 完成」转换时，后端累计状态与报告均已更新，重拉刷新页面
 const vFlow = useAnalysisFlow('v', (sid) => { void fetchVerticalState(sid); void fetchVerticalReport(sid) })
 const hFlow = useAnalysisFlow('h', (did) => { void fetchHorizontalState(did); void fetchHorizontalReport(did) })
+// 横向 pending_count 在纵向分析完成时累加（后端发布 horizontal.accumulated 事件），
+// 收到即刷新横向累计状态，实现实时更新。
+hFlow.onStateChange((did) => { void fetchHorizontalState(did) })
 
 const currentStatus = computed<AnalysisStatus | null>(() =>
   queryMode.value === 'vertical' ? vFlow.status.value : hFlow.status.value,
 )
 
-/** 状态展示：running | completed | failed | not_found | uptodate | idle */
-const statusKind = computed<'idle' | 'running' | 'completed' | 'failed' | 'not_found' | 'uptodate'>(() => {
+/** 状态展示：running | completed | failed | pending | uptodate
+ *  - 触发分析按钮始终显示（见 AnalysisStatusBar），本字段仅驱动状态指示文案。
+ *  - pending（有待分析行为）优先于陈旧的 completed，确保新积压时按钮立即可用。 */
+const currentPending = computed(() =>
+  queryMode.value === 'vertical'
+    ? vState.value?.analysis_state.pending_count ?? 0
+    : hState.value?.pending_count ?? 0,
+)
+
+const statusKind = computed<'idle' | 'running' | 'completed' | 'failed' | 'pending' | 'uptodate'>(() => {
   const s = currentStatus.value
-  if (!s) return 'idle'
-  if (s.status === 'running' || s.status === 'already_running') return 'running'
-  if (s.status === 'completed') {
+  if (s?.status === 'running' || s?.status === 'already_running') return 'running'
+  // 有待分析行为 → pending（按钮可点击），无论上次状态如何
+  if (currentPending.value > 0) return 'pending'
+  // 无待分析行为：根据上次结果判定
+  if (s?.status === 'completed') {
     if (s.triggered === false) {
       // 已分析过、无新增 trace（旧报告仍有效）——不是失败
       const r = s.reason || ''
@@ -96,8 +109,7 @@ const statusKind = computed<'idle' | 'running' | 'completed' | 'failed' | 'not_f
     }
     return 'completed'
   }
-  if (s.status === 'not_found') return 'not_found'
-  return 'idle'
+  return 'uptodate'
 })
 
 // 触发分析按钮禁用：累计未分析行为数为 0 时无需分析
@@ -217,12 +229,18 @@ function onViewDossier(did: string) {
 }
 
 function switchMode(mode: 'vertical' | 'horizontal') {
+  if (mode === queryMode.value) return
+  // 离开当前轴：关闭其 SSE 订阅（订阅现为长连接，需显式断开避免残留）
+  if (queryMode.value === 'vertical') void vFlow.unsubscribe()
+  else void hFlow.unsubscribe()
+  void unsubscribeTrace()
   queryMode.value = mode
   hasQueried.value = false
-  void unsubscribeTrace()
 }
 
-// ── trace.recorded SSE 订阅：行为链实时生长 ──
+// ── trace.recorded SSE 订阅：行为链 + 纵向累计状态实时更新 ──
+// 每条 record 落库后后端发布 trace.recorded；纵向 pending_count / last_trace_id
+// 随之变化，故同时刷新行为链与累计状态，使「未分析行为数」实时增长。
 let traceSseConn: SseConnection | null = null
 
 async function subscribeTrace(sid: string) {
@@ -236,8 +254,27 @@ async function subscribeTrace(sid: string) {
     return
   }
   onSseEvent(traceSseConn, (event) => {
-    if (event === 'trace.recorded') void fetchBehavior(sid)
+    if (event === 'trace.recorded') {
+      void fetchBehavior(sid)
+      void fetchVerticalState(sid)
+    }
   })
+}
+
+/** 手动刷新当前轴的全部展示数据（状态 + 报告 + 行为链）。 */
+function refreshCurrent() {
+  if (queryMode.value === 'vertical') {
+    const sid = sessionIdInput.value.trim()
+    if (!sid) return
+    void fetchBehavior(sid)
+    void fetchVerticalState(sid)
+    void fetchVerticalReport(sid)
+  } else {
+    const did = didInput.value.trim()
+    if (!did) return
+    void fetchHorizontalState(did)
+    void fetchHorizontalReport(did)
+  }
 }
 
 async function unsubscribeTrace() {
@@ -382,11 +419,10 @@ onMounted(async () => {
                 </div>
                 <!-- ── 分析状态条 ── -->
                 <AnalysisStatusBar
-                  v-if="currentStatus"
                   :status="currentStatus" :status-kind="statusKind"
                   :polling="vFlow.running.value" :trigger-loading="vFlow.triggerLoading.value"
                   :refresh-disabled="!sessionIdInput.trim()" :trigger-disabled="vTriggerDisabled"
-                  @refresh="vFlow.subscribe(sessionIdInput.trim())"
+                  @refresh="refreshCurrent"
                   @trigger="doTrigger"
                 />
                 <!-- 意图 (intent) -->
@@ -532,11 +568,10 @@ onMounted(async () => {
                   </div>
                   <!-- ── 分析状态条 ── -->
                   <AnalysisStatusBar
-                    v-if="currentStatus"
                     :status="currentStatus" :status-kind="statusKind"
                     :polling="hFlow.running.value" :trigger-loading="hFlow.triggerLoading.value"
                     :refresh-disabled="!didInput.trim()" :trigger-disabled="hTriggerDisabled"
-                    @refresh="hFlow.subscribe(didInput.trim())"
+                    @refresh="refreshCurrent"
                     @trigger="doTrigger"
                   />
                 </div>

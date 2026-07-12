@@ -207,6 +207,14 @@ class VerticalOrchestrator:
         report_json = json.dumps(report.to_dict(), ensure_ascii=False)
         report_row_id = await self._tracer.save_analysis_report(report_json)
 
+        # Update session state FIRST, then publish — 否则前端收到 analysis.report
+        # 立即拉取状态时会读到旧的 batch_index / last_trace_id / pending_count。
+        await self._state_mgr.reset_pending_count(session_id)
+        await self._state_mgr.update_cursor(
+            session_id, batch_index=batch_index,
+            last_trace_id=max_id, context=report.context_summary,
+        )
+
         if self._broker:
             await self._broker.publish(
                 "analysis.report",
@@ -220,13 +228,6 @@ class VerticalOrchestrator:
                 },
                 topic="analysis",
             )
-
-        # Update session state
-        await self._state_mgr.reset_pending_count(session_id)
-        await self._state_mgr.update_cursor(
-            session_id, batch_index=batch_index,
-            last_trace_id=max_id, context=report.context_summary,
-        )
 
         # Notify if suspicious or malicious
         if report.overall_verdict == "error":

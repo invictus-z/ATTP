@@ -94,11 +94,27 @@ class HorizontalOrchestrator:
         Increments accumulation counter for the DID.
         Triggers horizontal analysis if threshold reached.
 
+        发布 ``horizontal.accumulated`` 事件（topic=analysis, payload 含 did），
+        使前端订阅该 DID 的客户端能实时刷新横向累计状态（pending_count 等）。
+
         Returns:
             {"pending_count": int, "threshold": int, "triggered": bool}
         """
         count = await self._state_mgr.increment_pending_count(did)
         triggered = False
+
+        if self._broker:
+            await self._broker.publish(
+                "horizontal.accumulated",
+                {
+                    "axis": "horizontal",
+                    "did": did,
+                    "session_id": session_id,
+                    "pending_count": count,
+                    "threshold": self._threshold,
+                },
+                topic="analysis",
+            )
 
         if count >= self._threshold:
             logger.info(
@@ -183,6 +199,18 @@ class HorizontalOrchestrator:
         report_json = json.dumps(report.to_dict(), ensure_ascii=False)
         report_row_id = await self._tracer.storage.save_horizontal_report(report_json)
 
+        # Step 8: Update cursor and reset accumulation FIRST, then publish —
+        # 否则前端收到 analysis.report 立即拉取状态时会读到旧的 batch_index /
+        # last_trace_id / pending_count。
+        await self._state_mgr.update_cursor(
+            did,
+            batch_index=batch_index,
+            last_trace_id=max_id,
+            context=report.context_summary,
+            node_type=node_type,
+        )
+        await self._state_mgr.reset_pending_count(did)
+
         if self._broker:
             await self._broker.publish(
                 "analysis.report",
@@ -196,16 +224,6 @@ class HorizontalOrchestrator:
                 },
                 topic="analysis",
             )
-
-        # Step 8: Update cursor and reset accumulation
-        await self._state_mgr.update_cursor(
-            did,
-            batch_index=batch_index,
-            last_trace_id=max_id,
-            context=report.context_summary,
-            node_type=node_type,
-        )
-        await self._state_mgr.reset_pending_count(did)
 
         # Step 9: Update malicious_reports + dossier if malicious
         if report.overall_verdict in ("suspicious", "malicious"):
