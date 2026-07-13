@@ -1,0 +1,37 @@
+{
+    "did": "did:wba:attp-diting.cn:openclaw:e1_YNw__7D3uvUNyLX-2trt9hjOQw0hkmzGYddAsoNHsnY",
+    "attpClient": {
+        "didDocPath": "~/.attp/agent/openclaw/did/did.json",
+        "didKeyPath": "~/.attp/agent/openclaw/did/key-1_private.pem",
+        "nodeAds": []
+    },
+    "attpServer": {
+        "name": "diting-agent-openclaw",
+        "prefix": "/agent",
+        "description": "谛听演示智能体节点 (openclaw)",
+        "serverHost": "0.0.0.0",
+        "serverPort": 19000,
+        "privateKeyPath": "~/.attp/agent/openclaw/did/key-1_private.pem",
+        "publicKeyPath": "~/.attp/agent/openclaw/did/key-1_public.pem"
+    },
+    "webApp": {
+        "host": "0.0.0.0",
+        "port": 19001
+    },
+    "tool": {
+        "host": "127.0.0.1",
+        "port": 19002,
+        "toolNodeAds": [
+            "http://tool:9999/attp/ad.json"
+        ]
+    },
+    "heartbeat": {
+        "interval": 30,
+        "timeout": 90,
+        "maxFail": 3
+    },
+    "protocolNode": {
+        "enabled": false,
+        "configPath": "~/.attp/protocol_node/config.json"
+    }
+}

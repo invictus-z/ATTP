@@ -1,0 +1,58 @@
+{
+  "@context": [
+    "https://www.w3.org/ns/did/v1",
+    "https://w3id.org/security/data-integrity/v2",
+    "https://w3id.org/security/multikey/v1",
+    "https://w3id.org/security/suites/x25519-2019/v1"
+  ],
+  "id": "did:wba:attp-diting.cn:openclaw:e1_YNw__7D3uvUNyLX-2trt9hjOQw0hkmzGYddAsoNHsnY",
+  "verificationMethod": [
+    {
+      "id": "did:wba:attp-diting.cn:openclaw:e1_YNw__7D3uvUNyLX-2trt9hjOQw0hkmzGYddAsoNHsnY#key-1",
+      "type": "Multikey",
+      "controller": "did:wba:attp-diting.cn:openclaw:e1_YNw__7D3uvUNyLX-2trt9hjOQw0hkmzGYddAsoNHsnY",
+      "publicKeyMultibase": "z6Mkrptk4aYSkbkjVEmPSmYGeo93S8TCzJsNtjqgQTCewqnb"
+    },
+    {
+      "id": "did:wba:attp-diting.cn:openclaw:e1_YNw__7D3uvUNyLX-2trt9hjOQw0hkmzGYddAsoNHsnY#key-2",
+      "type": "EcdsaSecp256r1VerificationKey2019",
+      "controller": "did:wba:attp-diting.cn:openclaw:e1_YNw__7D3uvUNyLX-2trt9hjOQw0hkmzGYddAsoNHsnY",
+      "publicKeyJwk": {
+        "kty": "EC",
+        "crv": "P-256",
+        "x": "q75sKZ5lTB5dZGmtVhCPj2p0Zq98jfvU-LZ1BLoizyw",
+        "y": "JJzggEJsLSZagKW4Y6YSQRrnhB3qLxPkxEmtGbrmO_s"
+      }
+    },
+    {
+      "id": "did:wba:attp-diting.cn:openclaw:e1_YNw__7D3uvUNyLX-2trt9hjOQw0hkmzGYddAsoNHsnY#key-3",
+      "type": "X25519KeyAgreementKey2019",
+      "controller": "did:wba:attp-diting.cn:openclaw:e1_YNw__7D3uvUNyLX-2trt9hjOQw0hkmzGYddAsoNHsnY",
+      "publicKeyMultibase": "zGS8kF9WUJpA6z7hFJssNmXo48nrMfsodhXvTXd9Q7EJF"
+    }
+  ],
+  "authentication": [
+    "did:wba:attp-diting.cn:openclaw:e1_YNw__7D3uvUNyLX-2trt9hjOQw0hkmzGYddAsoNHsnY#key-1"
+  ],
+  "assertionMethod": [
+    "did:wba:attp-diting.cn:openclaw:e1_YNw__7D3uvUNyLX-2trt9hjOQw0hkmzGYddAsoNHsnY#key-1"
+  ],
+  "keyAgreement": [
+    "did:wba:attp-diting.cn:openclaw:e1_YNw__7D3uvUNyLX-2trt9hjOQw0hkmzGYddAsoNHsnY#key-3"
+  ],
+  "service": [
+    {
+      "id": "did:wba:attp-diting.cn:openclaw:e1_YNw__7D3uvUNyLX-2trt9hjOQw0hkmzGYddAsoNHsnY#node-type",
+      "type": "ATTPNodeType",
+      "serviceEndpoint": "attp:type:agent"
+    }
+  ],
+  "proof": {
+    "type": "DataIntegrityProof",
+    "created": "2026-07-13T15:45:49Z",
+    "verificationMethod": "did:wba:attp-diting.cn:openclaw:e1_YNw__7D3uvUNyLX-2trt9hjOQw0hkmzGYddAsoNHsnY#key-1",
+    "proofPurpose": "assertionMethod",
+    "cryptosuite": "eddsa-jcs-2022",
+    "proofValue": "pKIziq6UbLDGNIG5pi7z4lM-0_vKer7y0xW8WFrQbzboZUWxwxcOhw7dhKuw-A40_3Y8-yYTz9__gelQukFzAw"
+  }
+}

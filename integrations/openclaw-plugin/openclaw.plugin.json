@@ -1,0 +1,23 @@
+{
+  "id": "attp",
+  "channels": ["attp"],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": true,
+    "properties": {}
+  },
+  "channelConfigs": {
+    "attp": {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "pythonPath": { "type": "string", "description": "Python interpreter (ATTP venv) to spawn" },
+          "configPath": { "type": "string", "description": "ATTP openclaw profile config path" },
+          "webAppPort": { "type": "integer", "default": 8001, "description": "ATTP WebApp port (for /openclaw/reply)" }
+        },
+        "required": ["pythonPath", "configPath"],
+        "additionalProperties": true
+      }
+    }
+  }
+}
