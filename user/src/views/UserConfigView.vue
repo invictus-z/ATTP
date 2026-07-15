@@ -26,7 +26,7 @@ const readonly = computed(() => isDemoMode.value)
 async function switchMode() {
   // 演示↔自由双向切换
   if (!confirm(isDemoMode.value
-    ? '切换到自由配置模式？将以空白配置启动（演示身份不再生效）。'
+    ? '切换到自由配置模式？将以自有配置启动（若无则生成空白模板）。'
     : '切换到演示模式？将使用内置预置身份（只读）。')) return
   const ok = await setMode(isDemoMode.value ? 'free' : 'demo')
   if (ok) {
@@ -106,7 +106,7 @@ onMounted(() => {
             {{ isDemoMode ? '切换到自由配置' : '切换到演示模式' }}
           </button>
         </div>
-        <p class="text-sm text-gray-500">管理用户端 ATTP 身份配置，包括 DID、密钥路径、协议节点和已知 Agent。</p>
+        <p class="text-sm text-gray-500">管理用户端 ATTP 配置，包括 DID、密钥路径、协议节点和已知 Agent。</p>
       </div>
     </header>
 
@@ -132,19 +132,19 @@ onMounted(() => {
         <div>
           <div class="flex items-center gap-2 text-[11px] font-semibold text-gray-400 tracking-wider uppercase mb-3 px-1">
             <User class="w-3.5 h-3.5" />
-            <span>User ATTP Identity</span>
+            <span>用户 ATTP 身份</span>
           </div>
           <div class="bg-white p-5 rounded-xl border border-gray-100 space-y-4">
             <div>
-              <label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">User DID</label>
+              <label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">用户 DID</label>
               <input type="text" v-model="cfg.did" :disabled="readonly" placeholder="did:wba:..." class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono disabled:bg-gray-50 disabled:text-gray-500">
             </div>
             <div>
-              <label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">DID Document Path</label>
+              <label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">DID 文档路径</label>
               <input type="text" v-model="cfg.didDocPath" :disabled="readonly" placeholder="~/.attp/user/did/did.json" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono disabled:bg-gray-50 disabled:text-gray-500">
             </div>
             <div>
-              <label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">Private Key Path</label>
+              <label class="block text-[11px] font-medium text-gray-400 uppercase mb-1.5">私钥路径</label>
               <input type="text" v-model="cfg.didKeyPath" :disabled="readonly" placeholder="~/.attp/user/did/key-1_private.pem" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-gray-300 focus:bg-white transition-colors placeholder:text-gray-300 font-mono disabled:bg-gray-50 disabled:text-gray-500">
               <p v-if="!readonly && cfg.didKeyPath && !privateKeyLoaded" class="mt-1 text-[10px] text-amber-500">⚠ 密钥将在下次发送消息时加载</p>
               <p v-if="!readonly && cfg.didKeyPath && privateKeyLoaded" class="mt-1 text-[10px] text-emerald-500">✓ 密钥已加载</p>
@@ -180,7 +180,7 @@ onMounted(() => {
         <div>
           <div class="flex items-center gap-2 text-[11px] font-semibold text-gray-400 tracking-wider uppercase mb-3 px-1">
             <Link class="w-3.5 h-3.5" />
-            <span>Known Agents</span>
+            <span>智能体</span>
           </div>
           <div class="bg-white p-5 rounded-xl border border-gray-100 space-y-4">
             <div class="space-y-2">

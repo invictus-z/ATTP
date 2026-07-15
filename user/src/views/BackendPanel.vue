@@ -76,7 +76,7 @@ async function onLlmBlur() {
 }
 
 async function switchToFree() {
-  if (!confirm('切换到自由配置模式？将以空白配置启动（演示身份不再生效）。')) return
+  if (!confirm('切换到自由配置模式？将以自有配置启动（若无则生成空白模板）。')) return
   const ok = await setMode('free')
   if (ok) window.location.reload()  // 整体刷新，按新模式重建智能体列表/连接/只读态
 }

@@ -66,7 +66,7 @@ async function pick(mode: 'demo' | 'free') {
           </div>
           <h3 class="text-base font-semibold text-gray-900 mb-1.5">自由配置模式</h3>
           <p class="text-[13px] text-gray-500 leading-relaxed">
-            空白配置启动，请自行生成 / 导入 DID 与密钥，配置协议节点与智能体。
+            空白配置启动，请自行生成 / 导入 DID 与密钥并部署 DID 文档，配置协议节点、智能体与工具。
             适合真实部署与自由扩展。
           </p>
           <p class="text-[11px] text-amber-500 mt-3 flex items-center gap-1">

@@ -51,7 +51,7 @@ const CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inl
 
 app.whenReady().then(() => {
   // 去除顶部默认菜单栏
-  // Menu.setApplicationMenu(null);
+  Menu.setApplicationMenu(null);
 
   // 仅对顶层文档注入 CSP（非文档响应上的 CSP 头会被浏览器忽略，过滤掉避免无谓开销）
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
