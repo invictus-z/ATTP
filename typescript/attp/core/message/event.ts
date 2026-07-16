@@ -7,6 +7,8 @@
  */
 
 import { signHash, verifySignature } from '../authentication/signatures';
+import type { AnyKey } from '../authentication/keys';
+import { calculateHopHash } from '../provenance/hashing';
 
 // ---------------------------------------------------------------------------
 // RecordedHop — 单跳记录
@@ -45,26 +47,16 @@ export class RecordedHop {
     this.sigContent = data.sigContent ?? '';
   }
 
-  /** 计算除 sigContent 外所有字段的 SHA-256 哈希。 */
+  /** 计算除 sigContent 外所有字段的 SHA-256 哈希（委托给 calculateHopHash，DRY）。 */
   async contentHash(): Promise<string> {
-    const obj: Record<string, unknown> = {
-      session_id: this.sessionId,
-      sender_did: this.senderDid,
-      target_did: this.targetDid,
+    return calculateHopHash({
       content: this.content,
+      senderDid: this.senderDid,
+      targetDid: this.targetDid,
+      hopCount: this.hopCount,
       timestamp: this.timestamp,
-      hop_count: this.hopCount,
-    };
-    // 排序键后序列化，与 Python sort_keys=True 一致
-    const sorted: Record<string, unknown> = {};
-    for (const key of Object.keys(obj).sort()) {
-      sorted[key] = obj[key];
-    }
-    const raw = JSON.stringify(sorted);
-    const buffer = new TextEncoder().encode(raw);
-    const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+      sessionId: this.sessionId,
+    });
   }
 
   toDict(): Record<string, unknown> {
@@ -119,13 +111,13 @@ export class NodeMessage {
   }
 
   /** 发送方私钥对 recordedHop 内容签名，写入 sigContent。 */
-  async signContent(privateKey: CryptoKey): Promise<void> {
+  async signContent(privateKey: AnyKey): Promise<void> {
     const hash = await this.recordedHop.contentHash();
     this.recordedHop.sigContent = await signHash(hash, privateKey);
   }
 
   /** 验证 recordedHop.sigContent 是否由对应公钥签署。 */
-  async verifyContent(publicKey: CryptoKey): Promise<boolean> {
+  async verifyContent(publicKey: AnyKey): Promise<boolean> {
     if (!this.recordedHop.sigContent) return false;
     const hash = await this.recordedHop.contentHash();
     return verifySignature(hash, this.recordedHop.sigContent, publicKey);
@@ -199,7 +191,7 @@ export class BackMessage {
   // -- 身份签名 --
 
   /** 使用回传节点私钥对 nodeDid+nonce 签名，写入 sigIdentity。 */
-  async signIdentity(privateKey: CryptoKey): Promise<void> {
+  async signIdentity(privateKey: AnyKey): Promise<void> {
     this.sigIdentity = await signHash(
       await identityHash(this.nodeDid, this.nonce),
       privateKey,
@@ -207,7 +199,7 @@ export class BackMessage {
   }
 
   /** 验证 sigIdentity 是否合法。 */
-  async verifyIdentity(publicKey: CryptoKey): Promise<boolean> {
+  async verifyIdentity(publicKey: AnyKey): Promise<boolean> {
     if (!this.sigIdentity) return false;
     return verifySignature(
       await identityHash(this.nodeDid, this.nonce),
@@ -219,13 +211,13 @@ export class BackMessage {
   // -- 内容签名（发送方签名，由 recordedHop.sigContent 承载）--
 
   /** 使用发送方私钥对 recordedHop 内容签名。 */
-  async signContent(privateKey: CryptoKey): Promise<void> {
+  async signContent(privateKey: AnyKey): Promise<void> {
     const hash = await this.recordedHop.contentHash();
     this.recordedHop.sigContent = await signHash(hash, privateKey);
   }
 
   /** 验证 recordedHop 内容签名（发送方签名）。 */
-  async verifyContent(publicKey: CryptoKey): Promise<boolean> {
+  async verifyContent(publicKey: AnyKey): Promise<boolean> {
     if (!this.recordedHop.sigContent) return false;
     const hash = await this.recordedHop.contentHash();
     return verifySignature(hash, this.recordedHop.sigContent, publicKey);

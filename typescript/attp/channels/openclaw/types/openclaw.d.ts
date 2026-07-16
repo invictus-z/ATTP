@@ -33,8 +33,22 @@ declare module "openclaw/plugin-sdk/channel-plugin-common" {
     registerHttpRoute(opts: {
       path: string;
       auth?: string;
+      /** "prefix" matches URL path prefixes; default/exact matches the full path. */
+      match?: "prefix" | "exact";
       handler: (req: any, res: any) => Promise<boolean | void> | boolean | void;
+      /** WebSocket upgrade handler (see feishu/googlechat/canvas patterns). */
+      handleUpgrade?: (req: any, socket: any, head: any) => void;
     }): void;
+    registerTool(
+      tool: {
+        name: string;
+        label?: string;
+        description?: string;
+        parameters: any;
+        execute: (args: any, ctx: any) => Promise<any> | any;
+      },
+      meta?: { name: string },
+    ): void;
   }
 }
 

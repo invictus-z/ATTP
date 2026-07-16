@@ -1,0 +1,25 @@
+{
+  "id": "attp",
+  "name": "ATTP",
+  "version": "0.1.0",
+  "description": "ATTP agent-mesh channel (native in-process)",
+  "channels": ["attp"],
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "enabled": { "type": "boolean", "default": true },
+      "config_path": { "type": "string", "description": "ATTP agent 配置路径" }
+    }
+  },
+  "channelConfigs": {
+    "attp": {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "enabled": { "type": "boolean", "default": true },
+          "config_path": { "type": "string", "description": "ATTP agent 配置路径" }
+        }
+      }
+    }
+  }
+}

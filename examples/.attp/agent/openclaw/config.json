@@ -1,5 +1,5 @@
 {
-    "did": "did:wba:attp-diting.cn:openclaw:e1_YNw__7D3uvUNyLX-2trt9hjOQw0hkmzGYddAsoNHsnY",
+    "did": "did:wba:attp-diting.cn:test:agent:openclaw:e1_F25aQwabi60nv1os0v4fftulAtkc9w8emwnQbcmyDWA",
     "attpClient": {
         "didDocPath": "~/.attp/agent/openclaw/did/did.json",
         "didKeyPath": "~/.attp/agent/openclaw/did/key-1_private.pem",
