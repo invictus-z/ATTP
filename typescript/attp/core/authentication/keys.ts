@@ -6,7 +6,7 @@
  * 从 python/attp/core/authentication/keys.py 翻译并扩展而来。
  */
 
-import { secp256k1 } from "@noble/curves/secp256k1";
+import { secp256k1 } from "@noble/curves/secp256k1.js";
 
 /**
  * Noble 风格的原始字节密钥——用于 Web Crypto 不支持的曲线
@@ -146,6 +146,9 @@ function b64u(s: string | undefined): Uint8Array {
   if (!s) return new Uint8Array(0);
   let str = s.replace(/-/g, "+").replace(/_/g, "/");
   while (str.length % 4 !== 0) str += "=";
-  const bin = Buffer.from(str, "base64");
-  return new Uint8Array(bin);
+  // atob/btoa 在浏览器与 Node 16+ 均可用，避免依赖 Node Buffer
+  const bin = atob(str);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
 }

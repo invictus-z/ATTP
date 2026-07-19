@@ -13,10 +13,11 @@
     "noUnusedLocals": false,
     "noUnusedParameters": false,
     "noFallthroughCasesInSwitch": true,
-    "ignoreDeprecations": "6.0",
+    "ignoreDeprecations": "5.0",
     "baseUrl": ".",
     "paths": {
-      "@attp/core": ["../typescript/attp/core/index.ts"]
+      "@attp/core": ["../typescript/attp/core/index.ts"],
+      "@noble/curves/*": ["./node_modules/@noble/curves/*"]
     }
   },
   "include": ["src/**/*.ts", "src/**/*.d.ts", "src/**/*.vue"],

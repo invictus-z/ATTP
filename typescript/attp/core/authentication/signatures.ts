@@ -7,25 +7,25 @@
  *   secp256k1      : @noble/curves（输出 raw r‖s，prehash=SHA256 对齐 Python ECDSA(SHA256())）
  *   Ed25519        : @noble/ed25519（纯 EdDSA，对字节直接签）
  */
-import * as ed from "@noble/ed25519";
-import { secp256k1 } from "@noble/curves/secp256k1";
+import { ed25519 as ed } from "@noble/curves/ed25519.js";
+import { secp256k1 } from "@noble/curves/secp256k1.js";
 import type { AnyKey, NobleKey } from "./keys.js";
 
 type Bytes = Uint8Array<ArrayBuffer>;
 const enc = (s: string): Bytes => new TextEncoder().encode(s);
-const b64 = (b: Bytes | ArrayBuffer): string =>
-  typeof Buffer !== "undefined"
-    ? Buffer.from(b instanceof Uint8Array ? b : new Uint8Array(b)).toString("base64")
-    : btoa(String.fromCharCode(...(b instanceof Uint8Array ? b : new Uint8Array(b))));
-const unb64 = (s: string): Bytes =>
-  typeof Buffer !== "undefined"
-    ? new Uint8Array(Buffer.from(s, "base64"))
-    : (() => {
-        const bin = atob(s);
-        const u = new Uint8Array(bin.length);
-        for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
-        return u;
-      })();
+// atob/btoa 在浏览器与 Node 16+ 均可用，避免依赖 Node Buffer
+const b64 = (b: Bytes | ArrayBuffer): string => {
+  const u = b instanceof Uint8Array ? b : new Uint8Array(b);
+  let s = "";
+  for (let i = 0; i < u.length; i++) s += String.fromCharCode(u[i]);
+  return btoa(s);
+};
+const unb64 = (s: string): Bytes => {
+  const bin = atob(s);
+  const u = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+  return u;
+};
 const b64u = (s: string): Bytes => {
   const pad = s + "=".repeat((4 - (s.length % 4)) % 4);
   return unb64(pad.replace(/-/g, "+").replace(/_/g, "/"));
@@ -68,9 +68,10 @@ async function rsaMaxSalt(key: CryptoKey): Promise<number> {
 /** 字节级签名（DID-wba HTTP 签名用）。 */
 export async function signRaw(data: Bytes, key: AnyKey): Promise<Bytes> {
   if (isNoble(key)) {
-    if (key.kind === "ed25519") return (await ed.signAsync(data, key.priv!)) as Bytes;
+    if (key.kind === "ed25519") return new Uint8Array(ed.sign(data, key.priv!));
     // prehash=true: noble 默认 prehash=false（不哈希），需显式开启以对齐 Python ECDSA(SHA256())
-    return secp256k1.sign(data, key.priv!, { prehash: true }).toCompactRawBytes() as Bytes;
+    // format='compact' 即 raw r‖s（等价旧 .toCompactRawBytes()）；@noble/curves v2 sign 直接返回编码字节
+    return new Uint8Array(secp256k1.sign(data, key.priv!, { prehash: true, format: "compact" }));
   }
   const alg = (key.algorithm as { name: string }).name;
   if (alg === "RSA-PSS")
@@ -88,7 +89,7 @@ export async function signRaw(data: Bytes, key: AnyKey): Promise<Bytes> {
 export async function verifyRaw(data: Bytes, sig: Bytes, key: AnyKey): Promise<boolean> {
   try {
     if (isNoble(key)) {
-      if (key.kind === "ed25519") return await ed.verifyAsync(sig, data, key.pub!);
+      if (key.kind === "ed25519") return ed.verify(sig, data, key.pub!);
       // noble verify 自动识别 DER / compact 格式；prehash=true 对齐 Python ECDSA(SHA256())；
       // lowS=false 接受 high-s（Python cryptography 不做 low-s 归一化）
       return secp256k1.verify(sig, data, key.pub!, { prehash: true, lowS: false });
