@@ -1,4 +1,4 @@
-"""SqliteStore 外观类 — 委托给底层 Repository。"""
+"""SqliteStore 外观类 — 委托给底层 Repository（逐跳改版）。"""
 
 from __future__ import annotations
 
@@ -8,10 +8,10 @@ from typing import Any
 from attp.core.sse import EventType, Topic
 from attp.core.storage.database import Database
 from attp.core.storage.repositories import (
-    AnalysisRepository,
     MaliciousRepository,
     ProtocolSessionRepository,
     TraceRepository,
+    VerticalRepository,
 )
 from attp.core.storage.repositories.horizontal_repo import HorizontalRepository
 
@@ -19,13 +19,13 @@ from attp.core.storage.repositories.horizontal_repo import HorizontalRepository
 class SqliteStore:
     """Async SQLite-based trace log storage.
 
-    对外接口与原 SqliteStore 完全一致，内部委托给各 Repository。
+    对外接口与原 SqliteStore 一致（已按逐跳改版调整），内部委托给各 Repository。
     """
 
     def __init__(self, db_path: str | Path):
         self._db = Database(db_path)
         self._trace = TraceRepository(self._db)
-        self._analysis = AnalysisRepository(self._db)
+        self._vertical = VerticalRepository(self._db)
         self._malicious = MaliciousRepository(self._db)
         self._session_state = ProtocolSessionRepository(self._db)
         self._horizontal = HorizontalRepository(self._db)
@@ -91,37 +91,55 @@ class SqliteStore:
     ) -> tuple[list[dict], int]:
         return await self._trace.recover_traces_since(session_id, since_id)
 
-    # -- analysis_reports --
+    # -- vertical hop scores --
 
-    async def save_analysis_report(self, report_json: str) -> int:
-        """保存纵向分析报告，返回插入行的 id。"""
-        return await self._analysis.save_analysis_report(report_json)
+    async def save_hop_score(self, score: dict) -> int:
+        """保存一条逐跳评分，返回插入行 id。"""
+        row_id = await self._vertical.save_hop_score(score)
+        if self._event_broker:
+            await self._event_broker.publish(
+                EventType.HOP_SCORED,
+                {
+                    "session_id": score.get("session_id", ""),
+                    "trace_id": score.get("trace_id", 0),
+                    "sender_did": score.get("sender_did", ""),
+                    "field_type": score.get("field_type", ""),
+                    "score": score.get("score", 0.0),
+                    "severity": score.get("severity", "none"),
+                    "dimensions": [
+                        score.get("dim1", 0.0), score.get("dim2", 0.0),
+                        score.get("dim3", 0.0), score.get("dim4", 0.0),
+                    ],
+                    "breadth": score.get("breadth", 0),
+                },
+                topic=Topic.ANALYSIS,
+            )
+        return row_id
 
-    async def recover_analysis_reports(self, session_id: str) -> list[dict]:
-        return await self._analysis.recover_analysis_reports(session_id)
+    async def query_hop_scores_by_session(self, session_id: str) -> list[dict]:
+        return await self._vertical.query_hop_scores_by_session(session_id)
 
-    # -- analysis session state --
+    async def query_hop_scores_by_did(self, did: str, since_id: int = 0) -> list[dict]:
+        return await self._vertical.query_hop_scores_by_did(did, since_id)
 
-    async def save_analysis_session(self, session_id: str, state: dict) -> None:
-        await self._analysis.save_analysis_session(session_id, state)
+    async def max_trace_id_for_did(self, did: str) -> int:
+        return await self._vertical.max_trace_id_for_did(did)
 
-    async def load_analysis_session(self, session_id: str) -> dict | None:
-        return await self._analysis.load_analysis_session(session_id)
+    async def max_trace_id_for_session(self, session_id: str) -> int:
+        return await self._vertical.max_trace_id_for_session(session_id)
+
+    # -- vertical state (intent revisions / hidden state / cursor) --
+
+    async def save_vertical_state(self, session_id: str, state: dict) -> None:
+        await self._vertical.save_vertical_state(session_id, state)
+
+    async def load_vertical_state(self, session_id: str) -> dict | None:
+        return await self._vertical.load_vertical_state(session_id)
 
     # -- malicious reports (unified) --
 
     async def save_malicious_report(self, report: dict) -> int:
-        """统一写入 malicious_reports 表。
-
-        Args:
-            report: 包含 source, target_did, node_type, session_id,
-                    evidence_type, severity, taint_score,
-                    evidence_description, nonce, report_id,
-                    raw_evidence, timestamp 的字典。
-
-        Returns:
-            插入行的 id。
-        """
+        """统一写入 malicious_reports 表。"""
         row_id = await self._malicious.save_malicious_report(report)
         if self._event_broker:
             await self._event_broker.publish(
@@ -203,7 +221,7 @@ class SqliteStore:
         return await self._horizontal.load_horizontal_state(did)
 
     async def save_horizontal_report(self, report_json: str) -> int:
-        """保存横向分析报告，返回插入行的 id。"""
+        """保存横向确认报告，返回插入行的 id。"""
         return await self._horizontal.save_horizontal_report(report_json)
 
     async def recover_horizontal_reports(self, did: str) -> list[dict]:

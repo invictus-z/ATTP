@@ -32,7 +32,9 @@ class EventType:
     # ── analysis ──
     ANALYSIS_PROGRESS = "analysis.progress"
     ANALYSIS_REPORT = "analysis.report"
+    HOP_SCORED = "hop.scored"
     HORIZONTAL_ACCUMULATED = "horizontal.accumulated"
+    HORIZONTAL_TRIGGERED = "horizontal.triggered"
 
     # ── malicious ──
     MALICIOUS_DETECTED = "malicious.detected"

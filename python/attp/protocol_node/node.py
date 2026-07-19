@@ -48,6 +48,7 @@ class ProtocolNode:
         self._sweep_task: asyncio.Task | None = None
         self._malicious_detector: MaliciousNodeDetector | None = None
         self._broker = None
+        self._concurrency: int = 8
 
     @property
     def config(self) -> ProtocolNodeConfigFile:
@@ -128,6 +129,8 @@ class ProtocolNode:
             except asyncio.CancelledError:
                 pass
             self._sweep_task = None
+        if self._orchestrator:
+            await self._orchestrator.shutdown()
         if self._port:
             await self._port.stop()
         logger.info("ProtocolNode stopped")
@@ -202,7 +205,7 @@ class ProtocolNode:
     def _build_orchestrator(self):
         """根据当前配置构建 CrossLockCoordinator，未启用则返回 None。
 
-        Cross-Lock 架构：纵向分析（VerticalAxis）+ 横向分析（HorizontalAxis）。
+        逐跳改版：纵轴逐跳 V-Reasoner 评分 + 横轴 per-DID F 累加 + α 会话确认。
         """
         analysis_cfg = self._config.analysis
         if not analysis_cfg.enabled or not analysis_cfg.api_key:
@@ -219,19 +222,24 @@ class ProtocolNode:
         )
 
         llm_client = AsyncOpenAI(api_key=analysis_cfg.api_key, base_url=analysis_cfg.base_url)
+        self._concurrency = analysis_cfg.concurrency
 
-        # --- 纵轴 ---
-        vertical_analyzer = VerticalIntentAnalyzer(client=llm_client, model=analysis_cfg.model)
+        # --- 纵轴（逐跳评分） ---
+        vertical_analyzer = VerticalIntentAnalyzer(
+            client=llm_client, model=analysis_cfg.model, aggregation=analysis_cfg.aggregation,
+        )
         vertical_state_mgr = VerticalAnalysisManager(self._session_manager, self._tracer)
         vertical_orch = VerticalOrchestrator(
             analyzer=vertical_analyzer,
             vertical_state_mgr=vertical_state_mgr,
             tracer=self._tracer,
-            batch_size=analysis_cfg.report_batch_size,
+            r_t=analysis_cfg.r_t,
+            concurrency=analysis_cfg.concurrency,
+            queue_maxsize=analysis_cfg.queue_maxsize,
             event_broker=self._broker,
         )
 
-        # --- 横轴 ---
+        # --- 横轴（F 累加 + 确认） ---
         horizontal_orch = None
         if getattr(analysis_cfg, "horizontal_enabled", True):
             horizontal_analyzer = HorizontalIntentAnalyzer(client=llm_client, model=analysis_cfg.model)
@@ -240,12 +248,15 @@ class ProtocolNode:
                 analyzer=horizontal_analyzer,
                 horizontal_state_mgr=horizontal_state_mgr,
                 tracer=self._tracer,
-                accumulation_threshold=getattr(analysis_cfg, "horizontal_threshold", 5),
+                r_s=analysis_cfg.r_s,
+                alpha=analysis_cfg.alpha,
+                rho=analysis_cfg.rho,
+                concurrency=analysis_cfg.concurrency,
                 event_broker=self._broker,
             )
             logger.info(
-                "Cross-Lock horizontal axis enabled (accumulation_threshold={})",
-                getattr(analysis_cfg, "horizontal_threshold", 5),
+                "Cross-Lock horizontal axis enabled (R_S={}, α={}, ρ={})",
+                analysis_cfg.r_s, analysis_cfg.alpha, analysis_cfg.rho,
             )
 
         # --- 十字锁定协调器 ---
@@ -254,8 +265,7 @@ class ProtocolNode:
             horizontal_orchestrator=horizontal_orch,
         )
         logger.info(
-            "Cross-Lock coordinator built (model={}, vertical_batch_size={})",
-            analysis_cfg.model,
-            analysis_cfg.report_batch_size,
+            "Cross-Lock coordinator built (model={}, R_T={}, concurrency={})",
+            analysis_cfg.model, analysis_cfg.r_t, analysis_cfg.concurrency,
         )
         return coordinator

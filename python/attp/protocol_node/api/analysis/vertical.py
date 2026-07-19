@@ -1,10 +1,11 @@
-"""纵向分析 API 路由 — Session 级语义意图追踪。
+"""纵向分析 API 路由 — Session 级逐跳评分（逐跳改版）。
 
 端点（prefix `/api/analysis/v`）：
-    GET  /api/analysis/v/report/{session_id}      — 获取纵向分析报告
-    GET  /api/analysis/v/state/{session_id}       — 获取意图与累计分析状态
-    GET  /api/analysis/v/aggregate/{session_id}   — 聚合视图（traces + reports + alerts）
-    POST /api/analysis/v/trigger/{session_id}     — 手动触发纵向分析
+    GET  /api/analysis/v/report/{session_id}      — 会话逐跳评分聚合报告
+    GET  /api/analysis/v/state/{session_id}       — 意图流 / 隐状态 / 打分游标
+    GET  /api/analysis/v/aggregate/{session_id}   — traces + hop_scores + R_T 告警
+    POST /api/analysis/v/trigger/{session_id}     — 手动触发（补打未评分跳）
+    GET  /api/analysis/v/llm-status/{session_id}  — worker 状态（供轮询）
 """
 
 import json
@@ -13,11 +14,32 @@ from typing import Any
 from fastapi import APIRouter
 
 from attp.app.logging import get_logger
+from attp.core.analysis.base_models import overall_verdict_for_severities
 from attp.core.pn_tracer import ProtocolTracer
 
 logger = get_logger("VerticalAPI")
 
 _SENDER_TYPE_MAP = {"A": "agent", "U": "user", "T": "tool"}
+
+
+async def _astate(tracer: ProtocolTracer, session_id: str) -> dict[str, Any]:
+    """异步读取纵向状态（intent_revisions / hidden_state / cursor / initiator）。"""
+    saved = await tracer.load_vertical_state(session_id)
+    if not saved:
+        return {
+            "initiator_did": "", "intent_revisions": [],
+            "hidden_state": "", "last_scored_trace_id": 0,
+        }
+    try:
+        revisions = json.loads(saved.get("intent_revisions_json") or "[]")
+    except (json.JSONDecodeError, TypeError):
+        revisions = []
+    return {
+        "initiator_did": saved.get("initiator_did", ""),
+        "intent_revisions": revisions,
+        "hidden_state": saved.get("hidden_state", ""),
+        "last_scored_trace_id": saved.get("last_scored_trace_id", 0),
+    }
 
 
 def get_vertical_analysis_router(
@@ -29,106 +51,63 @@ def get_vertical_analysis_router(
     _coord_ref = coordinator_holder if coordinator_holder is not None else [None]
 
     # ------------------------------------------------------------------
-    # 分析报告查询
+    # 逐跳评分聚合报告
     # ------------------------------------------------------------------
 
     @router.get("/report/{session_id}")
-    async def get_analysis_reports(session_id: str):
-        """Return all vertical intent tracking reports for a session."""
+    async def get_hop_scores(session_id: str):
+        """会话内逐跳评分聚合（overall_verdict 由代码推导）。"""
         try:
-            reports = await tracer.recover_analysis_reports(session_id)
-            parsed = []
-            for r in reports:
-                parsed.append({
-                    "id": r["id"],
-                    "batch_index": r["batch_index"],
-                    "from_trace_id": r["from_trace_id"],
-                    "to_trace_id": r["to_trace_id"],
-                    "timestamp": r.get("timestamp"),
-                    "report": json.loads(r["report_json"]) if r.get("report_json") else {},
-                })
+            hop_scores = await tracer.query_hop_scores_by_session(session_id)
+            state = await _astate(tracer, session_id)
+            severities = [h.get("severity", "none") for h in hop_scores]
+            max_score = max((h.get("score", 0.0) for h in hop_scores), default=0.0)
             return {
                 "session_id": session_id,
-                "reports": parsed,
-                "total_batches": len(parsed),
+                "initiator_did": state["initiator_did"],
+                "intent_revisions": state["intent_revisions"],
+                "hidden_state": state["hidden_state"],
+                "hop_scores": hop_scores,
+                "overall_verdict": overall_verdict_for_severities(severities),
+                "max_score": max_score,
+                "total_hops": len(hop_scores),
+                "last_scored_trace_id": state["last_scored_trace_id"],
             }
         except Exception as e:
-            logger.error("Error recovering analysis reports for {}: {}", session_id, e)
-            return {
-                "session_id": session_id,
-                "reports": [],
-                "total_batches": 0,
-            }
+            logger.error("Error recovering hop scores for {}: {}", session_id, e)
+            return {"session_id": session_id, "hop_scores": [], "total_hops": 0}
 
     # ------------------------------------------------------------------
-    # Intent & 分析状态
+    # 意图流与状态
     # ------------------------------------------------------------------
 
     @router.get("/state/{session_id}")
     async def get_vertical_state(session_id: str):
-        """Return the extracted intent and vertical analysis state for a session.
-
-        Priority: in-memory session → fallback to vertical_analysis_states DB table.
-        """
-        intent_data = None
-        state: dict[str, Any] = {}
-
-        # 1. 尝试从内存中的 session 获取
-        if session_manager:
-            session = session_manager.get(session_id)
-            if session:
-                intent_data = session.get_intent()
-                state = session.get_analysis_state() or {}
-
-        # 2. 内存未命中 → fallback 到 DB
-        if intent_data is None and not state.get("last_trace_id"):
-            try:
-                saved = await tracer.load_analysis_session(session_id)
-                if saved:
-                    if saved.get("intent_json"):
-                        intent_data = json.loads(saved["intent_json"])
-                    state = {
-                        "pending_count": saved.get("pending_count", 0), # 当前待分析行为的数量
-                        "last_trace_id": saved.get("last_trace_id", 0), # 已分析的最新位置
-                        "batch_index": saved.get("batch_index", 0), # 已生成的报告总数
-                        "context": saved.get("context", ""),
-                    }
-            except Exception as e:
-                logger.error("Error loading analysis session for {}: {}", session_id, e)
-
+        """意图流 + 隐状态 + 打分游标 + 发起者 DID。"""
+        state = await _astate(tracer, session_id)
         return {
             "session_id": session_id,
-            "intent": intent_data,
-            "analysis_state": {
-                "pending_count": state.get("pending_count", 0),
-                "last_trace_id": state.get("last_trace_id", 0),
-                "batch_index": state.get("batch_index", 0),
-                "has_context": bool(state.get("context")),
-            },
+            "initiator_did": state["initiator_did"],
+            "intent_revisions": state["intent_revisions"],
+            "has_hidden_state": bool(state["hidden_state"]),
+            "last_scored_trace_id": state["last_scored_trace_id"],
+            "intent_revision_count": len(state["intent_revisions"]),
         }
 
     # ------------------------------------------------------------------
-    # 聚合视图（traces + reports + alerts）
+    # 聚合视图（traces + hop_scores + R_T 告警）
     # ------------------------------------------------------------------
 
     @router.get("/aggregate/{session_id}")
     async def get_aggregate_analysis(session_id: str, protocol_node_address: str | None = None):
-        """Return behavior traces + vertical analysis reports + alerts combined."""
-        # 1. Fetch behavior traces
+        """行为链 + 逐跳评分 + R_T 告警。"""
+        # 1. traces
         try:
             trace_entries = await tracer.recover_behavior_trace(session_id, protocol_node_address)
         except Exception as e:
             logger.error("Error recovering traces for aggregate {}: {}", session_id, e)
             trace_entries = []
 
-        # 2. Fetch analysis reports
-        try:
-            report_rows = await tracer.recover_analysis_reports(session_id)
-        except Exception as e:
-            logger.error("Error recovering reports for aggregate {}: {}", session_id, e)
-            report_rows = []
-
-        # 3. Build flat trace chain
         chain = []
         for row in trace_entries:
             ft = row["field_type"]
@@ -143,78 +122,51 @@ def get_vertical_analysis_router(
                 "timestamp": row.get("timestamp"),
             })
 
-        # 4. Parse reports and extract alerts
-        parsed_reports = []
-        alerts = []
-        for r in report_rows:
-            report_data = json.loads(r["report_json"]) if r.get("report_json") else {}
-            parsed_reports.append({
-                "id": r["id"],
-                "batch_index": r["batch_index"],
-                "from_trace_id": r["from_trace_id"],
-                "to_trace_id": r["to_trace_id"],
-                "timestamp": r.get("timestamp"),
-                "report": report_data,
-            })
+        # 2. hop scores
+        try:
+            hop_scores = await tracer.query_hop_scores_by_session(session_id)
+        except Exception as e:
+            logger.error("Error recovering hop scores for aggregate {}: {}", session_id, e)
+            hop_scores = []
 
-            if report_data.get("overall_verdict") in ("suspicious", "malicious"):
-                alerts.append({
-                    "report_id": r["id"],
-                    "batch_index": r["batch_index"],
-                    "verdict": report_data.get("overall_verdict"),
-                    "summary": report_data.get("summary", ""),
-                    "from_trace_id": r["from_trace_id"],
-                    "to_trace_id": r["to_trace_id"],
-                    "timestamp": r.get("timestamp"),
-                    "suspicious_nodes": [
-                        {
-                            "node_did": v.get("node_did"),
-                            "severity": v.get("severity"),
-                            "taint_score": v.get("taint_score"),
-                            "evidence": v.get("evidence"),
-                        }
-                        for v in report_data.get("node_verdicts", [])
-                        if v.get("severity") in ("medium", "high")
-                    ],
-                })
+        # 3. R_T 告警（source=vertical_analysis）
+        try:
+            alerts = await tracer.query_malicious_reports(
+                session_id=session_id, source="vertical_analysis",
+            )
+        except Exception as e:
+            logger.error("Error recovering alerts for aggregate {}: {}", session_id, e)
+            alerts = []
 
-        # 5. Get intent (in-memory first, fallback to DB)
-        intent = None
-        if session_manager:
-            session = session_manager.get(session_id)
-            if session:
-                intent = session.get_intent()
-        if intent is None:
-            try:
-                saved = await tracer.load_analysis_session(session_id)
-                if saved and saved.get("intent_json"):
-                    intent = json.loads(saved["intent_json"])
-            except Exception:
-                pass
-
+        severities = [h.get("severity", "none") for h in hop_scores]
         return {
             "session_id": session_id,
-            "intent": intent,
-            "traces": {
-                "chain": chain,
-                "total_entries": len(trace_entries),
-            },
-            "reports": parsed_reports,
+            "traces": {"chain": chain, "total_entries": len(trace_entries)},
+            "hop_scores": hop_scores,
+            "overall_verdict": overall_verdict_for_severities(severities),
             "alerts": alerts,
-            "total_batches": len(parsed_reports),
+            "total_hops": len(hop_scores),
             "total_alerts": len(alerts),
         }
 
     # ------------------------------------------------------------------
-    # 手动触发纵向分析
+    # 手动触发 + worker 状态
     # ------------------------------------------------------------------
 
     @router.post("/trigger/{session_id}")
     async def trigger_analysis(session_id: str):
-        """Manually trigger vertical intent tracking (async, returns immediately)."""
+        """手动触发：补打该会话未评分的跳。"""
         _coordinator = _coord_ref[0]
         if not _coordinator:
             return {"triggered": False, "reason": "analysis_disabled"}
         return await _coordinator.trigger_analysis_async(session_id)
+
+    @router.get("/llm-status/{session_id}")
+    async def get_llm_status(session_id: str):
+        """查询纵轴 worker 阶段（供前端轮询）。"""
+        _coordinator = _coord_ref[0]
+        if not _coordinator:
+            return {"status": "disabled", "session_id": session_id}
+        return _coordinator.get_analysis_status(session_id)
 
     return router

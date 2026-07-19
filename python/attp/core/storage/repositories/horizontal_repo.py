@@ -1,4 +1,8 @@
-"""horizontal_analysis_states + horizontal_analysis_reports 仓储。"""
+"""horizontal_analysis_states + horizontal_analysis_reports 仓储（逐跳改版）。
+
+状态表存 per-DID 的累积偏离 F、体积计数、确认游标（last_trace_id）、批次与上下文。
+报告表存横轴「确认」报告（confirmed / severity / sessions_reviewed / context_summary）。
+"""
 
 from __future__ import annotations
 
@@ -14,17 +18,22 @@ logger = get_logger("Tracing")
 class HorizontalRepository(BaseRepository):
     """horizontal_analysis_states + horizontal_analysis_reports CRUD。"""
 
+    # ------------------------------------------------------------------
+    # 状态 horizontal_analysis_states
+    # ------------------------------------------------------------------
+
     async def save_horizontal_state(self, did: str, state: dict) -> None:
-        """INSERT OR REPLACE 横向分析状态。"""
+        """INSERT OR REPLACE 横向分析状态（F / volume / cursor / batch / context）。"""
         await self._db.execute(
             """INSERT OR REPLACE INTO horizontal_analysis_states
-               (did, node_type, pending_count, last_trace_id,
+               (did, node_type, f_value, volume, last_trace_id,
                 batch_index, context, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 did,
                 state.get("node_type", "agent"),
-                state.get("pending_count", 0),
+                state.get("f_value", 0.0),
+                state.get("volume", 0),
                 state.get("last_trace_id", 0),
                 state.get("batch_index", 0),
                 state.get("context", ""),
@@ -33,39 +42,17 @@ class HorizontalRepository(BaseRepository):
         )
 
     async def load_horizontal_state(self, did: str) -> dict | None:
-        """加载横向分析状态。"""
         return await self._db.execute_fetchone(
             "SELECT * FROM horizontal_analysis_states WHERE did = ?",
             (did,),
         )
 
-    async def increment_pending_count(self, did: str) -> int:
-        """原子递增待分析计数并返回新值。"""
-        # Load current state
-        row = await self.load_horizontal_state(did)
-        if row is None:
-            await self.save_horizontal_state(did, {"pending_count": 1})
-            return 1
-        new_count = row.get("pending_count", 0) + 1
-        await self._db.execute(
-            """UPDATE horizontal_analysis_states
-               SET pending_count = ?, updated_at = ?
-               WHERE did = ?""",
-            (new_count, _time.time(), did),
-        )
-        return new_count
-
-    async def reset_pending_count(self, did: str) -> None:
-        """重置待分析计数。"""
-        await self._db.execute(
-            """UPDATE horizontal_analysis_states
-               SET pending_count = 0, updated_at = ?
-               WHERE did = ?""",
-            (_time.time(), did),
-        )
+    # ------------------------------------------------------------------
+    # 报告 horizontal_analysis_reports
+    # ------------------------------------------------------------------
 
     async def save_horizontal_report(self, report_json: str) -> int:
-        """保存横向分析报告，返回插入行的 id。"""
+        """保存横向确认报告，返回插入行 id。"""
         report = json.loads(report_json)
         row_id = await self._db.execute_insert(
             """INSERT INTO horizontal_analysis_reports
@@ -84,13 +71,14 @@ class HorizontalRepository(BaseRepository):
             ),
         )
         logger.info(
-            "Saved horizontal report: did={}, batch={}, id={}",
-            report.get("did"), report.get("batch_index"), row_id,
+            "Saved horizontal report: did={}, batch={}, confirmed={}, id={}",
+            report.get("did"), report.get("batch_index"),
+            report.get("confirmed"), row_id,
         )
         return row_id
 
     async def recover_horizontal_reports(self, did: str) -> list[dict]:
-        """查询DID的全部横向分析报告。"""
+        """查询 DID 的全部横向确认报告。"""
         return await self._db.execute_fetch(
             """SELECT * FROM horizontal_analysis_reports
                WHERE did = ?
@@ -98,12 +86,17 @@ class HorizontalRepository(BaseRepository):
             (did,),
         )
 
+    # ------------------------------------------------------------------
+    # 跨会话 trace 取数（供确认画像）
+    # ------------------------------------------------------------------
+
     async def recover_traces_by_did_since(
         self, did: str, since_id: int,
     ) -> tuple[list[dict], int]:
-        """恢复指定DID在所有Session中、since_id之后的全部trace。
+        """恢复指定 DID 在所有会话中、since_id 之后的全部 trace。
 
-        包含该DID作为sender(node_did)和receiver(target)的记录。
+        包含该 DID 作为 sender(node_did) 和 receiver(target) 的记录，
+        供横轴确认时构建跨会话画像。
         """
         result = await self._db.execute_fetch(
             """SELECT * FROM behavior_traces
@@ -119,7 +112,7 @@ class HorizontalRepository(BaseRepository):
         return result, max_id
 
     async def count_sessions_for_did(self, did: str, since_id: int = 0) -> int:
-        """统计DID涉及的Session数量。"""
+        """统计 DID 涉及的会话数量。"""
         row = await self._db.execute_fetchone(
             """SELECT COUNT(DISTINCT session_id) as cnt FROM behavior_traces
                WHERE (node_did = ? OR target = ?) AND id > ?""",

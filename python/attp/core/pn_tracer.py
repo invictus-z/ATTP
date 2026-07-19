@@ -80,20 +80,30 @@ class ProtocolTracer:
     async def recover_traces_since(self, session_id: str, since_id: int) -> tuple[list, int]:
         return await self._storage.recover_traces_since(session_id, since_id)
 
-    async def save_analysis_report(self, report_json: str) -> int:
-        """保存纵向分析报告，返回插入行的 id。"""
-        return await self._storage.save_analysis_report(report_json)
+    # -- vertical hop scores (逐跳评分) --
 
-    async def recover_analysis_reports(self, session_id: str) -> list:
-        return await self._storage.recover_analysis_reports(session_id)
+    async def save_hop_score(self, score: dict) -> int:
+        return await self._storage.save_hop_score(score)
 
-    # -- analysis session state --
+    async def query_hop_scores_by_session(self, session_id: str) -> list:
+        return await self._storage.query_hop_scores_by_session(session_id)
 
-    async def save_analysis_session(self, session_id: str, state: dict) -> None:
-        await self._storage.save_analysis_session(session_id, state)
+    async def query_hop_scores_by_did(self, did: str, since_id: int = 0) -> list:
+        return await self._storage.query_hop_scores_by_did(did, since_id)
 
-    async def load_analysis_session(self, session_id: str) -> dict | None:
-        return await self._storage.load_analysis_session(session_id)
+    async def max_trace_id_for_did(self, did: str) -> int:
+        return await self._storage.max_trace_id_for_did(did)
+
+    async def max_trace_id_for_session(self, session_id: str) -> int:
+        return await self._storage.max_trace_id_for_session(session_id)
+
+    # -- vertical state (意图流 / 隐状态 / 打分游标) --
+
+    async def save_vertical_state(self, session_id: str, state: dict) -> None:
+        await self._storage.save_vertical_state(session_id, state)
+
+    async def load_vertical_state(self, session_id: str) -> dict | None:
+        return await self._storage.load_vertical_state(session_id)
 
     # -- malicious reports (unified) --
 
