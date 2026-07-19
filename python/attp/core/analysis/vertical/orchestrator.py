@@ -12,7 +12,8 @@
 - U2A 且 sender==发起者 DID → 抽 Δ 追加意图流（**不打分**）。
 - U2A 但 sender≠发起者 DID → **当普通动作跳打分**（防第二用户注入/越权引导盲区）。
 - 动作跳（A2A/A2T/T2A/A2U）→ V-Reasoner 逐跳打分 → 落 hop_score → 更新 h_i →
-  ``s_i > R_T`` 立即告警 → 把 s_i 报给横轴 ``on_hop_scored``。
+  ``s_i > R_T`` 立即告警 → 把 **sub-R_T** 的 ``s_i`` 报给横轴 ``on_hop_scored``（critical
+  不重复计入 F：R_T 抓单跳恶，F 抓累积慢投毒）。
 """
 
 from __future__ import annotations
@@ -269,7 +270,7 @@ class VerticalOrchestrator:
             )
 
     async def _handle_action(self, session_id: str, hop: dict) -> None:
-        """动作跳 → V-Reasoner 打分 → 落库 → 更新 h → R_T 告警 → 报横轴。"""
+        """动作跳 → V-Reasoner 打分 → 落库 → 更新 h → R_T 告警 →（仅 sub-R_T）报横轴。"""
         state = await self._state_mgr.get_state(session_id)
         intent_snapshot = state["intent_revisions"]
         hidden_prev = state["hidden_state"]
@@ -289,8 +290,10 @@ class VerticalOrchestrator:
         if score.score > self._r_t:
             await self._notify_rt_alert(session_id, score)
 
-        # 报给横轴（F 累加 / 体积 / 触发确认）
-        if self._on_hop_scored_callback:
+        # 报给横轴（F 累加）——仅 sub-R_T 的跳：R_T 命中的单点恶已由上面告警，
+        # 不再喂横轴 F（轴职责分离：R_T 抓单跳恶，F 抓 sub-R_T 累积的慢投毒；
+        # critical 重复计入只会让 F 爆炸、横轴报告与 R_T 重复）。
+        if self._on_hop_scored_callback and score.score <= self._r_t:
             try:
                 await self._on_hop_scored_callback(
                     score.sender_did, session_id, score.trace_id,
