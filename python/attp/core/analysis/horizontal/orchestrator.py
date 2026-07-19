@@ -1,7 +1,8 @@
 """Horizontal Axis — 横向编排器（逐跳改版：per-DID F 累加 + 跨会话确认）。
 
 - ``on_hop_scored``：纵轴每打一跳分即调用，per-DID 累加 F（跨会话叠加，纯平方和 Σ s²）；
-  达 ``F > R_S`` 触发横轴确认（无折扣、无死区、无体积封顶）。
+  达 ``F > R_S`` **且累积 ≥ _MIN_TRIGGER_VOLUME 跳**才触发横轴确认——单跳 critical 交给纵轴
+  R_T，横轴只管累积/跨会话；无折扣、无死区、无体积封顶。
 - ``run_analysis``：候选会话 ≤ α 直接取全量，否则按 ``W(σ)=Σ s²`` 取 α 个（高危兜底）→
   H-Reasoner 确认（汇入上一次确认报告，防会话集拆分规避）→ 确认则告警，良性则记摘要闭案
   （重置 F、推进游标）。
@@ -30,6 +31,10 @@ if TYPE_CHECKING:
     from attp.core.pn_tracer import ProtocolTracer
 
 logger = get_logger("HorizontalAnalysis")
+
+#: 横轴自动触发最少累积跳数：单跳 critical 交给纵轴 R_T，横轴等累积≥2 跳才确认。
+#: 仅约束 ``on_hop_scored`` 的自动触发；手动 /h/trigger（run_analysis）不受限。
+_MIN_TRIGGER_VOLUME = 2
 
 
 @dataclass
@@ -119,8 +124,14 @@ class HorizontalOrchestrator:
 
         triggered = False
         reason = ""
-        if f_value > self._r_s:
+        if f_value > self._r_s and volume >= _MIN_TRIGGER_VOLUME:
             triggered, reason = True, "f_threshold"
+        elif f_value > self._r_s:
+            # F 已越阈值但累积跳数不足：F 保留累加，等下一跳达标再触发（不丢偏移量）
+            logger.info(
+                "Horizontal deferred: did={}, F={:.2f}>R_S but volume={}<{}}",
+                did, f_value, volume, _MIN_TRIGGER_VOLUME,
+            )
 
         if triggered:
             logger.info(
