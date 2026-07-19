@@ -104,6 +104,17 @@ class HorizontalAnalysisManager:
             state.context = context
         await self._persist(did)
 
+    async def reset_accumulation(self, did: str) -> None:
+        """清零 F/体积，但不动游标/batch/context。
+
+        用于 no_new_scores：滞留的 F 来自游标已越过的晚到跳（不会再被确认），
+        清掉避免反复空触发；这些跳的纵轴 R_T 告警已发。
+        """
+        state = await self._ensure_loaded(did)
+        state.f_value = 0.0
+        state.volume = 0
+        await self._persist(did)
+
     async def get_state(self, did: str) -> dict:
         """获取 DID 的横向累积状态。"""
         state = await self._ensure_loaded(did)

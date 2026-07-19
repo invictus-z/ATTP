@@ -154,6 +154,10 @@ class HorizontalOrchestrator:
         await self._set_phase(did, "selecting")
         hop_scores = await self._tracer.query_hop_scores_by_did(did, cursor)
         if not hop_scores:
+            # 游标已越过全部已打分跳。若有晚到跳（trace_id ≤ cursor）留下滞留 F，清掉——
+            # 这些跳不会再被确认（其纵轴 R_T 告警已发），留着 F 只会反复空触发。
+            if (state.get("f_value") or 0) > 0 or (state.get("volume") or 0) > 0:
+                await self._state_mgr.reset_accumulation(did)
             if self._broker:
                 await self._broker.publish(
                     EventType.ANALYSIS_REPORT,
@@ -174,7 +178,9 @@ class HorizontalOrchestrator:
         #    永不确认、F 滞留 >R_S）。
         traces, _ = await self._tracer.storage.recover_traces_by_did_since(did, cursor)
         max_scored = max((h.get("trace_id", 0) for h in hop_scores), default=cursor)
-        sessions_data = self._build_sessions_data(traces, hop_scores, selected, w_map)
+        # 各入选会话"截至本批最后一跳"的累积意图基准——供横轴判"违反授权"
+        intents = await self._load_session_intents(selected, max_scored)
+        sessions_data = self._build_sessions_data(traces, hop_scores, selected, w_map, intents)
 
         if not sessions_data:
             # 无可复核会话（兜底/窗口外）→ 闭案推进游标，避免重复触发
@@ -296,14 +302,66 @@ class HorizontalOrchestrator:
             f"结论：{prior.get('summary') or verdict.get('evidence', '')}"
         )
 
+    async def _load_session_intents(
+        self, session_ids: set[str], max_trace_id: int,
+    ) -> dict[str, dict]:
+        """加载各会话"截至本批最后一跳"的累积意图基准。
+
+        每个会话独立取自己的意图流——不跨会话、不用全局意图。
+        只取 ``source.trace_id <= max_trace_id`` 的 Δ：排除"在本批这些跳之后用户才更新的
+        意图"——新意图不应溯及既往地用到之前已发生的跳上。
+        """
+        intents: dict[str, dict] = {}
+        for sid in session_ids:
+            if not sid:
+                continue
+            vs = await self._tracer.storage.load_vertical_state(sid)
+            try:
+                revisions = json.loads((vs or {}).get("intent_revisions_json") or "[]")
+            except (json.JSONDecodeError, TypeError):
+                revisions = []
+            applicable = [
+                r for r in revisions
+                if (r.get("source") or {}).get("trace_id", 0) <= max_trace_id
+            ]
+            intents[sid] = self._accumulate_intent(applicable)
+        return intents
+
+    @staticmethod
+    def _accumulate_intent(revisions: list[dict]) -> dict:
+        """把（调用方已按时间过滤的）意图增量 Δ 累积成基准。
+
+        抽取是增量的（每条 Δ 只含本条 U2A 的新增 goal/constraints/prohibitions，
+        见 vertical/prompts.py 的 INTENT_REVISION_PROMPT），所以"截至某时刻的完整意图"
+        = 该时刻之前所有 Δ 的并集（prohibitions/constraints 取并、goal 取最新非空）——
+        只取末条 Δ 会漏，取全部 Δ 会把之后的更新溯及既往（由调用方按 max_trace_id 过滤）。
+        """
+        goals: list[str] = []
+        constraints: set[str] = set()
+        prohibitions: set[str] = set()
+        for r in revisions or []:
+            if r.get("goal"):
+                goals.append(r["goal"])
+            for c in r.get("constraints") or []:
+                constraints.add(c)
+            for p in r.get("prohibitions") or []:
+                prohibitions.add(p)
+        return {
+            "goal": goals[-1] if goals else "",
+            "constraints": sorted(constraints),
+            "prohibitions": sorted(prohibitions),
+        }
+
     @staticmethod
     def _build_sessions_data(
         traces: list[dict],
         hop_scores: list[dict],
         selected: set[str],
         w_map: dict[str, float],
+        intents: dict[str, dict] | None = None,
     ) -> list[dict]:
-        """为选中的会话构建确认画像：每会话 top 高分跳（含内容）。"""
+        """为选中的会话构建确认画像：每会话 top 高分跳（含内容）+ 累积意图基准。"""
+        intents = intents or {}
         content_by_trace: dict[int, str] = {}
         for t in traces:
             tid = t.get("id")
@@ -330,6 +388,7 @@ class HorizontalOrchestrator:
             sessions_data.append({
                 "session_id": sid,
                 "w_value": w_map.get(sid, 0.0),
+                "intent": intents.get(sid, {}),
                 "hops": hops,
             })
         sessions_data.sort(key=lambda x: x["w_value"], reverse=True)

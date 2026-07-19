@@ -168,6 +168,15 @@ class HorizontalIntentAnalyzer:
             w = s.get("w_value", 0.0)
             hops = s.get("hops", []) or []
             lines = [f"### 会话 {sid}  (W(σ)={w:.2f}, 高分跳 {len(hops)} 条)"]
+            intent = s.get("intent") or {}
+            goal = intent.get("goal") or ""
+            cons = intent.get("constraints") or []
+            proh = intent.get("prohibitions") or []
+            if goal or cons or proh:
+                lines.append(
+                    f"  授权意图：goal={goal or '(未抽取)'}；"
+                    f"constraints={cons or '[]'}；prohibitions={proh or '[]'}"
+                )
             for h in hops[:5]:
                 lines.append(
                     f"  - [trace#{h.get('trace_id')}] score={h.get('score')} "
