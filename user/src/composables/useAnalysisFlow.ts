@@ -33,6 +33,7 @@ export function useAnalysisFlow(
   const running = computed(() => status.value?.status === 'running')
 
   let sseConn: SseConnection | null = null
+  let pollTimer: ReturnType<typeof setInterval> | null = null
   const completedHooks: Array<(id: string) => void> = []
   const stateChangeHooks: Array<(id: string) => void> = []
   if (onCompleted) completedHooks.push(onCompleted)
@@ -45,6 +46,32 @@ export function useAnalysisFlow(
       else base.did = id
     }
     return { ...base, ...extra }
+  }
+
+  /** 轮询 llm-status 取 queue_depth / phase（running 期间，补 SSE 未带的积压跳数）。 */
+  async function pollLlmStatus(id: string): Promise<void> {
+    const url = buildUrl(`/api/analysis/${axis}/llm-status/${encodeURIComponent(id)}`)
+    if (!url) return
+    try {
+      const res = await apiFetch(url)
+      if (res.ok && res.data && status.value?.status === 'running') {
+        status.value = makeStatus('running', {
+          phase: res.data.phase ?? status.value.phase,
+          queue_depth: res.data.queue_depth,
+        }, id)
+      }
+    } catch {
+      /* 轮询失败忽略，保持上次状态 */
+    }
+  }
+
+  function startPolling(id: string): void {
+    if (pollTimer) return  // 已在轮询，避免重置时钟
+    pollTimer = setInterval(() => { void pollLlmStatus(id) }, 1500)
+  }
+
+  function stopPolling(): void {
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
   }
 
   /** 订阅指定 id 的分析事件流（progress + report）。 */
@@ -63,7 +90,9 @@ export function useAnalysisFlow(
     onSseEvent(sseConn, (event, data) => {
       if (event === 'analysis.progress') {
         status.value = makeStatus('running', { phase: data?.phase }, id)
+        startPolling(id)
       } else if (event === 'analysis.report') {
+        stopPolling()
         status.value = makeStatus('completed', {
           triggered: data?.triggered !== false,
           reason: data?.reason,
@@ -71,8 +100,14 @@ export function useAnalysisFlow(
         completedHooks.forEach(cb => cb(id))
         // 不自动取消订阅：保持连接以连续接收后续事件（新的 progress/report、
         // 横向累加 horizontal.accumulated），实现全程实时更新。
+      } else if (axis === 'v' && event === 'hop.scored') {
+        // 纵轴打出一跳分 → 刷新逐跳评分报告。
+        stateChangeHooks.forEach(cb => cb(id))
+      } else if (axis === 'h' && event === 'horizontal.triggered') {
+        // F 越 R_S，横轴确认被触发 → 刷新横向累计状态。
+        stateChangeHooks.forEach(cb => cb(id))
       } else if (axis === 'h' && event === 'horizontal.accumulated') {
-        // 横向 pending_count 在纵向分析完成时累加；刷新横向累计状态。
+        // 横向 F/volume 累加 → 刷新横向累计状态。
         stateChangeHooks.forEach(cb => cb(id))
       }
     })
@@ -80,6 +115,7 @@ export function useAnalysisFlow(
 
   /** 关闭 SSE 订阅。 */
   async function unsubscribe(): Promise<void> {
+    stopPolling()
     if (sseConn) {
       const conn = sseConn
       sseConn = null
@@ -97,6 +133,7 @@ export function useAnalysisFlow(
       if (result.ok && result.data?.triggered) {
         status.value = makeStatus('running', { phase: 'starting' }, id)
         void subscribe(id)
+        startPolling(id)
         return true
       }
       return false
@@ -110,7 +147,7 @@ export function useAnalysisFlow(
     completedHooks.push(cb)
   }
 
-  /** 追加 state-change 回调（横向 pending_count 累加等外部状态变更时触发）。 */
+  /** 追加 state-change 回调（hop.scored 刷逐跳评分 / horizontal.triggered|accumulated 刷 F/volume 时触发）。 */
   function onStateChange(cb: (id: string) => void): void {
     stateChangeHooks.push(cb)
   }

@@ -29,6 +29,19 @@ defineEmits<{
   (e: 'refresh'): void
   (e: 'trigger'): void
 }>()
+
+/** phase 本地化（纵 scoring/idle；横 selecting/confirming/saving_results）。 */
+function phaseLabel(phase?: string): string {
+  switch (phase) {
+    case 'scoring': return '逐跳打分中'
+    case 'selecting': return '选会话中'
+    case 'confirming': return '确认中'
+    case 'saving_results': return '保存结论中'
+    case 'idle': return '空闲'
+    case 'starting': return '启动中'
+    default: return phase || ''
+  }
+}
 </script>
 
 <template>
@@ -43,7 +56,11 @@ defineEmits<{
       <template v-if="statusKind === 'running'">
         <Loader2 class="w-4 h-4 text-blue-500 animate-spin shrink-0" />
         <span class="text-[12px] text-blue-600 font-medium">LLM 分析中</span>
-        <span v-if="status?.phase" class="text-[11px] text-gray-400 truncate">{{ status.phase }}</span>
+        <span v-if="status?.phase" class="text-[11px] text-gray-400 truncate">{{ phaseLabel(status.phase) }}</span>
+        <span v-if="status?.queue_depth != null && status.queue_depth > 0"
+          class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-50 text-amber-600 border border-amber-200 shrink-0"
+          title="该会话有界队列当前积压跳数"
+        >队列 {{ status.queue_depth }}</span>
       </template>
       <template v-else-if="statusKind === 'completed'">
         <CheckCircle2 class="w-4 h-4 text-emerald-500 shrink-0" />

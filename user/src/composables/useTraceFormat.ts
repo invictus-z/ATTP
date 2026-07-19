@@ -34,12 +34,22 @@ export function verdictBadge(verdict: string): BadgeStyle {
   return { text: verdict, cls: 'bg-gray-100 text-gray-500 border-gray-200' }
 }
 
-/** 仅返回 class（用于不需要 text 的场景） */
+/** 仅返回 class（用于不需要 text 的场景）。severity 五档：none/low/medium/high/critical */
 export function severityBadgeCls(sev: string): string {
-  if (sev === 'low') return 'bg-blue-50 text-blue-600 border-blue-200'
-  if (sev === 'medium') return 'bg-amber-50 text-amber-600 border-amber-200'
+  if (sev === 'critical') return 'bg-red-100 text-red-700 border-red-300'
   if (sev === 'high') return 'bg-red-50 text-red-600 border-red-200'
-  return 'bg-gray-50 text-gray-500 border-gray-200'
+  if (sev === 'medium') return 'bg-amber-50 text-amber-600 border-amber-200'
+  if (sev === 'low') return 'bg-blue-50 text-blue-600 border-blue-200'
+  return 'bg-gray-50 text-gray-500 border-gray-200'   // none / 未知
+}
+
+/** incident 行级背景 + 边框色（五档），供 MaliciousView 等行容器复用 */
+export function severityRowCls(sev: string): string {
+  if (sev === 'critical') return 'bg-red-50/60 border-red-200'
+  if (sev === 'high') return 'bg-red-50/50 border-red-200'
+  if (sev === 'medium') return 'bg-amber-50/50 border-amber-200'
+  if (sev === 'low') return 'bg-blue-50/50 border-blue-200'
+  return 'bg-gray-50/50 border-gray-200'   // none / 未知
 }
 
 export function severityLevelBadge(level: string): BadgeStyle {
