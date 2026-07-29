@@ -1,6 +1,6 @@
 """Horizontal Axis — 横向编排器（逐跳改版：per-DID F 累加 + 跨会话确认）。
 
-- ``on_hop_scored``：纵轴每打一跳分即调用，per-DID 累加 F（跨会话叠加，纯平方和 Σ s²）；
+- ``on_hop_scored``：纵轴每打一跳分即调用，per-DID 累加 F（跨会话叠加，三次方和 Σ s³）；
   达 ``F > R_S`` **且累积 ≥ _MIN_TRIGGER_VOLUME 跳**才触发横轴确认——单跳 critical 交给纵轴
   R_T，横轴只管累积/跨会话；无折扣、无死区、无体积封顶。
 - ``run_analysis``：候选会话 ≤ α 直接取全量，否则按 ``W(σ)=Σ s²`` 取 α 个（高危兜底）→
@@ -60,7 +60,7 @@ class HorizontalOrchestrator:
         analyzer: HorizontalIntentAnalyzer,
         horizontal_state_mgr: HorizontalAnalysisManager,
         tracer: ProtocolTracer,
-        r_s: float = 25.0,
+        r_s: float = 200.0,
         alpha: int = 10,
         rho: float = 8.0,
         concurrency: int = 8,
@@ -103,8 +103,8 @@ class HorizontalOrchestrator:
     ) -> dict:
         """单跳分数到达 → per-DID 累加 F/体积，达阈值触发确认（异步）。"""
         async with self._get_lock(did):
-            # 纯平方和：f_delta = s²（无死区 d、无折扣 γ）；F 单调递增，分散小偏移终将触发
-            f_delta = score ** 2
+            # 三次方和：f_delta = s³（无死区 d、无折扣 γ）；F 单调递增，分散小偏移终将触发
+            f_delta = score ** 3
             node_type = FIELD_TYPE_TO_SENDER_NODE_TYPE.get(field_type, "agent")
             f_value, volume = await self._state_mgr.accumulate(
                 did, f_delta, node_type,

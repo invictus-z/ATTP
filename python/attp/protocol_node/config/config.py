@@ -52,11 +52,11 @@ class AnalysisConfig(PNBase):
     dimensions: int = 4                  # 正交维度数（默认 4，见 base_models.DIMENSION_NAMES）
     aggregation: str = "max"             # 维度聚合："max"(默认) / "sum" / 数值 p 的 L^p 范数
 
-    # ── 阈值（r_s 为未标定占位，待 §9 benchmark 标定）──
+    # ── 阈值（R_S 已标定：三次方累计 cube@R_S=200，见 §9 benchmark rq_rs_trigger_f1）──
     r_t: float = 7.5                     # 单点阈值：s_i > R_T 立即告警（critical 下沿）
     rho: float = 8.0                     # 横轴高危兜底：会话内任一跳 s_j ≥ ρ 无条件纳入确认
     rho_k: float = 8.0                   # 单维 critical：d_k ≥ ρ_k（max 聚合下自动成立）
-    r_s: float = 25.0                    # 累积阈值：F_d = Σ s_i² > R_S 触发横轴确认（纯平方和；待标定）
+    r_s: float = 200.0                   # 累积阈值：F_d = Σ s_i³ > R_S 触发横轴确认（三次方和；实验最佳 cube@R_S=200）
     alpha: int = 10                      # 横轴确认上限：候选会话 > α 时按 W(σ) 取 α 个；≤ α 取全量
 
     # ── 异步 ──

@@ -23,7 +23,7 @@ class HorizontalAccumulationState:
     """Per-DID 横向累积状态（F 跨会话叠加）。
 
     字段语义：
-        f_value       — 累积偏离 F_d = Σ s_j²（纯平方和，无折扣/死区）
+        f_value       — 累积偏离 F_d = Σ s_j³（三次方和，无折扣/死区）
         volume        — 自上次闭案以来的 hop 计数（观测用，不再触发确认）
         last_trace_id — 确认游标（已闭案到此 trace_id）
         batch_index   — 已完成的确认次数（每确认一次 +1）
@@ -73,12 +73,12 @@ class HorizontalAnalysisManager:
     ) -> tuple[float, int]:
         """累加一条 hop 的偏离增量到 F_d，volume+1，持久化。
 
-        纯平方和累加：F_i = F_{i-1} + s_i²（无折扣 γ、无死区 d）。
+        三次方和累加：F_i = F_{i-1} + s_i³（无折扣 γ、无死区 d）。
         F 单调递增，分散小偏移终将超过 R_S 触发确认。
 
         Args:
             did: 发送方 DID。
-            f_delta: 本跳对 F 的贡献 s_i²（调用方已算好）。
+            f_delta: 本跳对 F 的贡献 s_i³（调用方已算好）。
             node_type: 该 DID 的节点类型（首次见到时记录）。
 
         Returns:

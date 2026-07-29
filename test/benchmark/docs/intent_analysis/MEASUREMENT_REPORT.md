@@ -1,5 +1,9 @@
 # ATTP 协议节点意图追踪 Agent 测量报告
 
+> ⚠️ **历史报告（v1）**：本文基于早期 **63 场景** 与上一代模型（DeepSeek-V3.2 / GPT-5.4 / Claude-Sonnet-4-6 / Gemini-3-Pro / GLM-5.1）。
+> 当前基准已扩展至 **274 场景**（train_R_T 95 / train_R_S 87 / test 92）并使用新一代模型，完整结果见 [EXPERIMENT.md](EXPERIMENT.md)。
+> 文中复现命令为旧路径（已迁移到 `intent_analysis/runners/`，用 `python -m intent_analysis.runners.<script>` 调用）；`eval_final.py` 等脚本已下线。
+
 | 项目 | 内容 |
 |------|------|
 | 报告编号 | ATTP-BENCH-2026-004 |

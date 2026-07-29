@@ -1,5 +1,8 @@
 # ATTP vs ANP / ACP / A2A — 用户侧定位恶意节点能力对比报告
 
+> ⚠️ **历史报告**：本文基于早期 **63 场景 / 179 会话** 口径，ATTP 列来源引用了旧 provider 目录（如 `data/results/deepseek/`，现已被新一代模型目录取代）。
+> 当前意图审计结果目录为 `data/results/eval/<model>/`；运行命令见顶层 [README.md](../../README.md) §6。复现时需先用 `intent_analysis.runners.evaluate` 产出对应模型的 `{sid}_llm.db`。
+
 ## 1. 背景与核心问题
 
 在多 Agent 协作中，用户发布任务后，任务往往被**委派给下游 agent**、再调用**工具**完成。一个关键的安全问题是：

@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from typing import Any
@@ -18,6 +19,9 @@ from attp.core.analysis.horizontal.models import ConfirmationVerdict
 from attp.core.analysis.horizontal.prompts import CONFIRMATION_PROMPT
 
 logger = get_logger("HorizontalAnalysis")
+
+# LLM 调用硬超时（秒）：与 VerticalIntentAnalyzer 一致，流式 keep-alive 下兜底防挂死。
+_LLM_HARD_TIMEOUT = 150
 
 # field_type → sender node_type（DID 与 node_type 严格一一对应）
 FIELD_TYPE_TO_SENDER_NODE_TYPE: dict[str, str] = {
@@ -103,15 +107,20 @@ class HorizontalIntentAnalyzer:
         )
 
         try:
-            response = await self._client.chat.completions.create(
-                model=self._model,
-                messages=[
-                    {"role": "system", "content": "你是一个多Agent系统的跨Session安全审计专家，只输出 JSON，不输出任何其他内容。"},
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=0.1,
-                response_format={"type": "json_object"},
-                timeout=120,
+            # 硬超时兜底：流式 keep-alive 下 httpx 读超时(120s)可能不触发，
+            # 用 asyncio.wait_for 保证单次调用（含 SDK 内部重试）必在硬上限内终止。
+            response = await asyncio.wait_for(
+                self._client.chat.completions.create(
+                    model=self._model,
+                    messages=[
+                        {"role": "system", "content": "你是一个多Agent系统的跨Session安全审计专家，只输出 JSON，不输出任何其他内容。"},
+                        {"role": "user", "content": prompt},
+                    ],
+                    temperature=0.1,
+                    response_format={"type": "json_object"},
+                    timeout=120,
+                ),
+                timeout=_LLM_HARD_TIMEOUT,
             )
             content = response.choices[0].message.content
             result = _loads_json_object(content or "", f"horizontal confirm did={did}")

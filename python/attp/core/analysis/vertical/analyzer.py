@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from typing import Any
@@ -30,6 +31,10 @@ from attp.core.analysis.vertical.models import VerticalSessionReport
 from attp.core.analysis.vertical.prompts import HOP_SCORING_PROMPT, INTENT_REVISION_PROMPT
 
 logger = get_logger("VerticalAnalysis")
+
+# LLM 调用硬超时（秒）：httpx 读超时(120s)在流式 keep-alive 下可能不触发，
+# 用 asyncio.wait_for 强制单次调用（含 SDK 内部重试）必在此上限内终止，避免高并发下挂死。
+_LLM_HARD_TIMEOUT = 150
 
 # field_type → sender node_type（与 HorizontalIntentAnalyzer 一致）
 FIELD_TYPE_TO_SENDER_NODE_TYPE: dict[str, str] = {
@@ -59,6 +64,9 @@ def _loads_json_object(raw_content: str, context: str) -> dict[str, Any]:
     text = (raw_content or "").strip()
     if not text:
         raise ValueError(f"empty LLM response for {context}")
+
+    # strip reasoning 模型的 <think>...</think>（如 MiniMax-M3），避免 think 内示例 JSON 被误提取
+    text = re.sub(r"<think>.*?</think>\s*", "", text, flags=re.DOTALL)
 
     if text.startswith("```"):
         text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.IGNORECASE | re.DOTALL).strip()
@@ -163,15 +171,20 @@ class VerticalIntentAnalyzer:
             previous_revisions=prev_str,
         )
         try:
-            response = await self._client.chat.completions.create(
-                model=self._model,
-                messages=[
-                    {"role": "system", "content": "你是一个安全审计助手，只输出 JSON，不输出任何其他内容。"},
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=0.1,
-                response_format={"type": "json_object"},
-                timeout=120,
+            # 硬超时兜底：流式 keep-alive 下 httpx 读超时(120s)可能不触发，
+            # 用 asyncio.wait_for 保证单次调用（含 SDK 内部重试）必在硬上限内终止。
+            response = await asyncio.wait_for(
+                self._client.chat.completions.create(
+                    model=self._model,
+                    messages=[
+                        {"role": "system", "content": "你是一个安全审计助手，只输出 JSON，不输出任何其他内容。"},
+                        {"role": "user", "content": prompt},
+                    ],
+                    temperature=0.1,
+                    response_format={"type": "json_object"},
+                    timeout=120,
+                ),
+                timeout=_LLM_HARD_TIMEOUT,
             )
             content = response.choices[0].message.content
             data = _loads_json_object(content or "", "intent revision")
@@ -216,15 +229,19 @@ class VerticalIntentAnalyzer:
         )
 
         try:
-            response = await self._client.chat.completions.create(
-                model=self._model,
-                messages=[
-                    {"role": "system", "content": "你是一个多Agent系统安全审计员，只输出 JSON，不输出任何其他内容。"},
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=0.1,
-                response_format={"type": "json_object"},
-                timeout=120,
+            # 硬超时兜底：见 extract_intent_revision 同款说明。
+            response = await asyncio.wait_for(
+                self._client.chat.completions.create(
+                    model=self._model,
+                    messages=[
+                        {"role": "system", "content": "你是一个多Agent系统安全审计员，只输出 JSON，不输出任何其他内容。"},
+                        {"role": "user", "content": prompt},
+                    ],
+                    temperature=0.1,
+                    response_format={"type": "json_object"},
+                    timeout=120,
+                ),
+                timeout=_LLM_HARD_TIMEOUT,
             )
             content = response.choices[0].message.content
             result = _loads_json_object(content or "", f"hop scoring trace={trace_id}")

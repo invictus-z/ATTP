@@ -13,8 +13,8 @@
         "baseUrl": "${LLM_BASE_URL}",
         "model": "${LLM_MODEL}",
         "horizontalEnabled": true,
-        "rT": 7.5,
-        "rS": 25.0,
+        "rT": 7.0,
+        "rS": 200.0,
         "alpha": 10,
         "rho": 8.0,
         "concurrency": 8
