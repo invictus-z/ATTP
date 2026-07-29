@@ -13,6 +13,7 @@ const router = createRouter({
     { path: '/trace/nodes', name: 'trace-nodes', component: () => import('./views/trace/NodeManageView.vue') },
     { path: '/trace/query', name: 'trace-query', component: () => import('./views/trace/TraceQueryView.vue') },
     { path: '/trace/malicious', name: 'trace-malicious', component: () => import('./views/trace/MaliciousView.vue') },
+    { path: '/trace/cross-lock', name: 'trace-cross-lock', component: () => import('./views/trace/CrossLockView.vue') },
     { path: '/tools', name: 'tools', component: () => import('./views/ToolView.vue') },
     { path: '/user-config', name: 'user-config', component: () => import('./views/UserConfigView.vue') },
   ],

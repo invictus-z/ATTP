@@ -19,7 +19,7 @@ import { useProtocolNodes } from '../../composables/useProtocolNodes'
 import { useToast } from '../../composables/useToast'
 import { onMaliciousDetected } from '../../composables/nodeEvents'
 import {
-  severityLevelBadge, sourceBadge, severityBadgeCls, formatTime, formatDid,
+  severityLevelBadge, sourceBadge, severityBadgeCls, severityRowCls, formatTime, formatDid,
 } from '../../composables/useTraceFormat'
 import type { MaliciousDossier, MaliciousReport } from './types'
 import NodeSelector from './components/NodeSelector.vue'
@@ -342,7 +342,7 @@ onMounted(() => {
                 <div v-else class="space-y-3">
                   <div v-for="report in filteredIncidents" :key="report.id"
                     class="p-3 rounded-lg border"
-                    :class="report.severity === 'high' ? 'bg-red-50/50 border-red-200' : report.severity === 'medium' ? 'bg-amber-50/50 border-amber-200' : 'bg-blue-50/50 border-blue-200'"
+                    :class="severityRowCls(report.severity)"
                   >
                     <div class="flex items-center justify-between mb-2">
                       <div class="flex items-center gap-2">

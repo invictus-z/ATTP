@@ -1,13 +1,13 @@
-"""Horizontal Analysis State Manager — 横向分析状态管理（per-DID 全局）。
+"""Horizontal Analysis State Manager — 横向分析状态管理（per-DID 全局，逐跳改版）。
 
-管理每个 DID 的横向累积计数器和分析游标。
-横向状态是全局 per-DID 的，不属于任何单个 Session。
-持久化到 horizontal_analysis_states 表。
+管理每个 DID 的累积偏离 F、体积计数、确认游标（last_trace_id）、批次与上下文。
+F 跨会话叠加：纵轴每打一跳分即调用 ``accumulate`` 喂入；达阈值触发横轴确认，
+确认后 ``close`` 重置 F/体积并推进游标（闭案）。持久化到 horizontal_analysis_states 表。
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from attp.app.logging import get_logger
@@ -20,23 +20,27 @@ logger = get_logger("HorizontalState")
 
 @dataclass
 class HorizontalAccumulationState:
-    """Per-DID 横向分析累积状态。
+    """Per-DID 横向累积状态（F 跨会话叠加）。
 
-    字段语义（与纵向 VerticalAnalysisState 对称）：
-        pending_count  — 当前待分析行为的数量（达阈值触发横向分析后归零）
-        last_trace_id  — 已分析的最新位置
-        batch_index    — 已生成的报告总数（每分析一批 +1，不重置）
+    字段语义：
+        f_value       — 累积偏离 F_d = Σ s_j²（纯平方和，无折扣/死区）
+        volume        — 自上次闭案以来的 hop 计数（观测用，不再触发确认）
+        last_trace_id — 确认游标（已闭案到此 trace_id）
+        batch_index   — 已完成的确认次数（每确认一次 +1）
+        context       — 最近一次确认的摘要（节点档案）
     """
+
     did: str
     node_type: str = "agent"
-    pending_count: int = 0
+    f_value: float = 0.0
+    volume: int = 0
     last_trace_id: int = 0
     batch_index: int = 0
     context: str = ""
 
 
 class HorizontalAnalysisManager:
-    """横向分析状态管理 — per-DID 的全局累积状态。"""
+    """横向分析状态管理 — per-DID 的 F 累加与闭案。"""
 
     def __init__(self, storage: SqliteStore):
         self._storage = storage
@@ -51,7 +55,8 @@ class HorizontalAnalysisManager:
                 saved = await self._storage.load_horizontal_state(did)
                 if saved:
                     state.node_type = saved.get("node_type", "agent")
-                    state.pending_count = saved.get("pending_count", 0)
+                    state.f_value = saved.get("f_value", 0.0)
+                    state.volume = saved.get("volume", 0)
                     state.last_trace_id = saved.get("last_trace_id", 0)
                     state.batch_index = saved.get("batch_index", 0)
                     state.context = saved.get("context", "")
@@ -63,40 +68,68 @@ class HorizontalAnalysisManager:
         """从 SQLite 恢复 DID 的横向状态。"""
         await self._ensure_loaded(did)
 
-    async def increment_pending_count(self, did: str) -> int:
-        """累加 DID 的横向待分析计数器。返回累加后的值。"""
-        state = await self._ensure_loaded(did)
-        state.pending_count += 1
-        await self._persist(did)
-        return state.pending_count
+    async def accumulate(
+        self, did: str, f_delta: float, node_type: str = "",
+    ) -> tuple[float, int]:
+        """累加一条 hop 的偏离增量到 F_d，volume+1，持久化。
 
-    async def reset_pending_count(self, did: str) -> None:
-        """重置 DID 的横向待分析计数器。"""
+        纯平方和累加：F_i = F_{i-1} + s_i²（无折扣 γ、无死区 d）。
+        F 单调递增，分散小偏移终将超过 R_S 触发确认。
+
+        Args:
+            did: 发送方 DID。
+            f_delta: 本跳对 F 的贡献 s_i²（调用方已算好）。
+            node_type: 该 DID 的节点类型（首次见到时记录）。
+
+        Returns:
+            (累加后的 f_value, 累加后的 volume)。
+        """
         state = await self._ensure_loaded(did)
-        state.pending_count = 0
+        state.f_value += f_delta
+        state.volume += 1
+        if node_type:
+            state.node_type = node_type
+        await self._persist(did)
+        return state.f_value, state.volume
+
+    async def close(self, did: str, advance_cursor_to: int, context: str = "") -> None:
+        """闭案：重置 F/体积、推进确认游标、batch+1、记录摘要。"""
+        state = await self._ensure_loaded(did)
+        state.f_value = 0.0
+        state.volume = 0
+        if advance_cursor_to > state.last_trace_id:
+            state.last_trace_id = advance_cursor_to
+        state.batch_index += 1
+        if context:
+            state.context = context
         await self._persist(did)
 
-    async def get_cursor(self, did: str) -> dict:
-        """获取 DID 的横向分析游标。"""
+    async def reset_accumulation(self, did: str) -> None:
+        """清零 F/体积，但不动游标/batch/context。
+
+        用于 no_new_scores：滞留的 F 来自游标已越过的晚到跳（不会再被确认），
+        清掉避免反复空触发；这些跳的纵轴 R_T 告警已发。
+        """
+        state = await self._ensure_loaded(did)
+        state.f_value = 0.0
+        state.volume = 0
+        await self._persist(did)
+
+    async def get_state(self, did: str) -> dict:
+        """获取 DID 的横向累积状态。"""
         state = await self._ensure_loaded(did)
         return {
-            "pending_count": state.pending_count,
+            "node_type": state.node_type,
+            "f_value": state.f_value,
+            "volume": state.volume,
             "last_trace_id": state.last_trace_id,
             "batch_index": state.batch_index,
             "context": state.context,
         }
 
-    async def update_cursor(
-        self, did: str, batch_index: int, last_trace_id: int, context: str, node_type: str = "",
-    ) -> None:
-        """更新 DID 的横向分析游标。"""
+    async def get_cursor(self, did: str) -> int:
         state = await self._ensure_loaded(did)
-        state.batch_index = batch_index
-        state.last_trace_id = last_trace_id
-        state.context = context
-        if node_type:
-            state.node_type = node_type
-        await self._persist(did)
+        return state.last_trace_id
 
     async def _persist(self, did: str) -> None:
         """持久化 DID 状态到 SQLite。"""
@@ -105,7 +138,8 @@ class HorizontalAnalysisManager:
             return
         await self._storage.save_horizontal_state(did, {
             "node_type": state.node_type,
-            "pending_count": state.pending_count,
+            "f_value": state.f_value,
+            "volume": state.volume,
             "last_trace_id": state.last_trace_id,
             "batch_index": state.batch_index,
             "context": state.context,

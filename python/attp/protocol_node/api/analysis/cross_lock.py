@@ -1,7 +1,7 @@
-"""十字锁定（Cross-Lock）综合视图 API 路由 — 纵向 + 横向综合分析。
+"""十字锁定（Cross-Lock）综合视图 API 路由 — 纵向逐跳 + 横向 F/确认。
 
 端点（prefix `/api/analysis`）：
-    GET  /api/analysis/cross-lock/{session_id}  — 纵向 + 横向综合视图
+    GET  /api/analysis/cross-lock/{session_id}  — 纵向 hop_scores + 各 DID 横向 F/volume
 """
 
 import json
@@ -9,6 +9,7 @@ import json
 from fastapi import APIRouter
 
 from attp.app.logging import get_logger
+from attp.core.analysis.base_models import overall_verdict_for_severities
 from attp.core.pn_tracer import ProtocolTracer
 
 logger = get_logger("CrossLockAPI")
@@ -19,43 +20,31 @@ def get_cross_lock_router(tracer: ProtocolTracer) -> APIRouter:
 
     @router.get("/cross-lock/{session_id}")
     async def get_cross_lock_view(session_id: str, protocol_node_address: str | None = None):
-        """返回纵向 + 横向综合分析视图。"""
-        # 1. Fetch behavior traces
+        """返回纵向逐跳评分 + 涉及各 DID 的横向 F/volume/最近确认。"""
+        # 1. traces（用于提取涉及 DID）
         try:
             trace_entries = await tracer.recover_behavior_trace(session_id, protocol_node_address)
         except Exception as e:
             logger.error("Error recovering traces for cross-lock {}: {}", session_id, e)
             trace_entries = []
 
-        # 2. Fetch vertical analysis reports
+        # 2. hop scores（纵向逐跳）
         try:
-            report_rows = await tracer.recover_analysis_reports(session_id)
+            hop_scores = await tracer.query_hop_scores_by_session(session_id)
         except Exception as e:
-            logger.error("Error recovering reports for cross-lock {}: {}", session_id, e)
-            report_rows = []
+            logger.error("Error recovering hop scores for cross-lock {}: {}", session_id, e)
+            hop_scores = []
+        severities = [h.get("severity", "none") for h in hop_scores]
 
-        # 3. Parse vertical reports and extract alerts
-        parsed_reports = []
-        vertical_alerts = []
-        for r in report_rows:
-            report_data = json.loads(r["report_json"]) if r.get("report_json") else {}
-            parsed_reports.append({
-                "id": r["id"],
-                "batch_index": r["batch_index"],
-                "from_trace_id": r["from_trace_id"],
-                "to_trace_id": r["to_trace_id"],
-                "timestamp": r.get("timestamp"),
-                "report": report_data,
-            })
-            if report_data.get("overall_verdict") in ("suspicious", "malicious"):
-                vertical_alerts.append({
-                    "report_id": r["id"],
-                    "batch_index": r["batch_index"],
-                    "verdict": report_data.get("overall_verdict"),
-                    "summary": report_data.get("summary", ""),
-                })
+        # 3. R_T 告警
+        try:
+            vertical_alerts = await tracer.query_malicious_reports(
+                session_id=session_id, source="vertical_analysis",
+            )
+        except Exception:
+            vertical_alerts = []
 
-        # 4. Extract unique DIDs and fetch horizontal state
+        # 4. 各 DID 横向 F/volume/最近确认
         unique_dids = list({t.get("node_did", "") for t in trace_entries if t.get("node_did")})
         horizontal_dids = []
         for did in unique_dids:
@@ -71,24 +60,31 @@ def get_cross_lock_router(tracer: ProtocolTracer) -> APIRouter:
                         report_data = {}
                     latest_h_report = {
                         "batch_index": latest.get("batch_index", 0),
-                        "verdict": report_data.get("overall_verdict"),
+                        "confirmed": report_data.get("confirmed", False),
+                        "overall_verdict": report_data.get("overall_verdict"),
                         "timestamp": latest.get("timestamp"),
                     }
                 horizontal_dids.append({
                     "did": did,
-                    "pending_count": h_state.get("pending_count", 0) if h_state else 0,
+                    "f_value": h_state.get("f_value", 0.0) if h_state else 0.0,
+                    "volume": h_state.get("volume", 0) if h_state else 0,
+                    "batch_index": h_state.get("batch_index", 0) if h_state else 0,
                     "last_horizontal_analysis": latest_h_report,
                 })
             except Exception as e:
                 logger.error("Error loading horizontal data for did={}: {}", did, e)
-                horizontal_dids.append({"did": did, "pending_count": 0, "last_horizontal_analysis": None})
+                horizontal_dids.append({
+                    "did": did, "f_value": 0.0, "volume": 0,
+                    "last_horizontal_analysis": None,
+                })
 
         return {
             "session_id": session_id,
             "vertical": {
                 "traces": len(trace_entries),
-                "reports": parsed_reports,
-                "total_batches": len(parsed_reports),
+                "hop_scores": hop_scores,
+                "overall_verdict": overall_verdict_for_severities(severities),
+                "total_hops": len(hop_scores),
                 "alerts": vertical_alerts,
             },
             "horizontal": {

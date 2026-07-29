@@ -186,7 +186,7 @@ def get_record_router(
             behavior_type = result.behavior_type
             stored = result.stored_msg
 
-            await tracer.save_behavior_entry(
+            trace_id = await tracer.save_behavior_entry(
                 session_id=session_id,
                 protocol_node_address=pna,
                 sender_did=stored.node_did, #验证过的真实的发送方DID
@@ -205,13 +205,21 @@ def get_record_router(
                 result.node_type, body, result,
             )
 
+            # 逐跳异步：落库后把该跳投进会话的有界队列（不等 LLM）；
+            # worker 内部按 field_type 分流（U2A 抽意图 / 动作跳打分）。
             _orch = orchestrator_holder[0]
-            if behavior_type == "U2A" and _orch and session_id and stored.hop.get("Hop_Count", [0, 0]) == [0, 0]:
-                content = stored.hop.get("Content", "")
-                await _orch.on_field_U2A_recorded(session_id, content)
-
             if _orch and session_id:
-                await _orch.on_record_received(session_id)
+                hop = {
+                    "trace_id": trace_id,
+                    "session_id": session_id,
+                    "sender_did": stored.node_did,      # 验证过的发送方
+                    "field_type": behavior_type,
+                    "hop_count": stored.hop.get("Hop_Count", [0, 0]),
+                    "content": stored.hop.get("Content", ""),
+                    "target": result.sender_did,         # 验证过的接收方
+                    "timestamp": stored.hop.get("Timestamp", 0),
+                }
+                await _orch.enqueue_trace(session_id, hop)
 
             return JSONResponse({"status": "Record verified and saved"})
 

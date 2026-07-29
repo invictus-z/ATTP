@@ -12,8 +12,11 @@
         "apiKey": "${LLM_API_KEY}",
         "baseUrl": "${LLM_BASE_URL}",
         "model": "${LLM_MODEL}",
-        "reportBatchSize": 10,
         "horizontalEnabled": true,
-        "horizontalThreshold": 5
+        "rT": 7.5,
+        "rS": 25.0,
+        "alpha": 10,
+        "rho": 8.0,
+        "concurrency": 8
     }
 }

@@ -17,6 +17,8 @@ docker/release/
 
 .env
 
+# 本地测试脚手架（种子库脚本 + 生成的 DB/config，不入库）
+local_test/
 
 test/benchmark/data/scenarios/
 test/benchmark/data/results/

@@ -1,23 +1,32 @@
-"""Vertical Axis — 纵向分析编排器。
+"""Vertical Axis — 纵向逐跳编排器（per-session 有界队列 worker）。
 
-协调意图提取、纵向分析调度、横向累积触发。
-分析完成后提取 analyzed_dids，调用横向触发回调。
+改版核心：``/record`` 落库后把该跳 ``hop`` 投进该会话的**有界队列**即返回
+（不 await LLM）；每个会话一个后台 worker 从队列消费，按 trace 序串行
+（per-session asyncio.Lock 保护意图流 / 隐状态 / 游标），LLM 调用受全局
+信号量 ``concurrency`` 限并发（即「同时处理的 hop 数」）。
+
+队列满（``queue_maxsize``）= 真背压：``/record`` 不阻塞，溢出的 hop 留在 DB，
+由 worker 的 **catch-up 扫描**（启动时 / 空闲时 / 手动触发）按游标补打，不丢数据。
+
+分流（§2）：
+- U2A 且 sender==发起者 DID → 抽 Δ 追加意图流（**不打分**）。
+- U2A 但 sender≠发起者 DID → **当普通动作跳打分**（防第二用户注入/越权引导盲区）。
+- 动作跳（A2A/A2T/T2A/A2U）→ V-Reasoner 逐跳打分 → 落 hop_score → 更新 h_i →
+  ``s_i > R_T`` 立即告警 → 把 **sub-R_T** 的 ``s_i`` 报给横轴 ``on_hop_scored``（critical
+  不重复计入 F：R_T 抓单跳恶，F 抓累积慢投毒）。
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Callable, Awaitable
+from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from attp.app.logging import get_logger
-from attp.core.analysis.base_models import IntentDescriptor
-from attp.core.analysis.vertical.analyzer import _derive_node_type
-from attp.core.analysis.vertical.models import NodeIntentVerdict, VerticalIntentReport
+from attp.core.analysis.vertical.analyzer import FIELD_TYPE_TO_SENDER_NODE_TYPE
 from attp.core.sse import EventType, Topic
 
 if TYPE_CHECKING:
+    from attp.core.analysis.base_models import IntentRevisionSource
     from attp.core.analysis.vertical.analyzer import VerticalIntentAnalyzer
     from attp.core.sessions.protocol_node.management.vertical_state import VerticalAnalysisManager
     from attp.core.sse import EventBroker
@@ -25,398 +34,333 @@ if TYPE_CHECKING:
 
 logger = get_logger("VerticalAnalysis")
 
+#: worker 空闲超时（秒）：队列空且无新增即退出，下次 enqueue 重建。
+WORKER_IDLE_TIMEOUT = 300.0
 
-@dataclass
-class VerticalAnalysisResult:
-    """Result of a vertical analysis run."""
-
-    triggered: bool
-    reason: str = ""
-    report: VerticalIntentReport | None = None
-
-    def to_dict(self) -> dict:
-        d: dict = {"triggered": self.triggered, "reason": self.reason}
-        if self.report:
-            d["report"] = self.report.to_dict()
-        return d
+#: 投进队列的"补打"哨兵：worker 见到它就跑一次 catch-up 扫描（手动触发用）。
+_CATCHUP_SENTINEL: Any = object()
 
 
 class VerticalOrchestrator:
-    """Coordinates intent extraction, batch counting, and vertical analysis scheduling.
-
-    Entirely driven by DataPort record reception — no dependency on web layer.
-    Analysis state is persisted to SQLite via VerticalAnalysisManager for crash recovery.
-
-    Cross-Lock integration:
-        After each vertical analysis, calls ``horizontal_trigger_callback(did, session_id)``
-        for every DID involved in the analysis, enabling the horizontal axis to accumulate.
-    """
+    """逐跳纵向编排：per-session 有界队列 worker + 全局并发限流。"""
 
     def __init__(
         self,
         analyzer: VerticalIntentAnalyzer,
         vertical_state_mgr: VerticalAnalysisManager,
         tracer: ProtocolTracer,
-        batch_size: int = 10,
-        horizontal_trigger_callback: Callable[[str, str], Awaitable[None]] | None = None,
+        r_t: float = 7.5,
+        concurrency: int = 8,
+        queue_maxsize: int = 1000,
         event_broker: EventBroker | None = None,
     ):
         self._analyzer = analyzer
         self._state_mgr = vertical_state_mgr
         self._tracer = tracer
-        self._batch_size = batch_size
-        self._horizontal_trigger_callback = horizontal_trigger_callback
+        self._r_t = r_t
+        self._queue_maxsize = queue_maxsize
         self._broker = event_broker
+        # 同时处理的 hop 数（并发上限）：每个 worker 处理一跳前先获取此信号量。
+        self._sem = asyncio.Semaphore(concurrency)
+
+        self._workers: dict[str, asyncio.Task] = {}
+        self._queues: dict[str, asyncio.Queue] = {}
         self._locks: dict[str, asyncio.Lock] = {}
-        self._restored_sessions: set[str] = set()
-        self._running_tasks: dict[str, asyncio.Task] = {}
-        self._task_results: dict[str, VerticalAnalysisResult] = {}
-        self._task_phases: dict[str, str] = {}
+        self._phases: dict[str, str] = {}
 
-    async def _set_phase(self, session_id: str, phase: str) -> None:
-        """更新任务阶段并发布 ``analysis.progress`` 事件。"""
-        self._task_phases[session_id] = phase
-        if self._broker:
-            await self._broker.publish(
-                EventType.ANALYSIS_PROGRESS,
-                {"axis": "vertical", "session_id": session_id, "phase": phase},
-                topic=Topic.ANALYSIS,
-            )
-
-    def _get_lock(self, session_id: str) -> asyncio.Lock:
-        if session_id not in self._locks:
-            self._locks[session_id] = asyncio.Lock()
-        return self._locks[session_id]
+        # 由 CrossLockCoordinator 注入：每打一跳分即回报横轴（F 累加）
+        self._on_hop_scored_callback: (
+            Callable[[str, str, int, float, str], Awaitable[None]] | None
+        ) = None
 
     # ------------------------------------------------------------------
-    # Callbacks (wired into DataPort)
+    # 公开接口（/record、手动触发、状态查询）
     # ------------------------------------------------------------------
 
-    async def on_field_U2A_recorded(self, session_id: str, content: str) -> None:
-        """Called when a User→Agent message (U2A) is recorded.
+    async def enqueue_trace(self, session_id: str, hop: dict) -> None:
+        """``/record`` 落库后调用：把该跳投进会话的有界队列（不阻塞、不等 LLM）。
 
-        Extracts intent from the first user message of a session.
-        Caches content for retry on subsequent triggers if extraction fails.
+        队列满时 ``/record`` 仍不阻塞——该 hop 已在 DB，由 worker 的 catch-up
+        扫描（空闲/手动触发）按游标补打，不丢数据。
         """
-        await self._state_mgr.restore_state(session_id)
-
-        intent = await self._state_mgr.get_intent(session_id)
-        if intent:
-            return
-
-        extracted = await self._analyzer.extract_intent(content)
-        if extracted:
-            await self._state_mgr.set_intent(session_id, extracted.to_dict())
-            logger.info("Intent extracted for session={}", session_id)
-        else:
-            # 兜底：LLM 意图提取失败时，用 U2A 原文构造最小意图，
-            # 避免后续 run_analysis 因 no_intent 静默放弃整段会话分析（导致漏检）。
-            from attp.core.analysis.base_models import IntentDescriptor
-            fallback = IntentDescriptor(
-                original_task=content,
-                core_objective=content[:200],
-                constraints=[],
-                involved_capabilities=[],
-                risk_level="medium",
-            )
-            await self._state_mgr.set_intent(session_id, fallback.to_dict())
+        self._ensure_worker(session_id)
+        queue = self._queues[session_id]
+        try:
+            queue.put_nowait(hop)
+        except asyncio.QueueFull:
             logger.warning(
-                "Intent extraction failed for session={}, applied fallback intent from raw U2A",
-                session_id,
+                "Vertical queue full (session={}, cap={}); hop trace={} 留在 DB，"
+                "将由 catch-up 扫描补打",
+                session_id, self._queue_maxsize, hop.get("trace_id"),
             )
-
-    async def on_record_received(self, session_id: str) -> None:
-        """Called by DataPort when a record message is received.
-
-        Increments report counter and triggers analysis if batch size reached.
-        """
-        async with self._get_lock(session_id):
-            count = await self._state_mgr.increment_pending_count(session_id)
-
-            if count >= self._batch_size:
-                logger.info(
-                    "Vertical batch size reached ({}/{}), triggering analysis for session={}",
-                    count, self._batch_size, session_id,
-                )
-                await self.run_analysis(session_id, is_final=False)
-
-    # ------------------------------------------------------------------
-    # Core analysis runner
-    # ------------------------------------------------------------------
-
-    async def run_analysis(self, session_id: str, is_final: bool = False) -> VerticalAnalysisResult:
-        """Run vertical semantic intent tracking for a session.
-
-        IMPORTANT: Caller must hold the per-session lock.
-        """
-        state = await self._state_mgr.get_state(session_id)
-        intent_data = state.get("intent")
-
-        if not intent_data:
-            logger.warning(
-                "Cannot run vertical analysis for session={}: no intent extracted",
-                session_id,
-            )
-            if self._broker:
-                await self._broker.publish(
-                    EventType.ANALYSIS_REPORT,
-                    {"axis": "vertical", "session_id": session_id,
-                     "triggered": False, "reason": "no_intent"},
-                    topic=Topic.ANALYSIS,
-                )
-            return VerticalAnalysisResult(triggered=False, reason="no_intent")
-
-        intent = IntentDescriptor.from_dict(intent_data)
-
-        # Recover unchecked traces
-        await self._set_phase(session_id, "recovering_traces")
-        last_id = state["last_trace_id"]
-        traces, max_id = await self._tracer.recover_traces_since(session_id, last_id)
-
-        if not traces:
-            await self._state_mgr.reset_pending_count(session_id)
-            if self._broker:
-                await self._broker.publish(
-                    EventType.ANALYSIS_REPORT,
-                    {"axis": "vertical", "session_id": session_id,
-                     "triggered": False, "reason": "no_unanalyzed_traces"},
-                    topic=Topic.ANALYSIS,
-                )
-            return VerticalAnalysisResult(triggered=False, reason="no_unanalyzed_traces")
-
-        batch_index = state["batch_index"] + 1
-        previous_context = state["context"]
-
-        logger.info(
-            "Running vertical analysis: session={}, batch={}, traces={}, is_final={}",
-            session_id, batch_index, len(traces), is_final,
-        )
-
-        await self._set_phase(session_id, "analyzing")
-        report = await self._analyzer.analyze(
-            session_id=session_id,
-            batch_index=batch_index,
-            from_trace_id=last_id,
-            to_trace_id=max_id,
-            traces=traces,
-            intent=intent,
-            previous_context=previous_context,
-        )
-
-        # Persist report
-        await self._set_phase(session_id, "saving_results")
-        report_json = json.dumps(report.to_dict(), ensure_ascii=False)
-        report_row_id = await self._tracer.save_analysis_report(report_json)
-
-        # Update session state FIRST, then publish — 否则前端收到 analysis.report
-        # 立即拉取状态时会读到旧的 batch_index / last_trace_id / pending_count。
-        await self._state_mgr.reset_pending_count(session_id)
-        await self._state_mgr.update_cursor(
-            session_id, batch_index=batch_index,
-            last_trace_id=max_id, context=report.context_summary,
-        )
-
-        if self._broker:
-            await self._broker.publish(
-                EventType.ANALYSIS_REPORT,
-                {
-                    "axis": "vertical",
-                    "session_id": session_id,
-                    "batch_index": batch_index,
-                    "verdict": report.overall_verdict,
-                    "summary": report.summary,
-                    "report_id": report_row_id,
-                },
-                topic=Topic.ANALYSIS,
-            )
-
-        # Notify if suspicious or malicious
-        if report.overall_verdict == "error":
-            logger.error("Vertical analysis error for session={}: {}", session_id, report.summary)
-        elif report.overall_verdict in ("suspicious", "malicious"):
-            await self._notify_analysis_result(session_id, report, report_row_id, traces)
-
-        # Cross-Lock: trigger horizontal accumulation for each involved DID
-        if self._horizontal_trigger_callback and report.analyzed_dids:
-            for did in report.analyzed_dids:
-                try:
-                    await self._horizontal_trigger_callback(did, session_id)
-                except Exception as e:
-                    logger.error(
-                        "Horizontal trigger callback failed for did={}, session={}: {}",
-                        did, session_id, e,
-                    )
-
-        logger.info(
-            "Vertical analysis complete: session={}, verdict={}, nodes_checked={}",
-            session_id, report.overall_verdict, len(report.node_verdicts),
-        )
-        return VerticalAnalysisResult(triggered=True, report=report)
-
-    # ------------------------------------------------------------------
-    # Async task management (for manual trigger endpoint)
-    # ------------------------------------------------------------------
 
     async def trigger_analysis_async(self, session_id: str) -> dict:
-        """Fire-and-forget analysis task. Returns immediately with status."""
-        if session_id in self._running_tasks:
-            return {"triggered": True, "status": "already_running", "session_id": session_id}
-
-        async def _task_body():
-            try:
-                async with self._get_lock(session_id):
-                    result = await self.run_analysis(session_id, is_final=False)
-                return result
-            except Exception as e:
-                logger.error("Async vertical analysis task failed for session={}: {}", session_id, e)
-                return VerticalAnalysisResult(triggered=False, reason=f"task_error: {e}")
-
-        task = asyncio.create_task(_task_body())
-        self._running_tasks[session_id] = task
-        await self._set_phase(session_id, "starting")
-
-        def _on_done(t: asyncio.Task):
-            self._task_results[session_id] = t.result()
-            self._running_tasks.pop(session_id, None)
-            self._task_phases.pop(session_id, None)
-
-        task.add_done_callback(_on_done)
+        """手动触发：确保该会话当前未打分的 hop 被消费（投哨兵触发 catch-up 扫描）。"""
+        await self._state_mgr.restore_state(session_id)
+        self._ensure_worker(session_id)
+        try:
+            self._queues[session_id].put_nowait(_CATCHUP_SENTINEL)
+        except asyncio.QueueFull:
+            # 队列满说明 worker 还在忙，忙完空闲时会自动 catch-up 扫描
+            pass
         return {"triggered": True, "status": "running", "session_id": session_id}
 
     def get_analysis_status(self, session_id: str) -> dict:
-        """Query async analysis task status."""
-        if session_id in self._task_results:
-            result = self._task_results.pop(session_id)
-            return {"status": "completed", **result.to_dict()}
-        if session_id in self._running_tasks:
+        """查询 worker 阶段与队列深度（供 /llm-status 轮询）。"""
+        if session_id in self._workers and not self._workers[session_id].done():
+            queue = self._queues.get(session_id)
             return {
                 "status": "running",
-                "phase": self._task_phases.get(session_id, "unknown"),
+                "phase": self._phases.get(session_id, "idle"),
+                "queue_depth": queue.qsize() if queue else 0,
                 "session_id": session_id,
             }
-        return {"status": "not_found", "session_id": session_id}
+        return {"status": "idle", "session_id": session_id}
+
+    async def shutdown(self) -> None:
+        """停止所有 worker（ProtocolNode.stop 调用）。"""
+        tasks = list(self._workers.values())
+        for t in tasks:
+            t.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        self._workers.clear()
+        self._queues.clear()
+        self._locks.clear()
+        self._phases.clear()
 
     # ------------------------------------------------------------------
-    # Internal helpers
+    # worker 生命周期
+    # ------------------------------------------------------------------
+
+    def _ensure_worker(self, session_id: str) -> None:
+        if session_id in self._workers and not self._workers[session_id].done():
+            return
+        self._queues.setdefault(
+            session_id, asyncio.Queue(maxsize=self._queue_maxsize),
+        )
+        self._locks.setdefault(session_id, asyncio.Lock())
+        task = asyncio.create_task(self._worker_loop(session_id))
+        self._workers[session_id] = task
+
+    async def _worker_loop(self, session_id: str) -> None:
+        queue = self._queues[session_id]
+        lock = self._locks[session_id]
+        try:
+            # 启动即 catch-up：恢复崩溃前已落库但未打分的跳
+            async with lock:
+                await self._catchup_scan(session_id)
+
+            while True:
+                self._phases[session_id] = "idle"
+                try:
+                    item = await asyncio.wait_for(queue.get(), timeout=WORKER_IDLE_TIMEOUT)
+                except asyncio.TimeoutError:
+                    # 空闲：补打溢出/残留，仍无新增则退出 worker（下次 enqueue 重建）
+                    async with lock:
+                        got = await self._catchup_scan(session_id)
+                    if not got:
+                        logger.debug(
+                            "Vertical worker idle-timeout, exiting: session={}", session_id,
+                        )
+                        break
+                    continue
+
+                if item is _CATCHUP_SENTINEL:
+                    async with lock:
+                        await self._catchup_scan(session_id)
+                    continue
+
+                # 普通跳：按游标去重（catch-up 可能已处理过），再串行处理
+                hop = item
+                cursor = (await self._state_mgr.get_state(session_id))["last_scored_trace_id"]
+                if hop.get("trace_id", 0) <= cursor:
+                    continue
+                self._phases[session_id] = "scoring"
+                async with lock:
+                    await self._process_one(session_id, hop)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.error("Vertical worker crashed for session={}: {}", session_id, e)
+        finally:
+            self._workers.pop(session_id, None)
+            self._phases.pop(session_id, None)
+
+    # ------------------------------------------------------------------
+    # 逐跳处理
+    # ------------------------------------------------------------------
+
+    async def _catchup_scan(self, session_id: str) -> bool:
+        """从游标补打所有未处理的 trace（恢复 / 溢出 / 残留）。返回是否处理了任何跳。"""
+        state = await self._state_mgr.get_state(session_id)
+        cursor = state["last_scored_trace_id"]
+        traces, _max_id = await self._tracer.recover_traces_since(session_id, cursor)
+        if not traces:
+            return False
+        for trace in traces:
+            await self._process_one(session_id, self._hop_from_row(trace))
+        return True
+
+    @staticmethod
+    def _hop_from_row(trace: dict) -> dict:
+        """把 behavior_traces 行整理成统一的 hop dict（供 _process_one）。"""
+        return {
+            "trace_id": trace.get("id", 0),
+            "session_id": trace.get("session_id", ""),
+            "sender_did": trace.get("sender_did") or trace.get("node_did", ""),
+            "field_type": trace.get("field_type", ""),
+            "hop_count": trace.get("hop_count", [0, 0]),
+            "content": trace.get("content", ""),
+            "target": trace.get("target_did") or trace.get("target", ""),
+            "timestamp": trace.get("timestamp", 0.0),
+        }
+
+    async def _process_one(self, session_id: str, hop: dict) -> None:
+        """处理单跳：分流 + 推进游标（成功或失败都推进，避免卡死）。"""
+        trace_id = hop.get("trace_id", 0)
+        try:
+            if hop.get("field_type") == "U2A":
+                await self._handle_u2a(session_id, hop)
+            else:
+                await self._handle_action(session_id, hop)
+        except Exception as e:
+            logger.error(
+                "Vertical hop processing failed (session={}, trace={}): {}",
+                session_id, trace_id, e,
+            )
+        finally:
+            # 即使失败也推进游标（失败/降级本次不做，不重试）
+            await self._state_mgr.advance_score_cursor(session_id, trace_id)
+
+    async def _handle_u2a(self, session_id: str, hop: dict) -> None:
+        """U2A 处理：发起者→抽 Δ 追加意图流（不打分）；非发起者→当普通动作跳打分。
+
+        非发起者 U2A 不采信为意图（防伪造"用户说…"），但作为可疑行为照常打分——
+        第二个用户中途注入/越权引导是典型的 d3 注入向量，直接丢弃会留盲区。
+        """
+        state = await self._state_mgr.get_state(session_id)
+        initiator = state["initiator_did"]
+        sender_did = hop["sender_did"]
+        if not initiator:
+            await self._state_mgr.set_initiator_did(session_id, sender_did)
+            initiator = sender_did
+        if sender_did != initiator:
+            # 非发起者 U2A：不进意图流，但照常打分（可能 d3 注入 / d2 越权引导）
+            await self._handle_action(session_id, hop)
+            return
+
+        from attp.core.analysis.base_models import IntentRevisionSource
+
+        source = IntentRevisionSource(
+            trace_id=hop["trace_id"], did=sender_did, timestamp=hop["timestamp"],
+        )
+        async with self._sem:
+            revision = await self._analyzer.extract_intent_revision(
+                hop["content"], state["intent_revisions"], source=source,
+            )
+        await self._state_mgr.append_intent_revision(session_id, revision.to_dict())
+
+        if self._broker:
+            await self._broker.publish(
+                EventType.ANALYSIS_PROGRESS,
+                {"axis": "vertical", "session_id": session_id,
+                 "phase": "intent_appended", "trace_id": hop["trace_id"]},
+                topic=Topic.ANALYSIS,
+            )
+
+    async def _handle_action(self, session_id: str, hop: dict) -> None:
+        """动作跳 → V-Reasoner 打分 → 落库 → 更新 h → R_T 告警 →（仅 sub-R_T）报横轴。"""
+        state = await self._state_mgr.get_state(session_id)
+        intent_snapshot = state["intent_revisions"]
+        hidden_prev = state["hidden_state"]
+
+        async with self._sem:
+            score = await self._analyzer.score_hop(hop, intent_snapshot, hidden_prev)
+
+        if score is None:
+            return  # 评分失败，本次不做（cursor 已由调用方推进）
+
+        await self._tracer.save_hop_score(self._hop_score_to_row(score))
+
+        if score.hidden_state:
+            await self._state_mgr.set_hidden_state(session_id, score.hidden_state)
+
+        # R_T：单点立即告警
+        if score.score > self._r_t:
+            await self._notify_rt_alert(session_id, score)
+
+        # 报给横轴（F 累加）——仅 sub-R_T 的跳：R_T 命中的单点恶已由上面告警，
+        # 不再喂横轴 F（轴职责分离：R_T 抓单跳恶，F 抓 sub-R_T 累积的慢投毒；
+        # critical 重复计入只会让 F 爆炸、横轴报告与 R_T 重复）。
+        if self._on_hop_scored_callback and score.score <= self._r_t:
+            try:
+                await self._on_hop_scored_callback(
+                    score.sender_did, session_id, score.trace_id,
+                    score.score, score.field_type,
+                )
+            except Exception as e:
+                logger.error(
+                    "on_hop_scored callback failed (did={}, trace={}): {}",
+                    score.sender_did, score.trace_id, e,
+                )
+
+    # ------------------------------------------------------------------
+    # R_T 告警
+    # ------------------------------------------------------------------
+
+    async def _notify_rt_alert(self, session_id: str, score) -> None:
+        """单点 R_T 告警：写 malicious_reports(source=vertical_analysis)。"""
+        node_type = FIELD_TYPE_TO_SENDER_NODE_TYPE.get(score.field_type, "agent")
+        evidence_desc = " | ".join(
+            e.description for e in score.evidence_items if e.description
+        ) or f"单跳评分 {score.score} 超过 R_T={self._r_t}（{score.deviation_type}）"
+
+        await self._tracer.storage.save_malicious_report({
+            "source": "vertical_analysis",
+            "target_did": score.sender_did,
+            "node_type": node_type,
+            "session_id": session_id,
+            "evidence_type": score.deviation_type,
+            "severity": score.severity,
+            "taint_score": score.score,
+            "evidence_description": evidence_desc,
+            "nonce": "",
+            "report_id": None,
+            "raw_evidence": {
+                "trace_id": score.trace_id,
+                "dimensions": score.dimensions,
+                "breadth": score.breadth,
+                "evidence_items": [e.to_dict() for e in score.evidence_items],
+            },
+            "timestamp": score.timestamp,
+        })
+        logger.warning(
+            "Vertical R_T alert: session={}, did={}, trace={}, score={}, severity={}",
+            session_id, score.sender_did, score.trace_id, score.score, score.severity,
+        )
+
+    # ------------------------------------------------------------------
+    # helpers
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _merge_verdicts_by_did(
-        verdicts: list[NodeIntentVerdict],
-    ) -> list[tuple[NodeIntentVerdict, list[list[int]]]]:
-        """将同一 DID 的多条 verdict 合并为一条，按 DID 去重但不丢失证据。
-
-        合并策略：
-        - severity / taint_score：取最严重那条（high > medium）
-        - deviation_type / influence_type：取最高分 verdict 的值（代表最核心偏离类型）
-        - evidence（描述）：全部合并，每条标注其 hop，体现多个通信上下文
-        - evidence_items：全部合并去重（按 description），保留所有 trace_ids
-          —— trace_ids 即为具体犯错地点，一条不漏
-        - hop_count：记录所有涉及 hop，随返回值一并输出（存入 raw_evidence.hops_involved）
-
-        Returns:
-            [(merged_verdict, hops_involved), ...]，每个 DID 一项
-        """
-        severity_rank = {"none": 0, "low": 1, "medium": 2, "high": 3}
-
-        grouped: dict[str, list[NodeIntentVerdict]] = {}
-        for v in verdicts:
-            grouped.setdefault(v.node_did, []).append(v)
-
-        merged: list[tuple[NodeIntentVerdict, list[list[int]]]] = []
-        for did, did_verdicts in grouped.items():
-            # 最高分（最严重）的 verdict 作为基础，决定 severity / deviation_type 等
-            primary = max(
-                did_verdicts,
-                key=lambda v: (severity_rank.get(v.severity, 0), v.taint_score),
-            )
-
-            # 收集该 DID 涉及的所有 hop（去重）
-            all_hops: list[list[int]] = []
-            for v in did_verdicts:
-                hc = list(v.hop_count)
-                if hc not in all_hops:
-                    all_hops.append(hc)
-
-            # 合并 evidence 描述，每条标注来源 hop，体现多个通信上下文
-            evidence_parts: list[str] = []
-            seen_evidence: set[str] = set()
-            for v in did_verdicts:
-                if v.evidence and v.evidence not in seen_evidence:
-                    evidence_parts.append(f"hop={list(v.hop_count)}: {v.evidence}")
-                    seen_evidence.add(v.evidence)
-            merged_evidence = " | ".join(evidence_parts) if evidence_parts else primary.evidence
-
-            # 合并 evidence_items（按 description 去重），保留所有 trace_ids（具体犯错地点）
-            merged_items = []
-            seen_desc: set[str] = set()
-            for v in did_verdicts:
-                for ei in v.evidence_items:
-                    if ei.description not in seen_desc:
-                        merged_items.append(ei)
-                        seen_desc.add(ei.description)
-
-            merged_v = NodeIntentVerdict(
-                node_did=did,
-                hop_count=list(primary.hop_count),
-                aligned=primary.aligned,
-                deviation_type=primary.deviation_type,
-                influence_detected=primary.influence_detected,
-                influence_type=primary.influence_type,
-                evidence=merged_evidence,
-                evidence_items=merged_items,
-                severity=primary.severity,
-                taint_score=primary.taint_score,
-            )
-            merged.append((merged_v, all_hops))
-
-        return merged
-
-    async def _notify_analysis_result(
-        self,
-        session_id: str,
-        report: VerticalIntentReport,
-        report_row_id: int,
-        traces: list[dict],
-    ) -> None:
-        """记录纵向分析发现的恶意节点：写入 malicious_reports + 更新 dossier。
-
-        按 DID 去重：同一 batch 内一个 DID 只产生一条 malicious_report，
-        但合并该 DID 所有 hop 的 evidence_items（含全部 trace_ids），确保具体犯错地点不丢失。
-        """
-        malicious_verdicts = [
-            v for v in report.node_verdicts
-            if v.severity in ("medium", "high")
-        ]
-        # 按 DID 合并：同一节点的多条 hop-verdict 合为一条
-        merged = self._merge_verdicts_by_did(malicious_verdicts)
-
-        for merged_v, hops_involved in merged:
-            node_type = _derive_node_type(traces, merged_v.node_did)
-
-            await self._tracer.storage.save_malicious_report({
-                "source": "vertical_analysis",
-                "target_did": merged_v.node_did,
-                "node_type": node_type,
-                "session_id": session_id,
-                "evidence_type": merged_v.deviation_type,
-                "severity": merged_v.severity,
-                "taint_score": merged_v.taint_score,
-                "evidence_description": merged_v.evidence,
-                "nonce": "",
-                "report_id": report_row_id,
-                "raw_evidence": {
-                    "evidence_items": [e.to_dict() for e in merged_v.evidence_items],
-                    "hops_involved": hops_involved,
-                    "verdict_count_merged": len(
-                        [v for v in malicious_verdicts if v.node_did == merged_v.node_did]
-                    ),
-                },
-                "timestamp": report.timestamp,
-            })
-
-        logger.warning(
-            "Vertical Security Alert: session={}, verdict={}, malicious_nodes={}",
-            session_id, report.overall_verdict,
-            [v.node_did for v, _ in merged],
-        )
+    def _hop_score_to_row(score) -> dict:
+        dims = score.dimensions or [0.0, 0.0, 0.0, 0.0]
+        while len(dims) < 4:
+            dims.append(0.0)
+        return {
+            "trace_id": score.trace_id,
+            "session_id": score.session_id,
+            "sender_did": score.sender_did,
+            "field_type": score.field_type,
+            "hop_count": list(score.hop_count),
+            "score": score.score,
+            "dim1": dims[0], "dim2": dims[1], "dim3": dims[2], "dim4": dims[3],
+            "breadth": score.breadth,
+            "severity": score.severity,
+            "deviation_type": score.deviation_type,
+            "evidence_refs": [e.to_dict() for e in score.evidence_items],
+            "hidden_state": score.hidden_state,
+            "timestamp": score.timestamp,
+        }

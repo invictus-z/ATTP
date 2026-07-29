@@ -11,19 +11,19 @@ from .pending_message import PendingMessage
 
 @dataclass
 class VerticalAnalysisState:
-    """纵向分析状态 — pending 计数、游标、intent。
+    """纵向分析状态 — 意图流 / 隐状态 / 打分游标（逐跳改版）。
 
-    字段语义（与横向 HorizontalAccumulationState 对称）：
-        pending_count  — 当前批次待分析行为的数量（达阈值触发分析后归零）
-        last_trace_id  — 已分析的最新位置
-        batch_index    — 已生成的报告总数（每分析一批 +1，不重置）
+    字段语义：
+        initiator_did        — 会话发起者 DID（首条 [0,0] U2A 的发送方），意图只采信它的 U2A
+        intent_revisions     — 意图流 I=[Δ_0..Δ_m]，每条核验过的发起者 U2A 追加一个 Δ（dict）
+        hidden_state         — 定长滚动隐状态 h_i（复用 context_summary）
+        last_scored_trace_id — 已打分的最大 trace_id（纵轴游标，崩溃恢复用）
     """
 
-    pending_count: int = 0
-    last_trace_id: int = 0
-    batch_index: int = 0
-    context: str = ""
-    intent: dict | None = None
+    initiator_did: str = ""
+    intent_revisions: list[dict] = field(default_factory=list)
+    hidden_state: str = ""
+    last_scored_trace_id: int = 0
 
 
 @dataclass
@@ -169,38 +169,45 @@ class ProtocolSession:
         return self.metadata.get(key, default)
 
     # ================================================================
-    # Analysis state
+    # Analysis state（逐跳改版：意图流 / 隐状态 / 打分游标）
     # ================================================================
 
     def get_analysis_state(self) -> dict[str, Any]:
         return {
-            "pending_count": self.vertical_analysis.pending_count,
-            "last_trace_id": self.vertical_analysis.last_trace_id,
-            "batch_index": self.vertical_analysis.batch_index,
-            "context": self.vertical_analysis.context,
-            "intent": self.vertical_analysis.intent,
+            "initiator_did": self.vertical_analysis.initiator_did,
+            "intent_revisions": list(self.vertical_analysis.intent_revisions),
+            "hidden_state": self.vertical_analysis.hidden_state,
+            "last_scored_trace_id": self.vertical_analysis.last_scored_trace_id,
         }
 
-    def increment_pending_count(self) -> int:
-        self.vertical_analysis.pending_count += 1
-        self.updated_at = time.time()
-        return self.vertical_analysis.pending_count
+    def set_initiator_did(self, did: str) -> None:
+        if not self.vertical_analysis.initiator_did and did:
+            self.vertical_analysis.initiator_did = did
+            self.updated_at = time.time()
 
-    def reset_pending_count(self) -> None:
-        self.vertical_analysis.pending_count = 0
-        self.updated_at = time.time()
+    def get_initiator_did(self) -> str:
+        return self.vertical_analysis.initiator_did
 
-    def update_analysis_cursor(
-        self, batch_index: int, last_trace_id: int, context: str,
-    ) -> None:
-        self.vertical_analysis.batch_index = batch_index
-        self.vertical_analysis.last_trace_id = last_trace_id
-        self.vertical_analysis.context = context
+    def append_intent_revision(self, revision: dict) -> None:
+        """追加一条意图增量 Δ_i 到意图流（只增不改）。"""
+        self.vertical_analysis.intent_revisions.append(revision)
         self.updated_at = time.time()
 
-    def set_intent(self, intent: dict) -> None:
-        self.vertical_analysis.intent = intent
+    def get_intent_revisions(self) -> list[dict]:
+        return list(self.vertical_analysis.intent_revisions)
+
+    def set_hidden_state(self, hidden: str) -> None:
+        self.vertical_analysis.hidden_state = hidden
         self.updated_at = time.time()
 
-    def get_intent(self) -> dict | None:
-        return self.vertical_analysis.intent
+    def get_hidden_state(self) -> str:
+        return self.vertical_analysis.hidden_state
+
+    def advance_score_cursor(self, trace_id: int) -> None:
+        """推进打分游标到 max(已记录, trace_id)。"""
+        if trace_id > self.vertical_analysis.last_scored_trace_id:
+            self.vertical_analysis.last_scored_trace_id = trace_id
+            self.updated_at = time.time()
+
+    def get_score_cursor(self) -> int:
+        return self.vertical_analysis.last_scored_trace_id

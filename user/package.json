@@ -26,7 +26,9 @@
       {
         "from": "../examples/.attp/user",
         "to": "demo-user",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       },
       {
         "from": "../docker-compose.yml",
@@ -52,6 +54,7 @@
     "@types/dompurify": "^3.0.5",
     "@types/estree": "^1.0.8",
     "@types/marked": "^5.0.2",
+    "@types/node": "^22.19.21",
     "autoprefixer": "^10.4.17",
     "concurrently": "^9.1.2",
     "electron": "^35.2.1",
