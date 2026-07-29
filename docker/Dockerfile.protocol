@@ -1,0 +1,29 @@
+# 协议节点（Protocol Node）镜像
+# 纯 Python，无外部框架依赖；挂载预置溯源数据 sample_attp.db 便于演示。
+FROM python:3.11-slim
+
+# envsubst 来自 gettext（运行期渲染 analysis 的 ${LLM_*}）
+RUN apt-get update && apt-get install -y --no-install-recommends gettext \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# 先装项目（pyproject 的 packages.find 指向 python/）
+COPY pyproject.toml ./
+COPY python ./python
+RUN pip install --no-cache-dir .
+
+# 预置配置存为模板（运行期 protocol-entrypoint.sh 用 envsubst 渲染为 config.json）+ 示例溯源库
+COPY examples/.attp/protocol_node/config.json /root/.attp/protocol_node/config.json.tmpl
+COPY test/sample_attp.db /root/.attp/protocol_node/attp.db
+COPY docker/protocol-entrypoint.sh /protocol-entrypoint.sh
+# 防御 Windows CRLF：剥掉 \r，否则 shebang #!/bin/sh\r 会 exec 失败（no such file or directory）
+RUN sed -i 's/\r$//' /protocol-entrypoint.sh && chmod +x /protocol-entrypoint.sh
+
+EXPOSE 9000
+
+# healthcheck 复用只读端点 GET /api/status
+HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=5 \
+    CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:9000/api/status',timeout=4).status==200 else 1)"
+
+CMD ["/protocol-entrypoint.sh"]

@@ -27,6 +27,7 @@
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 from anp.authentication import create_did_wba_document
@@ -53,6 +54,10 @@ def generate_one(hostname: str, path_segments: list[str], node_type: str, output
 
 
 def main() -> None:
+    # Windows 默认控制台编码（GBK）无法打印 ✓ 等 Unicode 字符，统一重配为 UTF-8。
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+
     parser = argparse.ArgumentParser(
         description="生成 ATTP DID 文档与密钥对（支持多段路径）",
         formatter_class=argparse.RawDescriptionHelpFormatter,
