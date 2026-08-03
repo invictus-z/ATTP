@@ -115,7 +115,9 @@ export async function buildNodeMessage(
     senderDid: userDid,
     targetDid,
     content,
-    timestamp: Date.now(),
+    // 秒·浮点，对齐 Python time.time() 与 TS SDK (Date.now()/1000)；
+    // 否则落库后前端 formatTime 会按秒再 ×1000 导致 U2A 时间溢出。
+    timestamp: Date.now() / 1000,
     hopCount,  // 使用 session 维护的 hop_count
   });
 

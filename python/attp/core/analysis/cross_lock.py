@@ -78,6 +78,12 @@ class CrossLockCoordinator:
             return {"triggered": False, "reason": "horizontal_disabled"}
         return await self._horizontal.trigger_analysis_async(did)
 
+    @property
+    def r_s(self) -> float | None:
+        """横轴 F 累积阈值 R_S（供 /h/state 返回，使前端进度条与后端一致）。
+        横轴未启用时为 None。"""
+        return self._horizontal._r_s if self._horizontal is not None else None
+
     def get_horizontal_status(self, did: str) -> dict:
         """查询横轴确认状态。"""
         if self._horizontal is None:

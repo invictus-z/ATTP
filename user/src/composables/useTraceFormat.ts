@@ -77,7 +77,14 @@ export function sourceBadge(source: string): BadgeStyle {
 export function formatTime(ts: string | number | null): string {
   if (!ts && ts !== 0) return '--'
   try {
-    const d = typeof ts === 'number' ? new Date(ts * 1000) : new Date(ts)
+    let d: Date
+    if (typeof ts === 'number') {
+      // 后端 time.time()/TS SDK 均为秒；旧版用户端曾误用 Date.now()(毫秒)。
+      // 按数量级自适应：>1e11 视为毫秒（当前秒级时间戳 ~1.7e9），避免再 ×1000 溢出。
+      d = ts > 1e11 ? new Date(ts) : new Date(ts * 1000)
+    } else {
+      d = new Date(ts)
+    }
     if (isNaN(d.getTime())) return String(ts)
     return d.toLocaleString('zh-CN', { hour12: false })
   } catch {

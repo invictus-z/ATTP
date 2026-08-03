@@ -157,15 +157,17 @@ export interface VerticalState {
   intent_revision_count: number
 }
 
-/** 横向分析累积状态（/api/analysis/h/state 扁平：F / volume / 游标 / 批次） */
+/** 横向分析累积状态（/api/analysis/h/state 扁平：F / 未分析数 / 游标 / 批次 / R_S） */
 export interface HorizontalState {
   did: string
-  f_value: number               // 累积偏离 F_d = Σ s_i²（闭案后归零）
-  volume: number                // 自上次闭案以来的 hop 数
-  last_trace_id: number         // 确认游标
+  f_value: number               // 累积偏离 F_d = Σ s_i³（三次方和，闭案后归零）
+  volume: number                // 自上次闭案以来喂入 F 的跳数（观测用）
+  unanalyzed_count?: number     // 该节点在确认游标之后的全部未分析跳数
+  last_trace_id: number         // 确认游标（最后一次分析位置）
   batch_index: number           // 已完成确认次数
   node_type?: string
   has_context: boolean
+  r_s?: number                  // 横轴 F 累积阈值（后端 analysis.r_s，默认 200.0）
 }
 
 /** 分析任务状态（SSE analysis.progress + llm-status 轮询） */

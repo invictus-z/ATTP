@@ -8,7 +8,7 @@
  */
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Loader2, Search, Crosshair, BarChart3, AlertTriangle } from 'lucide-vue-next'
+import { Loader2, Search, Crosshair, BarChart3, AlertTriangle, ArrowLeft } from 'lucide-vue-next'
 import { apiFetch } from '../../transport'
 import { useProtocolNodes } from '../../composables/useProtocolNodes'
 import { useToast } from '../../composables/useToast'
@@ -92,6 +92,17 @@ function onViewDossier(did: string) {
   router.push({ path: '/trace/malicious', query: { did } })
 }
 
+/** 返回溯源查询（带回 session / 协议节点上下文）。 */
+function goBack() {
+  router.push({
+    path: '/trace/query',
+    query: {
+      sessionId: sessionIdInput.value || undefined,
+      protocolNodeUrl: selectedNode.value?.url,
+    },
+  })
+}
+
 onMounted(() => {
   loadNodes()
   setTimeout(() => {
@@ -112,9 +123,17 @@ onMounted(() => {
 <template>
   <div class="flex flex-col h-full fade-in">
     <header class="bg-white border-b border-gray-100 shrink-0 px-8 py-6 shadow-[0_4px_20px_-15px_rgba(0,0,0,0.05)] z-10">
-      <div class="max-w-5xl mx-auto">
-        <h2 class="text-xl font-semibold text-gray-900 tracking-tight mb-1.5">十字锁定综合视图</h2>
-        <p class="text-sm text-gray-500">纵向逐跳评分 × 横向 F 累加，一次聚出全景</p>
+      <div class="max-w-5xl mx-auto flex items-center gap-3">
+        <button @click="goBack"
+          class="p-2 -ml-2 text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors shrink-0"
+          title="返回溯源查询"
+        >
+          <ArrowLeft class="w-5 h-5" />
+        </button>
+        <div>
+          <h2 class="text-xl font-semibold text-gray-900 tracking-tight mb-1.5">十字锁定综合视图</h2>
+          <p class="text-sm text-gray-500">纵向逐跳评分 × 横向 F 累加，一次聚出全景</p>
+        </div>
       </div>
     </header>
 

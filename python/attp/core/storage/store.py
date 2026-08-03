@@ -229,3 +229,7 @@ class SqliteStore:
 
     async def recover_traces_by_did_since(self, did: str, since_id: int) -> tuple[list[dict], int]:
         return await self._horizontal.recover_traces_by_did_since(did, since_id)
+
+    async def count_traces_by_did_since(self, did: str, since_id: int) -> int:
+        """DID 涉及且 id > since_id 的 trace 条数（供「未分析数」）。"""
+        return await self._horizontal.count_traces_by_did_since(did, since_id)

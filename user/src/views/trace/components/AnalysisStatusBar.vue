@@ -1,13 +1,13 @@
 <script setup lang="ts">
 /**
- * AnalysisStatusBar — 分析状态条（刷新状态 + 状态文案/触发分析）。
+ * AnalysisStatusBar — 分析状态条（刷新状态 + 状态文案 / 触发分析）。
  *
  * 纵向（session 级）与横向（did 级）共用，由父组件传入对应状态与禁用条件。
  *
  * 设计要点：
- * - 「触发分析」按钮始终显示；由 triggerDisabled 决定是否可点击
- *   （无待分析行为 / 分析进行中 / 输入为空 时禁用）。
- * - 状态指示（statusKind）仅反映当前分析阶段，不再控制按钮显隐。
+ * - 纵向逐跳改版后打分自动进行，无需手动触发：纵向实例传 `showTrigger=false`
+ *   隐藏「触发分析」按钮，仅由 statusKind 反映「分析中 / 空闲」。
+ * - 横向仍保留「触发分析」按钮（手动触发横轴确认），由 triggerDisabled 控制可点击。
  *
  * statusKind 状态词汇：running | completed | failed | pending | uptodate | idle
  */
@@ -20,9 +20,12 @@ defineProps<{
   status: AnalysisStatus | null
   statusKind: 'idle' | 'running' | 'completed' | 'failed' | 'pending' | 'uptodate'
   polling: boolean
-  triggerLoading: boolean
+  /** 仅横向（showTrigger=true）需要；纵向隐藏触发键时可不传。 */
+  triggerLoading?: boolean
   refreshDisabled: boolean
-  triggerDisabled: boolean
+  triggerDisabled?: boolean
+  /** 是否显示「触发分析」按钮。纵向逐跳改版后置 false（打分自动进行）。默认 true。 */
+  showTrigger?: boolean
 }>()
 
 defineEmits<{
@@ -76,12 +79,12 @@ function phaseLabel(phase?: string): string {
         <span class="text-[12px] text-amber-600 font-medium">有待分析行为</span>
       </template>
       <template v-else>
-        <!-- uptodate / idle：无待分析行为 -->
+        <!-- uptodate / idle：空闲（逐跳改版后无待分析即空闲） -->
         <CheckCircle2 class="w-4 h-4 text-gray-400 shrink-0" />
-        <span class="text-[12px] text-gray-500 font-medium">无待分析行为</span>
+        <span class="text-[12px] text-gray-500 font-medium">空闲</span>
       </template>
-      <!-- 触发分析：始终显示，triggerDisabled 控制可点击 -->
-      <button @click="$emit('trigger')" :disabled="triggerDisabled"
+      <!-- 触发分析：仅横向（手动触发横轴确认）；纵向逐跳改版后 showTrigger=false 隐藏 -->
+      <button v-if="showTrigger !== false" @click="$emit('trigger')" :disabled="triggerDisabled"
         class="px-3 py-1.5 text-[12px] font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-colors flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed disabled:bg-gray-300 disabled:hover:bg-gray-300 shrink-0"
       >
         <Loader2 v-if="triggerLoading || polling" class="w-3.5 h-3.5 animate-spin" />

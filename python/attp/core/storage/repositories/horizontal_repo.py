@@ -119,3 +119,16 @@ class HorizontalRepository(BaseRepository):
             (did, did, since_id),
         )
         return row["cnt"] if row else 0
+
+    async def count_traces_by_did_since(self, did: str, since_id: int) -> int:
+        """统计 DID 涉及（sender 或 receiver）且 id > since_id 的 trace 条数。
+
+        供「未分析数」：since_id 取确认游标 last_trace_id（最后一次分析位置），
+        结果即该节点在游标之后、尚未汇入确认报告的全部跳数。
+        """
+        row = await self._db.execute_fetchone(
+            """SELECT COUNT(*) as cnt FROM behavior_traces
+               WHERE (node_did = ? OR target = ?) AND id > ?""",
+            (did, did, since_id),
+        )
+        return row["cnt"] if row else 0

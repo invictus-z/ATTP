@@ -5,13 +5,14 @@
  * 纵向（session 级）：行为溯源 + 逐跳评分（hop_scores）+ 意图流（intent_revisions）+ R_T 告警
  * 横向（did 级）：F/volume 累积状态 + 横轴确认报告
  *
- * 引导式分析流程：查状态 → 触发后 SSE 订阅 → 完成后取报告。
+ * 逐跳改版：查询即订阅 SSE（trace + analysis），纵向打分自动进行，
+ * hop.scored 实时刷新逐跳评分；状态条仅反映「分析中 / 空闲」，无触发键。
  */
 import { ref, computed, onMounted, onScopeDispose } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   Loader2, Search, Crosshair, GitMerge, FileText,
-  AlertTriangle, CheckCircle2, AlertOctagon, BarChart3, Layers,
+  AlertTriangle, CheckCircle2, AlertOctagon, BarChart3, Layers, ChevronDown,
 } from 'lucide-vue-next'
 import { apiFetch, createSse, onSseEvent, type SseConnection } from '../../transport'
 import { useProtocolNodes } from '../../composables/useProtocolNodes'
@@ -42,6 +43,7 @@ const didInput = ref('')
 const loading = ref(false)
 const activeTab = ref<'behavior' | 'hops' | 'alerts'>('behavior')
 const hasQueried = ref(false)
+const hiddenStateOpen = ref(false)
 
 // ─── 数据 ───
 const behaviorNodes = ref<HopNode[]>([])
@@ -66,8 +68,9 @@ const currentStatus = computed<AnalysisStatus | null>(() =>
 )
 
 /** 状态展示：running | completed | failed | uptodate
- *  - 触发分析按钮始终显示（见 AnalysisStatusBar），本字段仅驱动状态指示文案。
- *  - 逐跳改版后无 pending_count；后端 triggered:false + reason:no_unanalyzed_traces 兜底「无待分析」。 */
+ *  - 纵向逐跳改版后打分自动进行（hop.scored 驱动 running，worker idle 驱动空闲），
+ *    实际只呈现「分析中 / 空闲」；completed/failed 主要服务于横向确认。
+ *  - useAnalysisFlow 在 worker idle 时置 status='idle'，这里统一归到 uptodate（空闲）。 */
 const statusKind = computed<'idle' | 'running' | 'completed' | 'failed' | 'uptodate'>(() => {
   const s = currentStatus.value
   if (s?.status === 'running' || s?.status === 'already_running') return 'running'
@@ -79,13 +82,11 @@ const statusKind = computed<'idle' | 'running' | 'completed' | 'failed' | 'uptod
     }
     return 'completed'
   }
-  return 'uptodate'
+  return 'uptodate'   // idle / 未触发 → 空闲
 })
 
-// 触发分析按钮：输入非空且未 running 即可（新模型无 pending_count；后端 no_unanalyzed 兜底）
-const vTriggerDisabled = computed(() =>
-  vFlow.triggerLoading.value || vFlow.running.value || !sessionIdInput.value.trim(),
-)
+// 横向触发分析按钮（手动触发横轴确认）：输入非空且未 running 即可。
+// 纵向逐跳改版后无需触发键（打分自动进行），故无 vTriggerDisabled。
 const hTriggerDisabled = computed(() =>
   hFlow.triggerLoading.value || hFlow.running.value || !didInput.value.trim(),
 )
@@ -171,7 +172,7 @@ async function doQuery() {
       hasQueried.value = true
       await Promise.all([fetchHorizontalState(did)])
       void hFlow.subscribe(did)
-      // 有确认批次则拉取展示；触发后新完成的报告由 SSE onCompleted 回调拉取
+      // 已有报告（batch_index>0）则拉取展示；触发后新完成的报告由 SSE onCompleted 回调拉取
       if (hState.value && hState.value.batch_index > 0) {
         await fetchHorizontalReport(did)
       }
@@ -181,20 +182,13 @@ async function doQuery() {
   }
 }
 
+/** 触发横轴确认（仅横向；纵向逐跳改版后打分自动进行，无触发键）。 */
 async function doTrigger() {
-  if (queryMode.value === 'vertical') {
-    const sid = sessionIdInput.value.trim()
-    if (!sid) return
-    const ok = await vFlow.trigger(sid)
-    if (!ok) showToast('触发分析失败（分析功能未启用？）', 'error')
-    else showToast('纵向意图追踪已触发')
-  } else {
-    const did = didInput.value.trim()
-    if (!did) return
-    const ok = await hFlow.trigger(did)
-    if (!ok) showToast('触发分析失败（分析功能未启用？）', 'error')
-    else showToast('横向分析已触发')
-  }
+  const did = didInput.value.trim()
+  if (!did) return
+  const ok = await hFlow.trigger(did)
+  if (!ok) showToast('触发分析失败（分析功能未启用？）', 'error')
+  else showToast('横向分析已触发')
 }
 
 function onViewDossier(did: string) {
@@ -384,7 +378,6 @@ onMounted(async () => {
                       {{ verdictBadge(vReport.overall_verdict).text }}
                     </span>
                     <span v-if="vReport?.max_score != null" class="text-gray-400">max <span class="font-mono text-gray-600">{{ Number(vReport.max_score).toFixed(1) }}</span></span>
-                    <span v-if="vReport?.total_hops != null" class="text-gray-400">hops <span class="font-mono text-gray-600">{{ vReport.total_hops }}</span></span>
                   </div>
                 </div>
                 <div class="grid grid-cols-3 gap-4">
@@ -396,18 +389,27 @@ onMounted(async () => {
                     <div class="text-[11px] text-gray-400 mb-1">打分游标</div>
                     <div class="text-xl font-semibold text-gray-800">{{ vState.last_scored_trace_id }}</div>
                   </div>
-                  <div class="bg-gray-50 rounded-lg p-3 text-center">
-                    <div class="text-[11px] text-gray-400 mb-1">隐状态</div>
+                  <button @click="hiddenStateOpen = !hiddenStateOpen"
+                    class="bg-gray-50 rounded-lg p-3 text-center w-full hover:bg-gray-100 transition-colors"
+                    :class="hiddenStateOpen ? 'ring-1 ring-indigo-200 bg-indigo-50/60' : ''"
+                  >
+                    <div class="text-[11px] text-gray-400 mb-1 flex items-center justify-center gap-1">
+                      隐状态
+                      <ChevronDown class="w-3 h-3 transition-transform" :class="hiddenStateOpen ? 'rotate-180' : ''" />
+                    </div>
                     <div class="text-xl font-semibold" :class="vState.has_hidden_state ? 'text-indigo-600' : 'text-gray-300'">{{ vState.has_hidden_state ? '有' : '无' }}</div>
-                  </div>
+                  </button>
                 </div>
-                <!-- ── 分析状态条 ── -->
+                <!-- 隐状态明细（LLM 滚动上下文摘要，可折叠） -->
+                <div v-if="hiddenStateOpen" class="text-[12px] text-gray-600 bg-gray-50 rounded-lg border border-gray-100 p-3 leading-relaxed whitespace-pre-wrap break-words">
+                  {{ vReport?.hidden_state || '（暂无隐状态内容）' }}
+                </div>
+                <!-- ── 分析状态条（纵向逐跳改版：无触发键，状态显分析中/空闲） ── -->
                 <AnalysisStatusBar
                   :status="currentStatus" :status-kind="statusKind"
-                  :polling="vFlow.running.value" :trigger-loading="vFlow.triggerLoading.value"
-                  :refresh-disabled="!sessionIdInput.trim()" :trigger-disabled="vTriggerDisabled"
+                  :polling="vFlow.running.value"
+                  :refresh-disabled="!sessionIdInput.trim()" :show-trigger="false"
                   @refresh="refreshCurrent"
-                  @trigger="doTrigger"
                 />
                 <!-- 意图流 (intent_revisions) -->
                 <div v-if="intentRevisions.length" class="border-t border-gray-100 pt-4">
@@ -468,7 +470,7 @@ onMounted(async () => {
               <!-- 逐跳评分 -->
               <div v-if="activeTab === 'hops'" class="space-y-4">
                 <div v-if="!vReport?.hop_scores?.length" class="text-center py-12 text-gray-400 text-sm">
-                  <div v-if="statusKind !== 'completed' && statusKind !== 'uptodate'">触发纵向分析后将生成逐跳评分</div>
+                  <div v-if="statusKind === 'running'">逐跳评分生成中…</div>
                   <div v-else>该会话暂无逐跳评分</div>
                 </div>
                 <HopScoreCard v-for="h in (vReport?.hop_scores || [])" :key="h.trace_id" :hop="h" />
@@ -527,20 +529,20 @@ onMounted(async () => {
                       <div class="text-xl font-semibold text-gray-800">{{ hState.node_type || '--' }}</div>
                     </div>
                     <div class="bg-gray-50 rounded-lg p-3 text-center">
-                      <div class="text-[11px] text-gray-400 mb-1">确认批次</div>
+                      <div class="text-[11px] text-gray-400 mb-1">已有报告</div>
                       <div class="text-xl font-semibold text-gray-800">{{ hState.batch_index }}</div>
                     </div>
-                    <div class="bg-gray-50 rounded-lg p-3 text-center">
-                      <div class="text-[11px] text-gray-400 mb-1">累计跳数</div>
-                      <div class="text-xl font-semibold text-gray-800">{{ hState.volume }}</div>
+                    <div class="bg-gray-50 rounded-lg p-3 text-center" title="该节点在最后一次分析位置之后的全部跳数">
+                      <div class="text-[11px] text-gray-400 mb-1">未分析数</div>
+                      <div class="text-xl font-semibold text-gray-800">{{ hState.unanalyzed_count ?? 0 }}</div>
                     </div>
                     <div class="bg-gray-50 rounded-lg p-3 text-center">
                       <div class="text-[11px] text-gray-400 mb-1">确认游标</div>
                       <div class="text-xl font-semibold text-gray-800">{{ hState.last_trace_id }}</div>
                     </div>
                   </div>
-                  <!-- F 累积进度（Σ s² vs R_S） -->
-                  <FProgress :f-value="hState.f_value" />
+                  <!-- F 累积进度（Σ s³ vs R_S，r_s 取后端 /h/state） -->
+                  <FProgress :f-value="hState.f_value" :r-s="hState.r_s" />
                   <!-- ── 分析状态条 ── -->
                   <AnalysisStatusBar
                     :status="currentStatus" :status-kind="statusKind"

@@ -48,18 +48,33 @@ export function useAnalysisFlow(
     return { ...base, ...extra }
   }
 
-  /** 轮询 llm-status 取 queue_depth / phase（running 期间，补 SSE 未带的积压跳数）。 */
+  /** 轮询 llm-status 取 queue_depth / phase。
+   *  逐跳改版后纵轴状态由 worker phase 驱动：phase=scoring/有积压 → 分析中；
+   *  phase=idle 且无积压 → 空闲（停止轮询）。横轴 completed/not_found 同样收敛。 */
   async function pollLlmStatus(id: string): Promise<void> {
     const url = buildUrl(`/api/analysis/${axis}/llm-status/${encodeURIComponent(id)}`)
     if (!url) return
     try {
       const res = await apiFetch(url)
-      if (res.ok && res.data && status.value?.status === 'running') {
-        status.value = makeStatus('running', {
-          phase: res.data.phase ?? status.value.phase,
-          queue_depth: res.data.queue_depth,
-        }, id)
+      if (!res.ok || !res.data) return
+      const s = res.data.status
+      const phase = res.data.phase
+      const qd = res.data.queue_depth ?? 0
+      // 终态：worker 空闲 / 分析未启用 / 无任务 / 纵轴打分完毕 → 空闲，停轮询
+      if (s === 'idle' || s === 'disabled' || s === 'not_found' ||
+          (axis === 'v' && phase === 'idle' && qd === 0)) {
+        stopPolling()
+        status.value = makeStatus('idle', {}, id)
+        return
       }
+      // 横轴确认已完成 → completed（通常 analysis.report 已先行处理，此处兜底）
+      if (s === 'completed') {
+        stopPolling()
+        status.value = makeStatus('completed', { triggered: true }, id)
+        return
+      }
+      // 运行中：刷新 phase / 积压跳数
+      status.value = makeStatus('running', { phase, queue_depth: qd }, id)
     } catch {
       /* 轮询失败忽略，保持上次状态 */
     }
@@ -87,6 +102,8 @@ export function useAnalysisFlow(
       /* 连接失败保持上次状态 */
       return
     }
+    // 订阅即探一次 worker 状态：若查询时正在逐跳打分，立即显示「分析中」并开轮询。
+    void pollLlmStatus(id)
     onSseEvent(sseConn, (event, data) => {
       if (event === 'analysis.progress') {
         status.value = makeStatus('running', { phase: data?.phase }, id)
@@ -101,7 +118,10 @@ export function useAnalysisFlow(
         // 不自动取消订阅：保持连接以连续接收后续事件（新的 progress/report、
         // 横向累加 horizontal.accumulated），实现全程实时更新。
       } else if (axis === 'v' && event === 'hop.scored') {
-        // 纵轴打出一跳分 → 刷新逐跳评分报告。
+        // 纵轴逐跳打分自动进行（无需手动触发）：每出一跳分即标「分析中」并刷新报告；
+        // worker 空闲后由 pollLlmStatus 转回「空闲」。
+        status.value = makeStatus('running', { phase: 'scoring' }, id)
+        startPolling(id)
         stateChangeHooks.forEach(cb => cb(id))
       } else if (axis === 'h' && event === 'horizontal.triggered') {
         // F 越 R_S，横轴确认被触发 → 刷新横向累计状态。
