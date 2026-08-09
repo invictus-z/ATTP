@@ -1,6 +1,6 @@
 {
   "name": "@invictus-z/attp",
-  "version": "0.2.0-alpha.0",
+  "version": "0.3.0",
   "description": "ATTP SDK for TypeScript — authentication, provenance & session management",
   "type": "module",
   "main": "./dist/index.cjs",

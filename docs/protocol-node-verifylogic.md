@@ -1,3 +1,9 @@
+# 协议节点验证逻辑（消息固化层 · 密码学校验）
+
+> 本文描述**消息固化层**的密码学回传验证与恶意节点判定（双回传 / 单回传决策树），对应 `protocol_node/engine/middleware.py` 的 `intercept_record` 管线与 `engine/malicious_detector.py` 的 `MaliciousNodeDetector`。该密码学层在 v0.3.0 未变更。
+>
+> v0.3.0 新增的**意图追踪层**（逐跳语义评分 + 横轴跨会话确认，`F = Σ s_i² > R_S`）是与本层并立、独立的语义检测，详见 [attp-core-analysis.md](attp-core-analysis.md) 的「意图追踪层」一节。两层互补：本层基于签名 / 哈希做不可否认与篡改判定，意图层基于审计大模型做语义恶意识别。
+
 ### 通信机制与基础规则
 
 1. **双向回传机制**：节点间通信（如 A -> B），发送方 A 和接收方 B 均需向协议节点回传消息。

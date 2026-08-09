@@ -1,6 +1,6 @@
 [project]
 name = "attp"
-version = "0.2.0a0"
+version = "0.3.0"
 description = "alpha version for ATTP channel plugin on nanobot"
 requires-python = ">=3.11"
 

@@ -1,6 +1,6 @@
 {
   "name": "@attp/openclaw-channel",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "description": "ATTP agent-mesh channel plugin for openclaw (native in-process, three-port: WebUI + Agent Server + MCP tools).",
   "type": "module",
   "private": true,

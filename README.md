@@ -1,29 +1,39 @@
 # ATTP
 
+[![官网](https://img.shields.io/badge/官网-attp--diting.cn-brightgreen)](https://attp-diting.cn/)
 [![PyPI](https://img.shields.io/badge/PyPI-attp-blue)](https://pypi.org/project/attp/)
-[![NPM](https://img.shields.io/badge/NPM-invictus--z%40attp-red)](https://www.npmjs.com/package/invictus-z@attp)
+[![NPM](https://img.shields.io/badge/NPM-%40invictus--z%2Fattp-red)](https://www.npmjs.com/package/@invictus-z/attp)
+
+## 目录
+
+- [概述](#概述)
+- [四端部署架构](#四端部署架构)
+- [快速启动](#快速启动)
+- [架构](#架构)
+- [功能详情](#功能详情)
+- [更新日志](#更新日志)
 
 ## 概述
 
-**Agents Traceability and Trust Protocol（ATTP）** 是一套面向开放互联环境下多 AI Agent 协作的可溯源通信与信任协议。通过结合密码学技术与大模型意图追踪，实现通信链路的不可否认复原，并精准追踪与发现试图进行诱导或传播恶意 Prompt 的源头节点，为智能体通信构筑互连互信的数字基座。
+**ATTP（Agent Trust and Traceability Protocol，智能体信任与溯源协议）** 是一套面向开放互联环境下多 AI Agent 协作的可溯源通信与信任协议。通过结合密码学技术与大模型意图追踪，实现通信链路的不可否认复原，并精准追踪与发现试图进行诱导或传播恶意 Prompt 的源头节点，为智能体通信构筑互连互信的数字基座。
 
 协议自底向上分为四层：
 
-- **数据传输层**：负责节点间消息的可靠传递与路由，支持任意拓扑的协作模式
-- **安全通信层**：在 [anp](https://github.com/agent-network-protocol/anp)（Agent Network Protocol）基础上扩展了分布式身份认证（DID），并实现端到端加密通信
-- **消息追踪层**：通过哈希链接与双轮回溯确认机制，构建不可篡改的消息溯源链，确保通信链路的不可否认性
-- **意图追踪层**：采用"十字锁定策略"对消息链和节点行为进行纵横双向评估，精准定位恶意 Prompt 的源头
+- **身份管理和加密通信层**：基于 [anp](https://github.com/agent-network-protocol/anp)（Agent Network Protocol）与 W3C DID（did:wba）构建去中心化身份体系，提供身份解析、密钥管理与签名验证，并通过双签名机制绑定身份与消息内容（端到端加密通信规划于后续版本）
+- **会话层**：定义节点类型、行为类型（U2A/A2A/A2T/T2A/A2U）与消息格式（单跳记录、转发消息、回传消息），承载节点间的业务通信与路由
+- **消息固化层**：采用"先回传、后转发"的双回传时序，由协议节点执行七步交叉验证，将通信行为转化为不可篡改、不可抵赖的溯源记录
+- **意图追踪层**：采用"十字锁定"协调架构对消息链逐跳进行语义评分（纵轴）并跨会话累积确认（横轴），精准定位传播恶意 Prompt 的源头节点
 
-本项目是 **ATTP 协议的完整实现**，提供开箱即用的四端部署架构：用户端、Agent 端、工具端和协议节点端。Agent 端通过渠道插件接入主流 Agent 框架（目前已支持 [nanobot](https://github.com/HKUDS/nanobot)，将来计划支持 [OpenClaw](https://github.com/openclaw/openclaw)、[Hermes](https://github.com/NousResearch/hermes-agent) 等）。
+本项目（配套系统代号 **「谛听」**）是 **ATTP 协议的完整实现**，提供开箱即用的四端部署架构：用户端、Agent 端、工具端和协议节点端。Agent 端通过渠道插件接入主流 Agent 框架，目前已支持 [nanobot](https://github.com/HKUDS/nanobot) 与 [openclaw](https://github.com/openclaw/openclaw)，将来计划支持 [Hermes](https://github.com/NousResearch/hermes-agent) 等。
 
 ## 四端部署架构
 
-v0.2.0-alpha 版本推出了完整的四端部署架构，各端开箱即用：
+ATTP 提供完整的四端部署架构，各端开箱即用：
 
 - **用户端**：基于 Vue + Electron 的跨平台应用，提供可视化拓扑图和时序图，直观复原智能体间通信链路，支持用户与Agent交互发布任务
-- **Agent端**：预封装协议核心逻辑的智能体节点，通过渠道插件快速接入 Nanobot、OpenClaw 等主流框架，支持跨框架通信
+- **Agent端**：预封装协议核心逻辑的智能体节点，通过渠道插件快速接入 nanobot、openclaw 等主流框架，支持跨框架通信
 - **工具端**：采用 MCP 桥接方式实现 ATTP 工具调用，支持原生 ATTP 工具开发和现有 MCP 服务转换
-- **协议节点端**：运行四步验证管线（身份验证、签名验证、Nonce 匹配、行为记录）的核心协议枢纽
+- **协议节点端**：运行回溯验证管线（字段校验 → DID 解析 → Nonce 双回传匹配 → 恶意节点判定 → 内容一致性校验 → 行为类型与 hop_count 推断 → 可信名单更新）的核心协议枢纽
 
 目前协议已在多代理协同场景下成功复原了通信链路，验证了整体架构的可靠性。基于 Ed25519 与 SHA-256 构建了不可篡改的溯源网络，开发了审计大模型引擎对上下文及历史行为进行评估，并封装了适配主流 Agent 框架的通道插件与 SDK。
 
@@ -40,7 +50,7 @@ v0.2.0-alpha 版本推出了完整的四端部署架构，各端开箱即用：
 pip install attp
 
 # Node.js 包  
-npm install invictus-z@attp
+npm install @invictus-z/attp
 ```
 
   或从源码启动：
@@ -75,8 +85,8 @@ python scripts/did_creator.py --hostname did-server.test --names my-agent --outp
 |------|------|
 | `did.json` | DID 文档 |
 | `key-1_private.pem` / `key-1_public.pem` | Ed25519 密钥对 — 用于 DID 认证 |
-| `key-2_private.pem` / `key-2_public.pem` | secp256r1 密钥对 — 用于 E2EE 消息签名 |
-| `key-3_private.pem` / `key-3_public.pem` | X25519 密钥对 — 用于 E2EE 密钥协商 |
+| `key-2_private.pem` / `key-2_public.pem` | secp256r1 密钥对 — 预留（v0.4.0 端到端加密消息签名） |
+| `key-3_private.pem` / `key-3_public.pem` | X25519 密钥对 — 预留（v0.4.0 端到端加密密钥协商） |
 
   > 生成后还需将 DID 文档部署至对应可访问的 HTTP 端点，供群组中的其他节点验证身份。
 
@@ -106,7 +116,7 @@ python scripts/did_creator.py --hostname did-server.test --names my-agent --outp
 
 ### Agent端
 
-  Agent端通过渠道插件接入主流框架，目前仅支持 Nanobot。
+  Agent端通过渠道插件接入主流框架，目前支持 **nanobot** 与 **openclaw** 两种渠道。
 
   **配置文件**
 
@@ -147,6 +157,29 @@ python scripts/did_creator.py --hostname did-server.test --names my-agent --outp
   nanobot plugins list   # 确认 attp 渠道插件已加载
   nanobot gateway        # 通过 nanobot 一键启动所有服务
   ```
+
+  **openclaw 渠道**
+
+  openclaw 渠道以原生 TypeScript 进程内插件形式接入，启动后在进程内拉起三个独立端口：WebUI `:19001`、Agent Server `:19000`、MCP 工具 `:19002`（相对 nanobot 的 8001/8000/8002 偏移，二者可共存）。
+
+  ```bash
+  # 1. 构建 TS 核心库与 openclaw 插件
+  cd typescript && npm install && npm run build
+  cd attp/channels/openclaw && npx tsup
+
+  # 2. 以本地链接方式安装插件
+  openclaw plugins install --link ./typescript/attp/channels/openclaw
+
+  # 3. 配置 ATTP 渠道与 MCP 工具服务
+  #    参见 examples/.openclaw/config.json（plugins / channels / mcp.servers）
+  #    与   examples/.attp/agent/openclaw/config.json（ATTP Agent 配置，三端口）
+
+  # 4. 重启网关并探测渠道
+  openclaw gateway restart
+  openclaw channels status --probe
+  ```
+
+  > openclaw 渠道按方向分发进站消息：浏览器 WebSocket 的 U2A 消息驱动 Agent 推理并广播回复；远端 Agent 的 A2A `receive_message` 仅记录输出，回复需通过 MCP `send_message` 主动发起。详见 [docs/attp-openclaw.md](docs/attp-openclaw.md)。
 
 ### 工具端
 
@@ -280,19 +313,18 @@ python scripts/did_creator.py --hostname did-server.test --names my-agent --outp
 
   | 配置项 | 说明 |
   |--------|------|
-  | `did` | 本节点的分布式身份标识（DID） |
-  | `didDocPath` | DID 文档路径 |
-  | `privateKeyPath` | 本节点私钥路径 |
-  | `publicKeyPath` | 本节点公钥路径 |
-  | `web.host` | 协议节点监听地址 |
-  | `web.port` | 协议节点监听端口（默认 `8000`） |
-  | `data_dir` | 数据存储目录 |
-  | `db_path` | 数据库文件名（相对 data_dir） |
-  | `analysis.enabled` | 是否启用语义意图追踪 |
-  | `analysis.api_key` | 分析 API Key |
-  | `analysis.base_url` | 分析 API 基础 URL |
-  | `analysis.model` | 分析模型名称 |
-  | `analysis.report_batch_size` | 批处理报告大小 |
+  | `web.host` | 协议节点监听地址（默认 `0.0.0.0`） |
+  | `web.port` | 协议节点监听端口（默认 `9000`） |
+  | `storage.data_dir` | 数据存储目录（默认 `~/.attp/protocol_node`） |
+  | `storage.db_path` | 数据库文件名（相对 `data_dir`，默认 `attp.db`） |
+  | `analysis.enabled` | 是否启用语义意图追踪（默认 `false`） |
+  | `analysis.api_key` / `base_url` / `model` | 审计大模型 API Key / 基础 URL / 模型名 |
+  | `analysis.horizontal_enabled` | 是否启用横轴跨会话确认（默认 `true`） |
+  | `analysis.r_t` | 单点阈值：单跳评分 `s_i > r_t`（默认 `7.5`）立即告警 |
+  | `analysis.r_s` | 累积阈值：`F = Σ s_i² > r_s`（默认 `25.0`）触发横轴确认 |
+  | `analysis.rho` | 横轴高危兜底阈值（默认 `8.0`） |
+  | `analysis.alpha` | 横轴确认候选会话上限（默认 `10`） |
+  | `analysis.concurrency` | 逐跳打分并发数（默认 `8`） |
 
   **启动协议节点**
 
@@ -326,17 +358,20 @@ python scripts/did_creator.py --hostname did-server.test --names my-agent --outp
                             ┌─────────────────────┐
                             │    协议节点端         │
                             │  ┌───────────────┐  │
-                            │  │ ATTP Server   │  │
-                            │  │   (:8000)     │  │
+                            │  │ 协议节点 HTTP │  │
+                            │  │   (:9000)     │  │
                             │  ├───────────────┤  │
-                            │  │ 验证管线      │  │
-                            │  │ · 身份验证    │  │
-                            │  │ · 签名验证    │  │
+                            │  │ 回溯验证管线  │  │
+                            │  │ · 字段校验    │  │
+                            │  │ · DID 解析    │  │
                             │  │ · Nonce 匹配  │  │
+                            │  │ · 恶意判定    │  │
                             │  │ · 行为记录    │  │
                             │  └───────────────┘  │
                             └─────────────────────┘
 ```
+
+> 端口说明：nanobot 渠道使用 WebUI `:8001` / Agent Server `:8000` / MCP 工具 `:8002`；openclaw 渠道对应 `:19001` / `:19000` / `:19002`（二者可共存）。协议节点固定监听 `:9000`，接收各端的双轮回传消息。
 
   ### 消息传递与回溯确认
 
@@ -386,15 +421,17 @@ python scripts/did_creator.py --hostname did-server.test --names my-agent --outp
 
 #### 意图追踪
 
-采用"十字锁定策略"进行综合评估：
-- **纵向评估**：沿着消息链追踪每条消息的传播路径，分析消息内容在传递过程中的变化，识别可能的恶意注入或篡改
-- **横向评估**：对参与通信的各个 Agent 节点进行行为分析，建立节点信誉模型，识别异常行为模式和潜在恶意节点
+v0.3.0 将意图追踪重构为**逐跳、有状态**的语义识别模型（"十字锁定策略"），由协议节点的审计大模型对每条动作跳（A2A/A2T/T2A/A2U）实时评分：
 
-通过双向评估机制，系统能够精准定位传播恶意 Prompt 的源头节点，为智能体通信提供安全保障。
+- **意图流（纵轴上下文）**：会话首条及后续每条 U2A 均抽取一条意图增量（目标 / 约束 / 禁止项）追加为只增意图流；仅会话发起者 DID 的 U2A 可修订意图，防止被劫持 Agent 注入伪造意图。U2A 只抽意图不打分。
+- **逐跳语义评分（纵轴）**：每条动作跳在 4 个正交维度上打分（0–10，0.5 步进）——意图对齐、能力域/越权、注入与操纵、外泄与篡改；聚合后得到单跳分 `s_i` 与 5 档严重度（none/low/medium/high/critical），严重度与最终判决由代码推导（critical→malicious、high→suspicious）。单跳 `s_i > R_T(7.5)` 立即告警。
+- **跨会话确认（横轴）**：按发送者 DID 累加 `F = Σ s_i²`，超过累积阈值 `R_S(25.0)` 即触发横轴确认；候选会话按 `W(σ)=Σ s_i²` 排序取 `α` 个，并含高危兜底（任一跳 `≥ ρ(8.0)` 无条件纳入）。
+
+逐跳评分异步进行（不阻塞 `/record` 写入），状态持久化至 SQLite，可中断恢复。该机制能精准定位传播恶意 Prompt 的源头节点，并对慢速投毒、跨会话分散攻击等隐蔽行为有效。
 
 ### 应用功能
 
-#### 多 Agent 群组通信（待实现）
+#### 多 Agent 群组通信
 
 通过 `nodeAds` 配置群组成员，Agent 间可自由选择通信对象，支持任意拓扑的协作模式（链式调用、扇出、直接回复等）。启动时通过 ad.json 自动发现远程 Agent 并建立连接缓存，未就绪节点进入失败队列。后台心跳机制周期性对已连接 Agent 发起健康检查，连续失败超限自动驱逐并回退至重连队列，实现节点恢复后的无缝接入。以 `chat_id` 为键维护会话生命周期，跨跳持久化溯源路径与上下文元数据，确保多轮协作中消息关联不丢失。
 
@@ -403,6 +440,7 @@ python scripts/did_creator.py --hostname did-server.test --names my-agent --outp
 - **对话交互**：支持与 Agent 进行实时对话，发布任务和查询状态
 - **可视化拓扑**：以拓扑图形式展示智能体间的通信关系和连接状态
 - **时序图展示**：通过时序图直观复原完整的消息传递链路
+- **溯源与分析**：展示行为链与恶意节点档案，支持触发意图追踪分析并实时查看逐跳评分与横轴确认报告
 - **配置热重载**：支持 Agent 配置的热重载，无需重启即可应用配置变更
 - **跨平台支持**：基于 Electron 框架，支持 Windows、macOS、Linux 等多个平台
 
@@ -417,9 +455,24 @@ ATTP 支持三种工具开发方式（详见"工具端"章节）：
 
 ## 更新日志
 
-### v0.2.0-alpha
-重大架构升级：推出完整的四端架构（用户端、Agent端、工具端、协议节点端），支持 PyPI 和 NPM 包管理器发布。
+### v0.4.0（开发中）
+重构统一抽象通信层，强化分布式身份认证与权限管理。
 
-### v0.1.0-alpha
-初始版本发布：实现 ATTP 核心协议框架，包括 DID 身份认证、消息追踪、Nanobot 集成和基础可视化功能。
+### v0.3.0
+意图追踪层框架升级：判定条件，横纵轴触发条件等多项优化。
+
+### v0.2.2
+TypeScript 核心库对等实现（与 Python 端序列化兼容）；新增 openclaw 渠道插件；用户端支持 SSE 实时推送。
+
+### v0.2.1-demo
+基于 v0.2.1，加入可自由切换的演示功能。
+
+### v0.2.1
+实现"十字锁定"（cross-lock）纵横双向意图追踪。
+
+### v0.2.0
+重大架构升级：推出完整四端部署架构（用户端、Agent 端、工具端、协议节点端），落地双回传消息固化与验证管线；发布至 PyPI 与 NPM。
+
+### v0.1.0
+初始版本：实现 ATTP 核心协议框架，包含 DID 身份认证、消息溯源、nanobot 集成与基础可视化界面。
 

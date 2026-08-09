@@ -1,7 +1,7 @@
 {
   "name": "attp-user",
   "private": true,
-  "version": "0.2.0-alpha.1.demo",
+  "version": "0.3.0",
   "type": "module",
   "main": "electron/main.js",
   "packageManager": "pnpm@11.8.0",

@@ -15,6 +15,8 @@ typescript/node_modules/
 
 docker/release/
 
+uploads/
+
 .env
 
 # 本地测试脚手架（种子库脚本 + 生成的 DB/config，不入库）
