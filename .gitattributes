@@ -1,0 +1,6 @@
+# 仓库内所有 shell 脚本强制 LF 行尾。
+# 原因：这些脚本被 COPY 进 Linux 容器作 entrypoint（CMD ["/xxx-entrypoint.sh"]），
+# 若带 Windows 的 \r，内核读到 shebang "#!/bin/sh\r" 会 exec 失败
+# （"exec /xxx-entrypoint.sh: no such file or directory"）。
+# 本规则保证无论贡献者在 Windows 还是 *nix 上 checkout，工作树里的 .sh 永远是 LF。
+*.sh text eol=lf

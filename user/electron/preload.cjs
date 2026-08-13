@@ -31,6 +31,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('ws-error', (_, data) => callback(data));
   },
 
+  // ---- SSE Proxy ----
+  sseConnect: (url) => ipcRenderer.invoke('sse-create', url),
+  sseClose: (id) => ipcRenderer.invoke('sse-close', id),
+
+  // ---- SSE Event Listeners ----
+  onSseEvent: (callback) => {
+    ipcRenderer.on('sse-event', (_, data) => callback(data));
+  },
+  onSseOpen: (callback) => {
+    ipcRenderer.on('sse-open', (_, data) => callback(data));
+  },
+  onSseClose: (callback) => {
+    ipcRenderer.on('sse-close-event', (_, data) => callback(data));
+  },
+
   // ---- File Operations ----
   readFile: (filepath) => ipcRenderer.invoke('read-file', filepath),
   readUserConfig: () => ipcRenderer.invoke('read-user-config'),

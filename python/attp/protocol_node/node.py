@@ -18,7 +18,7 @@ from attp.protocol_node.engine.behavior_controller import BehaviorController
 from attp.protocol_node.engine.malicious_detector import MaliciousNodeDetector
 
 if TYPE_CHECKING:
-    from attp.core.analysis.orchestrator import AnalysisOrchestrator
+    from attp.core.analysis.cross_lock import CrossLockCoordinator
 
 logger = get_logger("ProtocolNode")
 
@@ -44,9 +44,11 @@ class ProtocolNode:
         self._tracer: ProtocolTracer | None = None
         self._session_manager: ProtocolSessionManager | None = None
         self._port = None
-        self._orchestrator: AnalysisOrchestrator | None = None
+        self._orchestrator: CrossLockCoordinator | None = None
         self._sweep_task: asyncio.Task | None = None
         self._malicious_detector: MaliciousNodeDetector | None = None
+        self._broker = None
+        self._concurrency: int = 8
 
     @property
     def config(self) -> ProtocolNodeConfigFile:
@@ -69,6 +71,12 @@ class ProtocolNode:
         # 1. 创建 ProtocolTracer
         db_path = cfg.get_db_path()
         self._tracer = await ProtocolTracer.create(db_path=db_path)
+
+        # 1.5 创建事件总线并注入 storage（用于 trace/malicious 事件发布）
+        from attp.core.sse import EventBroker
+
+        self._broker = EventBroker()
+        self._tracer.storage.set_event_broker(self._broker)
 
         # 2. 创建 SessionManager（注入 storage 以启用验证状态持久化）
         self._session_manager = ProtocolSessionManager(storage=self._tracer.storage)
@@ -93,9 +101,10 @@ class ProtocolNode:
             did_resolver=did_resolver,
             behavior_controller=behavior_controller,
             malicious_detector=malicious_detector,
+            event_broker=self._broker,
         )
 
-        # 5. 可选：创建 AnalysisOrchestrator
+        # 5. 可选：创建 CrossLockCoordinator
         self._orchestrator = self._build_orchestrator()
         if self._orchestrator:
             self._port.set_orchestrator(self._orchestrator)
@@ -120,6 +129,8 @@ class ProtocolNode:
             except asyncio.CancelledError:
                 pass
             self._sweep_task = None
+        if self._orchestrator:
+            await self._orchestrator.shutdown()
         if self._port:
             await self._port.stop()
         logger.info("ProtocolNode stopped")
@@ -142,6 +153,7 @@ class ProtocolNode:
                             msg, session,
                         )
                         if report:
+                            report.node_type = msg.sender_node_type
                             await self._tracer.save_malicious_report(report)
                     if expired:
                         await self._session_manager.save(session)
@@ -152,15 +164,15 @@ class ProtocolNode:
     # Orchestrator 管理
     # ------------------------------------------------------------------
 
-    def set_orchestrator(self, orchestrator: AnalysisOrchestrator | None) -> None:
-        """注入或清除 AnalysisOrchestrator。"""
+    def set_orchestrator(self, orchestrator: CrossLockCoordinator | None) -> None:
+        """注入或清除 CrossLockCoordinator。"""
         self._orchestrator = orchestrator
         if self._port:
             self._port.set_orchestrator(orchestrator)
         if orchestrator:
-            logger.info("AnalysisOrchestrator injected into ProtocolNode")
+            logger.info("CrossLockCoordinator injected into ProtocolNode")
         else:
-            logger.info("AnalysisOrchestrator cleared from ProtocolNode")
+            logger.info("CrossLockCoordinator cleared from ProtocolNode")
 
     async def reload_config(self) -> None:
         """重新加载配置文件并重建 Orchestrator。
@@ -191,26 +203,69 @@ class ProtocolNode:
     # ------------------------------------------------------------------
 
     def _build_orchestrator(self):
-        """根据当前配置构建 AnalysisOrchestrator，未启用则返回 None。"""
+        """根据当前配置构建 CrossLockCoordinator，未启用则返回 None。
+
+        逐跳改版：纵轴逐跳 V-Reasoner 评分 + 横轴 per-DID F 累加 + α 会话确认。
+        """
         analysis_cfg = self._config.analysis
         if not analysis_cfg.enabled or not analysis_cfg.api_key:
             return None
 
-        from attp.core.analysis import SemanticTaintAnalyzer, AnalysisOrchestrator
+        from openai import AsyncOpenAI
 
-        analyzer = SemanticTaintAnalyzer(
-            api_key=analysis_cfg.api_key,
-            base_url=analysis_cfg.base_url,
-            model=analysis_cfg.model,
+        from attp.core.analysis.vertical import VerticalIntentAnalyzer, VerticalOrchestrator
+        from attp.core.analysis.horizontal import HorizontalIntentAnalyzer, HorizontalOrchestrator
+        from attp.core.analysis.cross_lock import CrossLockCoordinator
+        from attp.core.sessions.protocol_node.management import (
+            VerticalAnalysisManager,
+            HorizontalAnalysisManager,
+        )
+
+        llm_client = AsyncOpenAI(api_key=analysis_cfg.api_key, base_url=analysis_cfg.base_url)
+        self._concurrency = analysis_cfg.concurrency
+
+        # --- 纵轴（逐跳评分） ---
+        vertical_analyzer = VerticalIntentAnalyzer(
+            client=llm_client, model=analysis_cfg.model, aggregation=analysis_cfg.aggregation,
+        )
+        vertical_state_mgr = VerticalAnalysisManager(self._session_manager, self._tracer)
+        vertical_orch = VerticalOrchestrator(
+            analyzer=vertical_analyzer,
+            vertical_state_mgr=vertical_state_mgr,
+            tracer=self._tracer,
+            r_t=analysis_cfg.r_t,
+            concurrency=analysis_cfg.concurrency,
+            queue_maxsize=analysis_cfg.queue_maxsize,
+            event_broker=self._broker,
+        )
+
+        # --- 横轴（F 累加 + 确认） ---
+        horizontal_orch = None
+        if getattr(analysis_cfg, "horizontal_enabled", True):
+            horizontal_analyzer = HorizontalIntentAnalyzer(client=llm_client, model=analysis_cfg.model)
+            horizontal_state_mgr = HorizontalAnalysisManager(self._tracer.storage)
+            horizontal_orch = HorizontalOrchestrator(
+                analyzer=horizontal_analyzer,
+                horizontal_state_mgr=horizontal_state_mgr,
+                tracer=self._tracer,
+                r_s=analysis_cfg.r_s,
+                alpha=analysis_cfg.alpha,
+                rho=analysis_cfg.rho,
+                concurrency=analysis_cfg.concurrency,
+                event_broker=self._broker,
+            )
+            logger.info(
+                "Cross-Lock horizontal axis enabled (R_S={}, α={}, ρ={})",
+                analysis_cfg.r_s, analysis_cfg.alpha, analysis_cfg.rho,
+            )
+
+        # --- 十字锁定协调器 ---
+        coordinator = CrossLockCoordinator(
+            vertical_orchestrator=vertical_orch,
+            horizontal_orchestrator=horizontal_orch,
         )
         logger.info(
-            "Semantic taint analysis enabled (model={}, batch_size={})",
-            analysis_cfg.model,
-            analysis_cfg.report_batch_size,
+            "Cross-Lock coordinator built (model={}, R_T={}, concurrency={})",
+            analysis_cfg.model, analysis_cfg.r_t, analysis_cfg.concurrency,
         )
-        return AnalysisOrchestrator(
-            analyzer=analyzer,
-            session_manager=self._session_manager,
-            tracer=self._tracer,
-            batch_size=analysis_cfg.report_batch_size,
-        )
+        return coordinator

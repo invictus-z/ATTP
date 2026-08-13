@@ -1,0 +1,28 @@
+{
+    "agents": {
+        "defaults": {
+            "model": "${LLM_MODEL}",
+            "provider": "custom"
+        }
+    },
+    "providers": {
+        "custom": {
+            "api_key": "${LLM_API_KEY}",
+            "api_base": "${LLM_BASE_URL}"
+        }
+    },
+    "channels": {
+        "attp": {
+            "enabled": true,
+            "config_path": "~/.attp/agent/nanobot/config.json"
+        }
+    },
+    "tools": {
+        "mcpServers": {
+            "attp": {
+                "type": "sse",
+                "url": "http://127.0.0.1:8002/sse"
+            }
+        }
+    }
+}

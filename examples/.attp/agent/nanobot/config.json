@@ -1,0 +1,37 @@
+{
+    "did": "did:wba:attp-diting.cn:test:agent:nanobot:e1_jrd7uiR2w6wEPDOe-_JtNpvrJjokOdz9Io_hZExLsKw",
+    "attpClient": {
+        "didDocPath": "~/.attp/agent/nanobot/did/did.json",
+        "didKeyPath": "~/.attp/agent/nanobot/did/key-1_private.pem",
+        "nodeAds": []
+    },
+    "attpServer": {
+        "name": "diting-agent",
+        "prefix": "/agent",
+        "description": "谛听演示智能体节点 (nanobot)",
+        "serverHost": "0.0.0.0",
+        "serverPort": 8000,
+        "privateKeyPath": "~/.attp/agent/nanobot/did/key-1_private.pem",
+        "publicKeyPath": "~/.attp/agent/nanobot/did/key-1_public.pem"
+    },
+    "webApp": {
+        "host": "0.0.0.0",
+        "port": 8001
+    },
+    "tool": {
+        "host": "127.0.0.1",
+        "port": 8002,
+        "toolNodeAds": [
+            "http://tool:9999/attp/ad.json"
+        ]
+    },
+    "heartbeat": {
+        "interval": 30,
+        "timeout": 90,
+        "maxFail": 3
+    },
+    "protocolNode": {
+        "enabled": false,
+        "configPath": "~/.attp/protocol_node/config.json"
+    }
+}

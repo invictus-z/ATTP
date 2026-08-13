@@ -12,3 +12,19 @@ user/node_modules/
 
 typescript/dist/
 typescript/node_modules/
+
+docker/release/
+
+uploads/
+
+.env
+
+# 本地测试脚手架（种子库脚本 + 生成的 DB/config，不入库）
+local_test/
+
+test/benchmark/data/scenarios/
+test/benchmark/data/results/
+test/benchmark/data/compare_config.local.json
+test/benchmark/data/perf_config.local.json
+.attp_benchmark_config.json
+

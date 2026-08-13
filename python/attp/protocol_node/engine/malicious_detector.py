@@ -39,6 +39,7 @@ class MaliciousNodeReport:
     nonce: str
     timestamp: float
     raw_evidence: dict
+    node_type: str = ""  # 由 middleware 从 DID 解析结果填入（agent / tool / user）
 
 
 def _build_report(
@@ -78,7 +79,7 @@ class MaliciousNodeDetector:
         """双回传场景恶意判定。
 
         完整决策树：回传1身份验证 → 可信名单校验 → 回传2身份验证
-        → DID 比对 → 内容签名交叉验证。
+        → DID 比对 → 内容签名交叉验证 → 发送方双签（栽赃）检测。
 
         Args:
             stored_msg: 回传1（先到达，已暂存，身份验证结果在 identity_verified 中）
@@ -240,7 +241,29 @@ class MaliciousNodeDetector:
             back_msg_2.recorded_hop.sig_content,
             bp1_sender_result.public_key,
         ):
-            logger.debug("Step 4: 交叉验证成功，双回传验证通过，无恶意")
+            # --- Step 4b: 发送方双签（栽赃）检测 ---
+            # Step 4 通过 ⇒ 回传2的内容签名在发送方公钥下有效；Step 3 已验证回传1的
+            # 内容签名同样在发送方公钥下有效，即两条回传都携带了发送方的合法签名。
+            # 按协议时序，发送方应只签名一次、两条回传共享同一 sig_content（见
+            # chain.verify_back_propagation 的字节级比对要求）。若两条内容签名不同，
+            # 只能是发送方分别向协议节点与接收方各签署了一份不同内容——仅有发送方
+            # 私钥持有者可做到（密钥不可破假设），故判定发送方为恶意（栽赃）。
+            bp1_sig_content = stored_msg.hop.get("Signature", "")
+            if bp1_sig_content != back_msg_2.recorded_hop.sig_content:
+                logger.debug("Step 4b: 发送方双签（栽赃），判定发送方为恶意")
+                return _build_report(
+                    malicious_dids=[bp1_sender_did],
+                    evidence_type=EvidenceType.FRAMING,
+                    description=(
+                        f"发送方双签（栽赃）：回传1与回传2的内容签名不同，"
+                        f"但均在发送方({bp1_sender_did})公钥下有效，"
+                        f"说明发送方分别向协议节点与接收方各签署了一份不同内容"
+                    ),
+                    session_id=session_id,
+                    nonce=nonce,
+                    raw_evidence=raw_evidence,
+                )
+            logger.debug("Step 4b: 内容签名一致，双回传验证通过，无恶意")
             # 身份确认通过，无恶意，交给后续 verify_back_propagation
             return None
 
@@ -294,27 +317,16 @@ class MaliciousNodeDetector:
             f"Trusted list: {trusted_list}, latest_trusted={session.get_latest_trusted_did()}"
         )
 
-        # --- Case A: 身份签名解不开 ---
+        # --- Case A: 身份签名解不开 → 直接丢弃 ---
+        # 单回传且身份签名无法验证，属于无主垃圾消息：既未对特定方完成注入，
+        # 也非针对具体节点的栽赃。按威胁模型原则（仅追究注入/栽赃行径），不予记录、
+        # 不通报任何节点；同时避免被恶意节点用作对可信名单的广播栽赃洪流（反例 C1）。
         if not pending_msg.identity_verified:
-            logger.debug("Case A: 身份签名验证失败")
-            if trusted_list:
-                return _build_report(
-                    malicious_dids=list(trusted_list),
-                    evidence_type=EvidenceType.IDENTITY_TAMPERING,
-                    description=f"单回传身份签名无效，对应情况2(垃圾消息)，"
-                                f"可信名单中的节点为恶意，一起通报: {trusted_list}",
-                    session_id=session_id,
-                    nonce=nonce,
-                    raw_evidence=raw_evidence,
-                )
-            return _build_report(
-                malicious_dids=[node_did],
-                evidence_type=EvidenceType.IDENTITY_TAMPERING,
-                description=f"单回传身份签名无效(无可信名单)，报告发送者: {node_did}",
-                session_id=session_id,
-                nonce=nonce,
-                raw_evidence=raw_evidence,
+            logger.info(
+                f"单回传身份签名无效，视为垃圾消息丢弃（不通报）: "
+                f"session={session_id}, nonce={nonce}, node_did={node_did}"
             )
+            return None
         logger.debug("Case A: 身份签名验证成功")
 
         # --- Case B: 身份签名解得开，但 DID 不在可信名单中 ---
@@ -325,7 +337,7 @@ class MaliciousNodeDetector:
             return _build_report(
                 malicious_dids=list(trusted_list),
                 evidence_type=EvidenceType.TRUSTED_LIST_VIOLATION,
-                description=f"单回传DID({node_did})与最新名单({latest_trusted})不一致，"
+                description=f"单回传DID({node_did})与最新名单({session.get_latest_trusted_did()})不一致，"
                             f"可信名单中的节点为恶意，一起通报: {trusted_list}",
                 session_id=session_id,
                 nonce=nonce,

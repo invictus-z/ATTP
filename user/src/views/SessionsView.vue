@@ -63,11 +63,11 @@ const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
 const handleTrace = (id: string) => {
   const protocolUrl = getSessionProtocolUrl(id)
   if (!protocolUrl) {
-    showToast('该会话未绑定溯源节点，无法溯源', 'error')
+    showToast('该会话未绑定协议节点，无法溯源', 'error')
     closeMenu()
     return
   }
-  router.push(`/trace?sessionId=${encodeURIComponent(id)}&protocolNodeUrl=${encodeURIComponent(protocolUrl)}`)
+  router.push(`/trace/query?sessionId=${encodeURIComponent(id)}&protocolNodeUrl=${encodeURIComponent(protocolUrl)}`)
   closeMenu()
 }
 

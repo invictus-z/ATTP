@@ -1,10 +1,18 @@
 """Record 接收路由 — 从 DataPort 闭包重构为标准 APIRouter。"""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from attp.app.logging import get_logger
 from attp.core.message.event import BackMessage
+from attp.core.sse import EventType, Topic
+
+if TYPE_CHECKING:
+    from attp.core.sse import EventBroker
 
 logger = get_logger("RecordAPI")
 
@@ -36,6 +44,7 @@ def get_record_router(
     behavior_controller,
     malicious_detector,
     orchestrator_holder: list,
+    event_broker: EventBroker | None = None,
 ) -> APIRouter:
     """返回 /record 路由。
 
@@ -43,8 +52,54 @@ def get_record_router(
     ----------
     orchestrator_holder : list
         长度为 1 的可变列表，用于 late-binding 注入 orchestrator。
+    event_broker : EventBroker | None
+        事件总线；非 None 时在回传处理 error 出口发布 ``record.error`` 事件。
     """
     router = APIRouter()
+
+    async def _publish_record_error(
+        *, back_msg: BackMessage | None = None, body: dict | None = None,
+        error_key: str, error_message: str, status_code: int,
+    ) -> None:
+        """发布 record.error 事件（None-safe）。优先用已解析的 back_msg，否则 best-effort 从 raw body 取。"""
+        if not event_broker:
+            return
+        session_id = nonce = node_did = protocol_url = sender_did = target_did = ""
+        hop_count: list = []
+        if back_msg is not None:
+            recorded = back_msg.recorded_hop
+            session_id = recorded.session_id
+            nonce = back_msg.nonce
+            node_did = back_msg.node_did
+            protocol_url = back_msg.protocol_url
+            hop_count = list(recorded.hop_count)
+            sender_did = recorded.sender_did
+            target_did = recorded.target_did
+        elif isinstance(body, dict):
+            rh = body.get("recorded_hop") or {}
+            session_id = rh.get("session_id", "")
+            nonce = body.get("nonce", "")
+            node_did = body.get("node_did", "")
+            protocol_url = body.get("protocol_url", "")
+            hop_count = rh.get("hop_count", [])
+            sender_did = rh.get("sender_did", "")
+            target_did = rh.get("target_did", "")
+        await event_broker.publish(
+            EventType.RECORD_ERROR,
+            {
+                "session_id": session_id,
+                "nonce": nonce,
+                "node_did": node_did,
+                "protocol_url": protocol_url,
+                "hop_count": hop_count,
+                "sender_did": sender_did,
+                "target_did": target_did,
+                "error_key": error_key,
+                "error_message": error_message,
+                "status_code": status_code,
+            },
+            topic=Topic.RECORD,
+        )
 
     @router.post("/record")
     async def receive_record(request: Request) -> JSONResponse:
@@ -52,12 +107,19 @@ def get_record_router(
         try:
             body = await request.json()
         except Exception:
+            await _publish_record_error(
+                error_key="invalid_json", error_message="Invalid JSON body", status_code=400,
+            )
             return JSONResponse({"error": "Invalid JSON body"}, status_code=400)
 
         # 解析 BackMessage
         try:
             back_msg = BackMessage.from_dict(body)
         except Exception as e:
+            await _publish_record_error(
+                body=body, error_key="invalid_backmessage",
+                error_message=f"Invalid BackMessage: {e}", status_code=400,
+            )
             return JSONResponse({"error": f"Invalid BackMessage: {e}"}, status_code=400)
 
         session_id = back_msg.recorded_hop.session_id
@@ -74,6 +136,10 @@ def get_record_router(
             )
         except Exception as e:
             logger.error("intercept_record unhandled exception: session={}, error={}", session_id, e)
+            await _publish_record_error(
+                back_msg=back_msg, error_key="internal_error",
+                error_message=f"Internal error: {e}", status_code=500,
+            )
             return JSONResponse({"error": f"Internal error: {e}"}, status_code=500)
 
         if result.status == "error":
@@ -84,6 +150,9 @@ def get_record_router(
             logger.error(
                 "Record rejected: session={}, error_key={}, detail={}",
                 session_id, error_key, result.error,
+            )
+            await _publish_record_error(
+                back_msg=back_msg, error_key=error_key, error_message=msg, status_code=code,
             )
             return JSONResponse({"error": msg}, status_code=code)
 
@@ -117,7 +186,7 @@ def get_record_router(
             behavior_type = result.behavior_type
             stored = result.stored_msg
 
-            await tracer.save_behavior_entry(
+            trace_id = await tracer.save_behavior_entry(
                 session_id=session_id,
                 protocol_node_address=pna,
                 sender_did=stored.node_did, #验证过的真实的发送方DID
@@ -136,13 +205,21 @@ def get_record_router(
                 result.node_type, body, result,
             )
 
+            # 逐跳异步：落库后把该跳投进会话的有界队列（不等 LLM）；
+            # worker 内部按 field_type 分流（U2A 抽意图 / 动作跳打分）。
             _orch = orchestrator_holder[0]
-            if behavior_type == "U2A" and _orch and session_id and stored.hop.get("Hop_Count", [0, 0]) == [0, 0]:
-                content = stored.hop.get("Content", "")
-                await _orch.on_field_U2A_recorded(session_id, content)
-
             if _orch and session_id:
-                await _orch.on_record_received(session_id)
+                hop = {
+                    "trace_id": trace_id,
+                    "session_id": session_id,
+                    "sender_did": stored.node_did,      # 验证过的发送方
+                    "field_type": behavior_type,
+                    "hop_count": stored.hop.get("Hop_Count", [0, 0]),
+                    "content": stored.hop.get("Content", ""),
+                    "target": result.sender_did,         # 验证过的接收方
+                    "timestamp": stored.hop.get("Timestamp", 0),
+                }
+                await _orch.enqueue_trace(session_id, hop)
 
             return JSONResponse({"status": "Record verified and saved"})
 

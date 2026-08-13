@@ -1,4 +1,4 @@
-"""统一端口 — 合并原 DataPort（/record）+ ApiPort（/api/*）。"""
+"""统一端口 — 合并原 DataPort（/record）+ ApiPort（/api/*）+ SSE（/api/events）。"""
 
 from __future__ import annotations
 
@@ -7,12 +7,14 @@ from typing import TYPE_CHECKING
 
 import uvicorn
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from attp.app.logging import get_logger, UVICORN_SILENT_LOG_CONFIG
 
 logger = get_logger("ProtocolPort")
 
 if TYPE_CHECKING:
+    from attp.core.sse import EventBroker
     from attp.core.pn_tracer import ProtocolTracer
     from attp.core.sessions.protocol_node import ProtocolSessionManager
 
@@ -38,6 +40,7 @@ class ProtocolPort:
         did_resolver,
         behavior_controller,
         malicious_detector,
+        event_broker: EventBroker | None = None,
     ):
         self._tracer = tracer
         self._session_manager = session_manager
@@ -46,8 +49,15 @@ class ProtocolPort:
         self._did_resolver = did_resolver
         self._behavior_controller = behavior_controller
         self._malicious_detector = malicious_detector
+        self._broker = event_broker
 
         self._app = FastAPI(title="ATTP Protocol Node")
+        self._app.add_middleware(
+            CORSMiddleware,
+            allow_origins=["*"],
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
         self._orchestrator = None
         self._orch_holder: list = [None]  # mutable list for late-binding
         self._uvicorn_server: uvicorn.Server | None = None
@@ -69,26 +79,51 @@ class ProtocolPort:
                 behavior_controller=self._behavior_controller,
                 malicious_detector=self._malicious_detector,
                 orchestrator_holder=self._orch_holder,
+                event_broker=self._broker,
             )
         )
 
-        # 2. /api/* 路由（行为溯源 + 分析）
+        # 2. /api/* 路由 — 行为溯源
         from attp.protocol_node.api.trace import get_behavior_router
         from attp.protocol_node.api.malicious import get_malicious_router
 
         self._app.include_router(
-            get_behavior_router(
-                tracer=self._tracer,
-                session_manager=self._session_manager,
-                orchestrator_holder=self._orch_holder,
-            )
+            get_behavior_router(tracer=self._tracer)
         )
         self._app.include_router(
             get_malicious_router(tracer=self._tracer)
         )
 
+        # 3. Cross-Lock 分析路由（纵向 + 横向 + 综合视图）
+        from attp.protocol_node.api.analysis.vertical import get_vertical_analysis_router
+        from attp.protocol_node.api.analysis.horizontal import get_horizontal_analysis_router
+        from attp.protocol_node.api.analysis.cross_lock import get_cross_lock_router
+
+        self._app.include_router(
+            get_vertical_analysis_router(
+                tracer=self._tracer,
+                session_manager=self._session_manager,
+                coordinator_holder=self._orch_holder,
+            )
+        )
+        self._app.include_router(
+            get_horizontal_analysis_router(
+                tracer=self._tracer,
+                coordinator_holder=self._orch_holder,
+            )
+        )
+        self._app.include_router(
+            get_cross_lock_router(tracer=self._tracer)
+        )
+
+        # 4. SSE 事件流路由
+        if self._broker is not None:
+            from attp.protocol_node.api.events import get_events_router
+
+            self._app.include_router(get_events_router(self._broker))
+
     def set_orchestrator(self, orchestrator) -> None:
-        """注入 AnalysisOrchestrator 并更新所有路由引用。"""
+        """注入 CrossLockCoordinator 并更新所有路由引用。"""
         self._orchestrator = orchestrator
         self._orch_holder[0] = orchestrator
 

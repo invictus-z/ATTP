@@ -1,0 +1,31 @@
+# 智能体节点（Agent Node）镜像
+# nanobot + ATTP 渠道插件；构建期 onboard 初始化工作区，运行期 envsubst 注入 LLM 配置后 gateway。
+# 注意：必须在 tool 节点健康之后启动（compose 用 depends_on 保证），以便发现工具。
+
+FROM python:3.11-slim
+
+# envsubst 来自 gettext
+RUN apt-get update && apt-get install -y --no-install-recommends gettext \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# 装 attp + nanobot 渠道依赖（.[nanobot] extra）；nanobot CLI 随后供 onboard 用
+COPY pyproject.toml ./
+COPY python ./python
+RUN pip install --no-cache-dir ".[nanobot]"
+
+# 构建期初始化 nanobot 工作区（config 不存在→非交互，仅生成默认 config + 工作区模板）
+RUN nanobot onboard --config /root/.nanobot/config.json
+
+# 预置 agent 身份（容器内 ~/.attp/agent/）
+COPY examples/.attp/agent /root/.attp/agent
+# nanobot 配置模板（${LLM_*} 占位）放 template 目录，运行期 envsubst 覆盖真实 config
+COPY examples/.nanobot/config.json /root/.nanobot-template/config.json
+COPY docker/agent-entrypoint.sh /agent-entrypoint.sh
+# 防御 Windows CRLF：剥掉 \r，否则 shebang #!/bin/sh\r 会 exec 失败（no such file or directory）
+RUN sed -i 's/\r$//' /agent-entrypoint.sh && chmod +x /agent-entrypoint.sh
+
+EXPOSE 8000 8001
+
+CMD ["/agent-entrypoint.sh"]

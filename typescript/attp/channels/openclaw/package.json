@@ -1,0 +1,37 @@
+{
+  "name": "@attp/openclaw-channel",
+  "version": "0.3.0",
+  "description": "ATTP agent-mesh channel plugin for openclaw (native in-process, three-port: WebUI + Agent Server + MCP tools).",
+  "type": "module",
+  "private": true,
+  "openclaw": {
+    "extensions": [
+      "./dist/index.js"
+    ],
+    "channel": {
+      "id": "attp",
+      "label": "ATTP",
+      "selectionLabel": "ATTP (agent mesh)",
+      "blurb": "ATTP agent-mesh channel: WebUI + cross-framework A2A + MCP tools, native in-process.",
+      "order": 50
+    },
+    "compat": {
+      "pluginApi": ">=2026.7.2"
+    },
+    "install": {
+      "minHostVersion": ">=2026.7.2"
+    }
+  },
+  "peerDependencies": {
+    "openclaw": ">=2026.7.2"
+  },
+  "peerDependenciesMeta": {
+    "openclaw": {
+      "optional": true
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\""
+  }
+}

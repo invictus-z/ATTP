@@ -1,11 +1,10 @@
 [project]
 name = "attp"
-version = "0.2.0a0"
+version = "0.3.0"
 description = "alpha version for ATTP channel plugin on nanobot"
 requires-python = ">=3.11"
 
 dependencies = [
-    "nanobot-ai>=0.1,<0.2",
     "aiohttp>=3.9,<4.0",
     "fastapi>=0.110,<1.0",
     "anp>=0.8.7,<0.9",
@@ -17,6 +16,11 @@ dependencies = [
     "openai>=2.8.0",
     "aiosqlite>=0.20,<1.0",
 ]
+
+[project.optional-dependencies]
+# nanobot 渠道插件依赖；仅 agent 镜像装（pip install .[nanobot]）。
+# protocol / tool 节点不 import nanobot，无需此 extra，避免拖入 lark-oapi 等大依赖。
+nanobot = ["nanobot-ai>=0.1.5,<0.2"]
 
 [project.scripts]
 attp = "attp.protocol_node.cli:main"

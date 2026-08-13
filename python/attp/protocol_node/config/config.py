@@ -34,13 +34,34 @@ class StorageConfig(PNBase):
 
 
 class AnalysisConfig(PNBase):
-    """语义污点分析（LLM）配置。"""
+    """语义意图追踪（LLM）配置 — 逐跳有状态改版（三元组 + F 累加 + 横轴确认）。
+
+    taint_score 取 [0,10]（0.5 步进，5 档 severity）。详见
+    ``core/analysis/base_models.py`` 的评分常量与 ``core/analysis/`` 的实现。
+    """
 
     enabled: bool = False
     api_key: str = ""
     base_url: str = "https://api.openai.com/v1"
     model: str = "gpt-4o"
-    report_batch_size: int = 10
+
+    # 横轴开关（依赖 enabled=True）
+    horizontal_enabled: bool = True
+
+    # ── 评分聚合 ──
+    dimensions: int = 4                  # 正交维度数（默认 4，见 base_models.DIMENSION_NAMES）
+    aggregation: str = "max"             # 维度聚合："max"(默认) / "sum" / 数值 p 的 L^p 范数
+
+    # ── 阈值（R_S 已标定：三次方累计 cube@R_S=200，见 §9 benchmark rq_rs_trigger_f1）──
+    r_t: float = 7.5                     # 单点阈值：s_i > R_T 立即告警（critical 下沿）
+    rho: float = 8.0                     # 横轴高危兜底：会话内任一跳 s_j ≥ ρ 无条件纳入确认
+    rho_k: float = 8.0                   # 单维 critical：d_k ≥ ρ_k（max 聚合下自动成立）
+    r_s: float = 200.0                   # 累积阈值：F_d = Σ s_i³ > R_S 触发横轴确认（三次方和；实验最佳 cube@R_S=200）
+    alpha: int = 10                      # 横轴确认上限：候选会话 > α 时按 W(σ) 取 α 个；≤ α 取全量
+
+    # ── 异步 ──
+    concurrency: int = 8                 # 同时处理的 hop 数（全局并发上限；每个 worker 处理一跳前获取此信号量）
+    queue_maxsize: int = 1000            # 单会话有界队列容量（真背压：满则该跳留 DB，由 catch-up 扫描补打，不丢数据）
 
 
 class ProtocolNodeConfigFile(PNBase):

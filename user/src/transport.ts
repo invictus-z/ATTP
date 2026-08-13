@@ -15,7 +15,7 @@ export interface UserAttpConfig {
   did: string;
   didDocPath: string;
   didKeyPath: string;
-  /** Protocol Nodes（协议节点 / 溯源节点，同一概念） */
+  /** Protocol Nodes（协议节点） */
   protocolNodes: TraceNodeEntry[];
   /** Tool Nodes（工具节点） */
   toolNodes: TraceNodeEntry[];
@@ -47,6 +47,11 @@ declare global {
       onWsOpen: (cb: (data: WsEventBasic) => void) => void;
       onWsClose: (cb: (data: WsCloseEvent) => void) => void;
       onWsError: (cb: (data: WsErrorEvent) => void) => void;
+      sseConnect: (url: string) => Promise<IpcWsConnectResult>;
+      sseClose: (id: string) => Promise<{ ok: boolean }>;
+      onSseEvent: (cb: (data: SseEventData) => void) => void;
+      onSseOpen: (cb: (data: WsEventBasic) => void) => void;
+      onSseClose: (cb: (data: WsEventBasic) => void) => void;
       readFile: (filepath: string) => Promise<IpcFileResult>;
       readUserConfig: () => Promise<IpcUserConfigResult>;
       saveUserConfig: (config: UserAttpConfig) => Promise<IpcFileResult>;
@@ -95,6 +100,13 @@ interface WsCloseEvent {
 interface WsErrorEvent {
   id: string;
   error: string;
+}
+
+interface SseEventData {
+  id: string;
+  eventId?: string;
+  event: string;
+  data: any;
 }
 
 // ---- HTTP ----
@@ -246,4 +258,100 @@ export function onWsClose(conn: WsConnection, handler: WsEventHandler) {
 export function onWsError(conn: WsConnection, handler: WsErrorHandler) {
   if (!wsErrorHandlers.has(conn.id)) wsErrorHandlers.set(conn.id, new Set());
   wsErrorHandlers.get(conn.id)!.add(handler);
+}
+
+// ---- SSE ----
+
+export interface SseConnection {
+  readonly id: string;
+  close: () => Promise<void>;
+}
+
+type SseEventHandler = (event: string, data: any) => void;
+type SseOpenHandler = () => void;
+
+const sseEventHandlers = new Map<string, Set<SseEventHandler>>();
+const sseOpenHandlers = new Map<string, Set<SseOpenHandler>>();
+const sseCloseHandlers = new Map<string, Set<SseOpenHandler>>();
+let sseListenersRegistered = false;
+
+function ensureSseListeners() {
+  if (sseListenersRegistered) return;
+  sseListenersRegistered = true;
+
+  window.electronAPI.onSseEvent((event: SseEventData) => {
+    const handlers = sseEventHandlers.get(event.id);
+    if (handlers) handlers.forEach(cb => cb(event.event, event.data));
+  });
+
+  window.electronAPI.onSseOpen((event: WsEventBasic) => {
+    const handlers = sseOpenHandlers.get(event.id);
+    if (handlers) handlers.forEach(cb => cb());
+  });
+
+  window.electronAPI.onSseClose((event: WsEventBasic) => {
+    const handlers = sseCloseHandlers.get(event.id);
+    if (handlers) handlers.forEach(cb => cb());
+    sseEventHandlers.delete(event.id);
+    sseOpenHandlers.delete(event.id);
+    sseCloseHandlers.delete(event.id);
+  });
+}
+
+/**
+ * Create an SSE connection through Electron IPC.
+ * Returns a SseConnection with a close() method and event registration.
+ *
+ * Usage:
+ *   const conn = await createSse('http://localhost:8000/api/events?topics=analysis');
+ *   onSseEvent(conn, (event, data) => { ... });
+ *   await conn.close();
+ */
+export async function createSse(url: string): Promise<SseConnection> {
+  ensureSseListeners();
+
+  console.log(`[DEBUG-CONN][createSse] >>> Requesting SSE connection to: ${url}`);
+  const result = await window.electronAPI.sseConnect(url);
+
+  if (!result.ok || !result.id) {
+    console.error(`[DEBUG-CONN][createSse] !!! SSE connection FAILED to ${url}: ${result.error || 'unknown error'}`);
+    throw new Error(result.error || 'Failed to create SSE connection');
+  }
+
+  const id = result.id;
+  console.log(`[DEBUG-CONN][createSse] ✓ SSE connected #${id} → ${url}`);
+
+  return {
+    id,
+    async close() {
+      await window.electronAPI.sseClose(id);
+      sseEventHandlers.delete(id);
+      sseOpenHandlers.delete(id);
+      sseCloseHandlers.delete(id);
+    },
+  };
+}
+
+/**
+ * Register an event handler for a SseConnection.
+ */
+export function onSseEvent(conn: SseConnection, handler: SseEventHandler) {
+  if (!sseEventHandlers.has(conn.id)) sseEventHandlers.set(conn.id, new Set());
+  sseEventHandlers.get(conn.id)!.add(handler);
+}
+
+/**
+ * Register an open handler for a SseConnection.
+ */
+export function onSseOpen(conn: SseConnection, handler: SseOpenHandler) {
+  if (!sseOpenHandlers.has(conn.id)) sseOpenHandlers.set(conn.id, new Set());
+  sseOpenHandlers.get(conn.id)!.add(handler);
+}
+
+/**
+ * Register a close handler for a SseConnection.
+ */
+export function onSseClose(conn: SseConnection, handler: SseOpenHandler) {
+  if (!sseCloseHandlers.has(conn.id)) sseCloseHandlers.set(conn.id, new Set());
+  sseCloseHandlers.get(conn.id)!.add(handler);
 }

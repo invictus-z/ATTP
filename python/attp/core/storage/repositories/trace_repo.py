@@ -25,9 +25,9 @@ class TraceRepository(BaseRepository):
         content: str = "",
         timestamp: float = 0.0,
         extra: dict[str, Any] | None = None,
-    ) -> None:
+    ) -> int:
         extra_json = json.dumps(extra or {}, ensure_ascii=False)
-        await self._db.execute(
+        row_id = await self._db.execute_insert(
             """INSERT INTO behavior_traces
                (session_id, protocol_node_address, node_did, hop_count_a2a,
                 hop_count_intra, field_type, content, target, timestamp, extra)
@@ -36,9 +36,10 @@ class TraceRepository(BaseRepository):
              hop_count[1], field_type, content, target_did, timestamp, extra_json),
         )
         logger.debug(
-            "Saved behavior entry: session={}, sender={}, hop={}, field={}, target={}",
-            session_id, sender_did, hop_count, field_type, target_did,
+            "Saved behavior entry: session={}, sender={}, hop={}, field={}, target={}, id={}",
+            session_id, sender_did, hop_count, field_type, target_did, row_id,
         )
+        return row_id
 
     async def recover_behavior_trace(
         self,
@@ -62,8 +63,8 @@ class TraceRepository(BaseRepository):
         result = []
         for row in rows:
             row["hop_count"] = [row.pop("hop_count_a2a", 0), row.pop("hop_count_intra", 0)]
-            row["sender_did"] = row.pop("node_did", "")
-            row["target_did"] = row.pop("target", "")
+            row["sender_did"] = row.get("node_did", "")
+            row["target_did"] = row.get("target", "")
             result.append(row)
         logger.debug(
             "Recovered behavior trace: session={}, pna={}, count={}",
@@ -84,7 +85,7 @@ class TraceRepository(BaseRepository):
         )
         for row in result:
             row["hop_count"] = [row.pop("hop_count_a2a", 0), row.pop("hop_count_intra", 0)]
-            row["sender_did"] = row.pop("node_did", "")
-            row["target_did"] = row.pop("target", "")
+            row["sender_did"] = row.get("node_did", "")
+            row["target_did"] = row.get("target", "")
         max_id = result[-1]["id"] if result else since_id
         return result, max_id

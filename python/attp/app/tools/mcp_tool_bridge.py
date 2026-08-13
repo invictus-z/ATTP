@@ -16,6 +16,7 @@ import json
 import re
 import uuid
 from typing import TYPE_CHECKING, Any, Callable, Awaitable
+from urllib.parse import urlsplit, urlunsplit
 
 import aiohttp
 import uvicorn
@@ -27,6 +28,26 @@ from attp.core.message.event import NodeMessage, RecordedHop
 from attp.core.message.back_sender import send_back_message, BackPropagationError
 
 logger = get_logger("ToolBridge")
+
+
+def _rewrite_endpoint_host(ad_url: str, attp_endpoint: str) -> str:
+    """跨容器改写：用 ad URL 的 host:port 替换 attp_endpoint 的 host:port。
+
+    tool 节点在 host=0.0.0.0 时会把广告里的 attp_endpoint 写成 localhost:port（自身视角），
+    在 agent 容器内不可达。ad 既已从 ad_url 成功拉取，说明 ad_url 的 host:port 可达，
+    工具调用也走它。仅替换 netloc，保留 endpoint 的 scheme/path/query。
+    """
+    if not attp_endpoint:
+        return attp_endpoint
+    try:
+        ad_netloc = urlsplit(ad_url).netloc
+        ep = urlsplit(attp_endpoint)
+        if not ad_netloc or ad_netloc == ep.netloc:
+            return attp_endpoint
+        return urlunsplit((ep.scheme, ad_netloc, ep.path, ep.query, ep.fragment))
+    except Exception:
+        return attp_endpoint
+
 
 if TYPE_CHECKING:
     from attp.app.config.config import ToolConfig
@@ -169,11 +190,11 @@ class MCPToolBridge:
         @self._mcp.tool(
             name="send_message_tool",
             description=(
-                "必须且只能使用此工具来发送消息给主人或其他 Agent。"
+                "必须且只能使用此工具来发送消息给其他 Agent。"
                 "绝对不允许尝试自己构造或使用 JSON-RPC 等不存在或未经定义的接口。"
                 "如果你找不到工具，请回复 '我无法找到发送消息工具'。\n\n"
                 "参数说明：\n"
-                "- target: 目标地址。发给主人使用 \"user:web_ui\"；"
+                "- target: 目标地址。"
                 "发给其他 agent 使用对应节点的完整 DID，"
                 "例如 \"did:wba:home.local:furniture-manager\"\n"
                 "- content: 消息内容\n"
@@ -521,7 +542,7 @@ class MCPToolBridge:
                 did=ad_data.get("identifier", ""),
                 name=ad_data.get("name", ""),
                 description=ad_data.get("description", ""),
-                attp_endpoint=ad_data.get("attp_endpoint", ""),
+                attp_endpoint=_rewrite_endpoint_host(ad_url, ad_data.get("attp_endpoint", "")),
                 tools=ad_data.get("mcp_tools", []),
                 public_key_endpoint=ad_data.get("public_key_endpoint", ""),
                 ad_url=ad_url,

@@ -1,0 +1,48 @@
+{
+    "_comment_": "ATTP × openclaw 示例配置模板（ATTP 作为原生进程内插件，但保留独立三端口身份）。合并进 ~/.openclaw/openclaw.json（或整份覆盖体验）。把 ${...} 占位替换为真实值。channels.attp 精简为 {enabled, config_path}（对齐 nanobot）；ATTP 身份/DID/端口/publicBaseUrl 都在 config_path 指向的 ATTP agent 配置里。ATTP 在 openclaw 进程内绑三端口：WebUI+WS(19001, NodeMessage,供 ATTP user 端连)、Agent Server(19000, DID-wba A2A + ad.json/OpenRPC 发现)、MCP 工具节点(19002, send_message)。agent 经 mcp.servers.attp-tools 接入工具。全进程内,无 Python 子进程。设计/使用见 docs/attp-openclaw.md。",
+    "agents": {
+        "defaults": {
+            "model": "${LLM_MODEL}"
+        },
+        "list": [
+            { "id": "main", "default": true }
+        ]
+    },
+    "models": {
+        "providers": {
+            "custom": {
+                "baseUrl": "${LLM_BASE_URL}",
+                "api": "openai-completions",
+                "apiKey": "${LLM_API_KEY}"
+            }
+        }
+    },
+    "plugins": {
+        "entries": {
+            "attp": { "enabled": true }
+        },
+        "load": {
+            "paths": [
+                "${ATTP_ROOT}/typescript/attp/channels/openclaw"
+            ]
+        }
+    },
+    "channels": {
+        "attp": {
+            "enabled": true,
+            "config_path": "~/.attp/agent/openclaw/config.json"
+        }
+    },
+    "bindings": [
+        { "agentId": "main", "match": { "channel": "attp" } }
+    ],
+    "mcp": {
+        "servers": {
+            "attp-tools": { "url": "http://127.0.0.1:19002/sse", "transport": "sse" }
+        }
+    },
+    "gateway": {
+        "port": 18789,
+        "bind": "loopback"
+    }
+}

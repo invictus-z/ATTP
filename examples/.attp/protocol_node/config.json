@@ -1,0 +1,22 @@
+{
+    "web": {
+        "host": "0.0.0.0",
+        "port": 9000
+    },
+    "storage": {
+        "dataDir": "~/.attp/protocol_node",
+        "dbPath": "attp.db"
+    },
+    "analysis": {
+        "enabled": true,
+        "apiKey": "${LLM_API_KEY}",
+        "baseUrl": "${LLM_BASE_URL}",
+        "model": "${LLM_MODEL}",
+        "horizontalEnabled": true,
+        "rT": 7.0,
+        "rS": 200.0,
+        "alpha": 10,
+        "rho": 8.0,
+        "concurrency": 8
+    }
+}

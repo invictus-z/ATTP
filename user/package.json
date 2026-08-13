@@ -1,18 +1,19 @@
 {
   "name": "attp-user",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.3.0",
   "type": "module",
   "main": "electron/main.js",
+  "packageManager": "pnpm@11.8.0",
   "scripts": {
-    "clean": "rm -rf node_modules package-lock.json",
+    "clean": "rm -rf node_modules",
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "electron": "electron .",
     "electron:dev": "concurrently -k \"vite\" \"wait-on http://localhost:5173 && electron . --dev\"",
     "electron:prod": "vite build && electron .",
-    "electron:build": "tsc && vite build && electron-builder"
+    "electron:build": "tsc && vite build && node scripts/electron-build.mjs"
   },
   "build": {
     "appId": "com.attp.nanobot-workspace",
@@ -20,6 +21,23 @@
     "files": [
       "dist/**/*",
       "electron/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../examples/.attp/user",
+        "to": "demo-user",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "../docker-compose.yml",
+        "to": "docker-compose.yml"
+      },
+      {
+        "from": "../.env.example",
+        "to": ".env.example"
+      }
     ],
     "directories": {
       "output": "release"
@@ -36,9 +54,11 @@
     "@types/dompurify": "^3.0.5",
     "@types/estree": "^1.0.8",
     "@types/marked": "^5.0.2",
+    "@types/node": "^22.19.21",
     "autoprefixer": "^10.4.17",
     "concurrently": "^9.1.2",
     "electron": "^35.2.1",
+    "electron-builder": "^26.15.3",
     "lucide": "^0.359.0",
     "postcss": "^8.4.35",
     "tailwindcss": "^3.4.1",

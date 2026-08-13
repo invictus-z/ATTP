@@ -60,6 +60,7 @@ async def _sweep_expired_pending(
     for _nonce, msg in expired:
         report = await malicious_detector.evaluate_single_back_prop(msg, session)
         if report:
+            report.node_type = msg.sender_node_type
             await tracer.save_malicious_report(report)
 
 
@@ -219,6 +220,7 @@ async def intercept_record(
             # 恶意节点检测到
             session.remove_pending_message(nonce)
             await session_manager.save(session)
+            report.node_type = node_type
             await tracer.save_malicious_report(report)
             return InterceptResult(
                 status="malicious", node_type=node_type,
